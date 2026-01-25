@@ -45,24 +45,24 @@ def check_glade():
     porthole_gladefile = "glade/main_window.ui"
     #return porthole_gladefile
     # determine glade version
-    versions = PMS_LIB.get_installed("gnome-base/libglade")
-    if versions:
-        debug.dprint("libglade: %s" % versions)
-        old, new = ver_match(versions,
-            ["2.0.1", "2.4.9-r99"],
-            ["2.5.0", "2.99.99"])
-        if old:
-            debug.dprint("MAINWINDOW: Check_glade(); Porthole no longer " +
-                "supports the older versions\nof libglade.  Please upgrade " +
-                "libglade to >=2.5.0 for all GUI features to work")
-            porthole_gladefile = "glade/main_window.glade"
-            new_toolbar_api = False
-        elif new:
-            porthole_gladefile = "glade/main_window.glade"
-            new_toolbar_api = True
-    else:
-        debug.dprint("MAINWINDOW: No version list returned for libglade")
-        return None, None
+    # versions = PMS_LIB.get_installed("gnome-base/libglade")
+    # if versions:
+        # debug.dprint("libglade: %s" % versions)
+        # old, new = ver_match(versions,
+            # ["2.0.1", "2.4.9-r99"],
+            # ["2.5.0", "2.99.99"])
+        # if old:
+            # debug.dprint("MAINWINDOW: Check_glade(); Porthole no longer " +
+                # "supports the older versions\nof libglade.  Please upgrade " +
+                # "libglade to >=2.5.0 for all GUI features to work")
+            # porthole_gladefile = "glade/main_window.ui"
+            # new_toolbar_api = False
+        # elif new:
+            # porthole_gladefile = "glade/main_window.ui"
+            # new_toolbar_api = True
+    # else:
+        # debug.dprint("MAINWINDOW: No version list returned for libglade")
+        # return None, None
     debug.dprint("MAINWINDOW: __init__(); glade file = %s" %porthole_gladefile)
     return porthole_gladefile, True #new_toolbar_api
 
@@ -78,6 +78,7 @@ class MainBase(object):
         debug.dprint("MAINWINDOW: Prefs.myarch = " + config.Prefs.myarch)
         #self.config = configs
         # setup glade
+        debug.dprint("MAINWINDOW: Prefs... = " + config.Prefs.DATA_PATH + " *** " + str(config.Prefs.use_gladefile))
         self.gladefile = config.Prefs.DATA_PATH + config.Prefs.use_gladefile
         self.wtree = Gtk.Builder()
         self.wtree.add_from_file(self.gladefile)
