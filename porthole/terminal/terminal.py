@@ -223,7 +223,7 @@ class ProcessManager: #dbus.service.Object):
             return True
         # load the glade file
         self.wtree = Gtk.Builder()
-        self.wtree.add_from_file(config.Prefs.DATA_PATH + "glade/process_window.glade")
+        self.wtree.add_from_file(config.Prefs.DATA_PATH + "glade/process_window.ui")
         self.wtree.set_translation_domain(config.Prefs.APP)
         # these need to be before the callbacks
         # setup some aliases for easier access

@@ -42,7 +42,7 @@ from porthole.backends.version_sort import ver_match
 def check_glade():
     """determine the libglade version installed
     and return the correct glade file to use"""
-    porthole_gladefile = "glade/main_window.glade"
+    porthole_gladefile = "glade/main_window.ui"
     #return porthole_gladefile
     # determine glade version
     versions = PMS_LIB.get_installed("gnome-base/libglade")
@@ -64,7 +64,7 @@ def check_glade():
         debug.dprint("MAINWINDOW: No version list returned for libglade")
         return None, None
     debug.dprint("MAINWINDOW: __init__(); glade file = %s" %porthole_gladefile)
-    return porthole_gladefile, new_toolbar_api
+    return porthole_gladefile, True #new_toolbar_api
 
 
 class MainBase(object):

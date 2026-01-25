@@ -38,7 +38,7 @@ class ConfigDialog:
         """ Initialize Config GUI """
 
         # Parse glade file
-        self.gladefile = config.Prefs.DATA_PATH + "/glade/config.glade"
+        self.gladefile = config.Prefs.DATA_PATH + "/glade/config.ui"
         self.wtree = Gtk.Builder()
         self.wtree.add_from_file(self.gladefile)
         self.wtree.set_translation_domain(config.Prefs.APP)

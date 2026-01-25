@@ -38,7 +38,7 @@ class AboutDialog:
 
     def __init__(self):
         # setup glade
-        self.gladefile = config.Prefs.DATA_PATH + 'glade/about.glade' #config.Prefs.use_gladefile
+        self.gladefile = config.Prefs.DATA_PATH + 'glade/about.ui' #config.Prefs.use_gladefile
         self.builder = Gtk.Builder()
         self.builder.add_from_file(self.gladefile)
         self.builder.set_translation_domain(config.Prefs.APP)

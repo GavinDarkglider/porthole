@@ -1,5 +1,5 @@
-porthole.glade
-advemerge.glade
+porthole.ui
+advemerge.ui
 porthole
 mainwindow.py
 terminal.py

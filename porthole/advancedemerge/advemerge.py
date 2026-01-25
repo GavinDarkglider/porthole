@@ -65,7 +65,7 @@ class AdvancedEmergeDialog:
         self.current_verInfo = None
 
         # Parse glade file
-        self.gladefile = config.Prefs.DATA_PATH + "glade/advemerge.glade"
+        self.gladefile = config.Prefs.DATA_PATH + "glade/advemerge.ui"
         self.wtree = Gtk.Builder()
         self.wtree.add_from_file(self.gladefile)
         self.wtree.set_translation_domain(config.Prefs.APP)
