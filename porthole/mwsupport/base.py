@@ -43,29 +43,8 @@ def check_glade():
     """determine the libglade version installed
     and return the correct glade file to use"""
     porthole_gladefile = "glade/main_window.ui"
-    #return porthole_gladefile
-    # determine glade version
-    # versions = PMS_LIB.get_installed("gnome-base/libglade")
-    # if versions:
-        # debug.dprint("libglade: %s" % versions)
-        # old, new = ver_match(versions,
-            # ["2.0.1", "2.4.9-r99"],
-            # ["2.5.0", "2.99.99"])
-        # if old:
-            # debug.dprint("MAINWINDOW: Check_glade(); Porthole no longer " +
-                # "supports the older versions\nof libglade.  Please upgrade " +
-                # "libglade to >=2.5.0 for all GUI features to work")
-            # porthole_gladefile = "glade/main_window.ui"
-            # new_toolbar_api = False
-        # elif new:
-            # porthole_gladefile = "glade/main_window.ui"
-            # new_toolbar_api = True
-    # else:
-        # debug.dprint("MAINWINDOW: No version list returned for libglade")
-        # return None, None
     debug.dprint("MAINWINDOW: __init__(); glade file = %s" %porthole_gladefile)
-    return porthole_gladefile, True #new_toolbar_api
-
+    return porthole_gladefile, True
 
 class MainBase(object):
     """base MainWindow"""
