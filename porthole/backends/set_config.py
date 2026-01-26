@@ -301,7 +301,7 @@ def set_make_conf(_property, add=[], remove=[], replace=''):
 
 class MakeConf:
     """Make_config
-    A /etc/make.conf file parsing, modifying, saving class module for porthole
+    A /etc/portage/make.conf file parsing, modifying, saving class module for porthole
 
     Copyright (C) 2005 - 2008 Brian Dolbec,
         Gunnar Wrobel <wrobel@gentoo.org>
@@ -312,7 +312,7 @@ class MakeConf:
     """
     # define some re's
     regex = {'USE': re.compile('USE\s*=\s*"([^"]*)"'),
-                    'PORTDIR_OVERLAY': re.compile('PORTDIR_OVERLAY\s*=\s*"([^"]*)"'),
+                    # 'PORTDIR_OVERLAY': re.compile('PORTDIR_OVERLAY\s*=\s*"([^"]*)"'),
                     'PORTAGE_NICENESS': re.compile('PORTAGE_NICENESS\s*=\s*([0-9]*)\s*\n')
     }
 
@@ -336,50 +336,50 @@ class MakeConf:
         if not _property in self.regex:
             self.regex[_property] = re.compile(('%s\s*=\s*"([^"]*)"') %_property)
 
-    def add_overlay(self, overlay):
-        '''Add an overlay to make.conf.'''
-        self.overlays.append(overlay)
-        self.write_overlay()
+    # def add_overlay(self, overlay):
+        # '''Add an overlay to make.conf.'''
+        # self.overlays.append(overlay)
+        # self.write_overlay()
 
-    def delete_overlay(self, overlay):
-        '''Delete an overlay from make.conf.'''
-        self.overlays = [i
-                         for i in self.overlays
-                         if i.name != overlay.name]
-        self.write_overlay()
+    # def delete_overlay(self, overlay):
+        # '''Delete an overlay from make.conf.'''
+        # self.overlays = [i
+                         # for i in self.overlays
+                         # if i.name != overlay.name]
+        # self.write_overlay()
 
-    def read_overlay(self):
-        '''Read the list of registered overlays from /etc/make.conf.'''
-        if self.data == '':
-            self.content()
-        if self.data > '':
-            overlays = self.regex['PORTDIR_OVERLAY'].search(self.data)
-            if not overlays:
-                raise Exception('MAKE_CONF: read_overlay(); Did not find a PORTDIR_OVERLAY entry in file ' +
-                                self.path +'! Did you specify the correct file?')
-            overlays = [i.strip()
-                        for i in overlays.group(1).split('\n')
-                        if i.strip()]
+    # def read_overlay(self):
+        # '''Read the list of registered overlays from /etc/make.conf.'''
+        # if self.data == '':
+            # self.content()
+        # if self.data > '':
+            # overlays = self.regex['PORTDIR_OVERLAY'].search(self.data)
+            # if not overlays:
+                # raise Exception('MAKE_CONF: read_overlay(); Did not find a PORTDIR_OVERLAY entry in file ' +
+                                # self.path +'! Did you specify the correct file?')
+            # overlays = [i.strip()
+                        # for i in overlays.group(1).split('\n')
+                        # if i.strip()]
 
-            if self.db == None: # we do not have the layman db
-                return overlays
-            for i in overlays:
-                if i[:len(self.storage)] == self.storage:
-                    oname = os.path.basename(i)
-                    if  oname in list(self.db.keys()):
-                        self.overlays.append(self.db[oname])
-                    else:
-                        # These are additional overlays that we dont know
-                        # anything about. The user probably added them manually
-                        self.extra.append(i)
-                else:
-                    # These are additional overlays that we dont know anything
-                    # about. The user probably added them manually
-                    self.extra.append(i)
-        return self.overlays + self.extra
+            # if self.db == None: # we do not have the layman db
+                # return overlays
+            # for i in overlays:
+                # if i[:len(self.storage)] == self.storage:
+                    # oname = os.path.basename(i)
+                    # if  oname in list(self.db.keys()):
+                        # self.overlays.append(self.db[oname])
+                    # else:
+                        # # These are additional overlays that we dont know
+                        # # anything about. The user probably added them manually
+                        # self.extra.append(i)
+                # else:
+                    # # These are additional overlays that we dont know anything
+                    # # about. The user probably added them manually
+                    # self.extra.append(i)
+        # return self.overlays + self.extra
 
     def read_property(self, _property):
-        '''Read the list of USE flags from /etc/make.conf.'''
+        '''Read the list of USE flags from /etc/portage/make.conf.'''
         if self.data == '':
             self.content()
         if _property not in self.regex:
@@ -400,32 +400,32 @@ class MakeConf:
         #dprint("SET_CONFIG: MakeConf read_property \n%s %s = %s" % (property, len(values), values))
         return values
 
-    def write_overlay(self):
-        '''  Write the list of registered overlays to /etc/make.conf.'''
-        def prio_sort(a, b):
-            '''Sort by priority.'''
-            if a.priority < b.priority:
-                return -1
-            elif a.priority > b.priority:
-                return 1
-            return 0
+    # def write_overlay(self):
+        # '''  Write the list of registered overlays to /etc/make.conf.'''
+        # def prio_sort(a, b):
+            # '''Sort by priority.'''
+            # if a.priority < b.priority:
+                # return -1
+            # elif a.priority > b.priority:
+                # return 1
+            # return 0
 
-        self.overlays.sort(prio_sort)
+        # self.overlays.sort(prio_sort)
 
-        paths = []
-        for i in self.overlays:
-            paths.append(os.path((self.storage, i.name, )))
-        overlays = 'PORTDIR_OVERLAY="\n'
-        overlays += '\n'.join(paths) + '\n'
-        overlays += '$PORTDIR_OVERLAY\n'
-        overlays += '\n'.join(self.extra)
-        overlays += '"'
-        content = self.OVERLAY_re.sub(overlays, self.data)
-        if not self.OVERLAY_re.search(content):
-            raise Exception('MAKE_CONF: write_overlay(); failed to set a proper PORTDIR_OVERLAY entry '
-                            'in file ' + self.path +'! Did not overwrite the file.')
-        self.write_file(content)
-        return True
+        # paths = []
+        # for i in self.overlays:
+            # paths.append(os.path((self.storage, i.name, )))
+        # overlays = 'PORTDIR_OVERLAY="\n'
+        # overlays += '\n'.join(paths) + '\n'
+        # overlays += '$PORTDIR_OVERLAY\n'
+        # overlays += '\n'.join(self.extra)
+        # overlays += '"'
+        # content = self.OVERLAY_re.sub(overlays, self.data)
+        # if not self.OVERLAY_re.search(content):
+            # raise Exception('MAKE_CONF: write_overlay(); failed to set a proper PORTDIR_OVERLAY entry '
+                            # 'in file ' + self.path +'! Did not overwrite the file.')
+        # self.write_file(content)
+        # return True
 
     def write_file(self, content, backup = False):
         """Write the content to the pre-determined path"""
@@ -497,10 +497,10 @@ class MakeConf:
         if not self.properties:
             self.get_property_list()
         for _property in self.properties:
-                if _property == 'PORTDIR_OVERLAY':
-                    _dict[_property] = self.read_overlay()
-                else:
-                    _dict[_property] = self.read_property(_property)
+                # if _property == 'PORTDIR_OVERLAY':
+                    # _dict[_property] = self.read_overlay()
+                # else:
+            _dict[_property] = self.read_property(_property)
         return _dict
 
     def add_string_property(self, _property, value):
