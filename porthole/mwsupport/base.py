@@ -37,7 +37,7 @@ from porthole.dialogs.about import AboutDialog
 from porthole.dialogs.configure import ConfigDialog
 from porthole.loaders.loaders import load_web_page
 
-from porthole.backends.version_sort import ver_match
+#from porthole.backends.version_sort import ver_match
 
 def check_glade():
     """determine the libglade version installed
@@ -127,7 +127,8 @@ class MainBase(object):
 
     def about(self, *widget):
         """Show about dialog."""
-        return AboutDialog()
+        about = AboutDialog(parent=self.mainwindow)
+        about.run()
 
     def configure_porthole(self, menuitem_widget):
         """Shows the Configuration GUI"""
