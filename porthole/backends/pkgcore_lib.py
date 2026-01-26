@@ -400,7 +400,7 @@ def set_user_config(prefs, file, name='', ebuild='', add='', remove='', callback
 
 def get_make_conf(want_linelist=False, savecopy=False):
     """
-    Parses /etc/make.conf into a dictionary of items with
+    Parses /etc/portage/make.conf into a dictionary of items with
     dict[setting] = properties string
 
     If want_linelist is True, the list of lines read from make.conf will also
