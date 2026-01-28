@@ -4,7 +4,7 @@
     Porthole Mainwindow Package support class
     Support class and functions for the main interface
 
-    Copyright (C) 2003 - 2011
+    Copyright (C) 2003 - 2026
     Fredrik Arnerup, Brian Dolbec,
     Daniel G. Taylor, Wm. F. Wheeler, Tommy Iorns
 

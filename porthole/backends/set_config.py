@@ -4,7 +4,7 @@
     Set_config
     A config file saving module for porthole
 
-    Copyright (C) 2005 - 2008 Brian Dolbec, Tommy Iorns,
+    Copyright (C) 2005 - 2026 Brian Dolbec, Tommy Iorns,
                             Gunnar Wrobel <wrobel@gentoo.org>
 
     This program is free software; you can redistribute it and/or modify
