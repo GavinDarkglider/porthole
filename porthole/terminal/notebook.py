@@ -85,6 +85,8 @@ class TerminalNotebook:
         self.notebook.remove_page(TAB_CAUTION)
         self.notebook.remove_page(TAB_WARNING)
 
+        self.clipboard = None
+
         # get the buffer & view widgets and assign them to their arrays
         widget_labels = ["process_text", "warnings_text", "cautions_text", "info_text"]
         for x in widget_labels:
@@ -226,8 +228,15 @@ class TerminalNotebook:
 
     def copy_selected(self, *widget):
         """ Copy selected text to clipboard """
-        self.view_buffer[self.current_tab].copy_clipboard(self.clipboard)
-        pass
+        buffer = self.view_buffer[self.current_tab]
+        # make sure there is a selection
+        if buffer.get_has_selection():
+            buffer.copy_clipboard()
+        else:
+            # or copy everything if nothing selected
+            buffer.select_range(buffer.get_start_iter(), buffer.get_end_iter())
+            buffer.copy_clipboard()
+        self.clipboard = buffer
 
     def clear_buffers(self, *widget):
         """ Clear the text buffers """
