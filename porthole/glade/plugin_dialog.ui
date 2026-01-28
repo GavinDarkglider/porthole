@@ -1,36 +1,33 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.22.2 -->
+<!-- Generated with glade 3.40.0 -->
 <interface>
-  <requires lib="gtk+" version="3.20"/>
+  <requires lib="gtk+" version="3.24"/>
   <object class="GtkDialog" id="plugin_dialog">
-    <property name="width_request">600</property>
-    <property name="height_request">350</property>
+    <property name="width-request">600</property>
+    <property name="height-request">350</property>
     <property name="visible">True</property>
-    <property name="can_focus">False</property>
+    <property name="can-focus">False</property>
     <property name="title" translatable="yes">Plugin Settings</property>
-    <property name="type_hint">dialog</property>
+    <property name="type-hint">dialog</property>
     <signal name="destroy" handler="on_plugin_dialog_destroy" swapped="no"/>
-    <child>
-      <placeholder/>
-    </child>
     <child internal-child="vbox">
       <object class="GtkBox" id="dialog-vbox3">
         <property name="visible">True</property>
-        <property name="can_focus">False</property>
+        <property name="can-focus">False</property>
         <property name="orientation">vertical</property>
         <child internal-child="action_area">
           <object class="GtkButtonBox" id="dialog-action_area3">
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
-            <property name="layout_style">spread</property>
+            <property name="can-focus">False</property>
+            <property name="layout-style">spread</property>
             <child>
               <object class="GtkButton" id="rescan_button">
                 <property name="label">gtk-refresh</property>
                 <property name="sensitive">False</property>
-                <property name="can_focus">True</property>
-                <property name="can_default">True</property>
-                <property name="receives_default">False</property>
-                <property name="use_stock">True</property>
+                <property name="can-focus">True</property>
+                <property name="can-default">True</property>
+                <property name="receives-default">False</property>
+                <property name="use-stock">True</property>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -42,10 +39,10 @@
               <object class="GtkButton" id="okbutton">
                 <property name="label">gtk-ok</property>
                 <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="can_default">True</property>
-                <property name="receives_default">False</property>
-                <property name="use_stock">True</property>
+                <property name="can-focus">True</property>
+                <property name="can-default">True</property>
+                <property name="receives-default">False</property>
+                <property name="use-stock">True</property>
                 <signal name="clicked" handler="on_okbutton_clicked" swapped="no"/>
               </object>
               <packing>
@@ -58,32 +55,31 @@
           <packing>
             <property name="expand">False</property>
             <property name="fill">False</property>
-            <property name="pack_type">end</property>
+            <property name="pack-type">end</property>
             <property name="position">0</property>
           </packing>
         </child>
         <child>
           <object class="GtkPaned" id="hpaned1">
             <property name="visible">True</property>
-            <property name="can_focus">True</property>
+            <property name="can-focus">True</property>
             <property name="position">178</property>
             <child>
               <object class="GtkFrame" id="List_frame">
-                <property name="width_request">87</property>
-                <property name="height_request">35</property>
+                <property name="width-request">87</property>
+                <property name="height-request">35</property>
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="label_xalign">0</property>
+                <property name="can-focus">False</property>
+                <property name="label-xalign">0</property>
                 <child>
                   <object class="GtkScrolledWindow" id="List_scrolledwindow">
                     <property name="visible">True</property>
-                    <property name="can_focus">True</property>
-                    <property name="border_width">4</property>
+                    <property name="can-focus">True</property>
+                    <property name="border-width">4</property>
                     <child>
                       <object class="GtkTreeView" id="plugin_view">
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="rules_hint">True</property>
+                        <property name="can-focus">True</property>
                         <child internal-child="selection">
                           <object class="GtkTreeSelection"/>
                         </child>
@@ -100,27 +96,27 @@
             <child>
               <object class="GtkBox" id="vbox2">
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
+                <property name="can-focus">False</property>
                 <property name="orientation">vertical</property>
                 <child>
                   <object class="GtkFrame" id="Desc_frame">
-                    <property name="height_request">80</property>
+                    <property name="height-request">80</property>
                     <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="label_xalign">0</property>
+                    <property name="can-focus">False</property>
+                    <property name="label-xalign">0</property>
                     <child>
                       <object class="GtkScrolledWindow" id="Desc_scrolledwindow">
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
+                        <property name="can-focus">True</property>
                         <child>
                           <object class="GtkTextView" id="plugin_desc">
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="border_width">4</property>
+                            <property name="can-focus">True</property>
+                            <property name="border-width">4</property>
                             <property name="editable">False</property>
-                            <property name="left_margin">4</property>
-                            <property name="right_margin">4</property>
-                            <property name="cursor_visible">False</property>
+                            <property name="left-margin">4</property>
+                            <property name="right-margin">4</property>
+                            <property name="cursor-visible">False</property>
                           </object>
                         </child>
                       </object>
@@ -135,12 +131,12 @@
                 <child>
                   <object class="GtkFrame" id="Options_frame">
                     <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="label_xalign">0</property>
+                    <property name="can-focus">False</property>
+                    <property name="label-xalign">0</property>
                     <child>
                       <object class="GtkScrolledWindow" id="Options_scrolledwindow">
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
+                        <property name="can-focus">True</property>
                         <child>
                           <placeholder/>
                         </child>
