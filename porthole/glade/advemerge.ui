@@ -1,35 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Generated with glade 3.22.2 -->
+<!-- Generated with glade 3.40.0 -->
 <interface>
-  <requires lib="gtk+" version="3.0"/>
+  <requires lib="gtk+" version="3.24"/>
   <object class="GtkDialog" id="adv_emerge_dialog">
     <property name="visible">True</property>
-    <property name="can_focus">False</property>
+    <property name="can-focus">False</property>
     <property name="modal">True</property>
-    <property name="type_hint">dialog</property>
-    <child type="titlebar">
-      <placeholder/>
-    </child>
+    <property name="type-hint">dialog</property>
     <child internal-child="vbox">
       <object class="GtkBox" id="dialog-vbox1">
         <property name="visible">True</property>
-        <property name="can_focus">False</property>
+        <property name="can-focus">False</property>
         <property name="orientation">vertical</property>
         <property name="spacing">2</property>
         <child internal-child="action_area">
           <object class="GtkButtonBox" id="dialog-action_area1">
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can-focus">False</property>
             <property name="valign">end</property>
-            <property name="layout_style">end</property>
+            <property name="layout-style">end</property>
             <child>
               <object class="GtkButton" id="helpbutton1">
                 <property name="label">gtk-help</property>
                 <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="can_default">True</property>
-                <property name="receives_default">False</property>
-                <property name="use_stock">True</property>
+                <property name="can-focus">True</property>
+                <property name="can-default">True</property>
+                <property name="receives-default">False</property>
+                <property name="use-stock">True</property>
                 <signal name="clicked" handler="on_help_clicked" swapped="no"/>
               </object>
               <packing>
@@ -42,10 +39,10 @@
               <object class="GtkButton" id="cancelbutton1">
                 <property name="label">gtk-cancel</property>
                 <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="can_default">True</property>
-                <property name="receives_default">False</property>
-                <property name="use_stock">True</property>
+                <property name="can-focus">True</property>
+                <property name="can-default">True</property>
+                <property name="receives-default">False</property>
+                <property name="use-stock">True</property>
                 <signal name="clicked" handler="on_cancel_clicked" swapped="no"/>
               </object>
               <packing>
@@ -58,10 +55,11 @@
               <object class="GtkButton" id="okbutton1">
                 <property name="label">gtk-execute</property>
                 <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="can_default">True</property>
-                <property name="receives_default">False</property>
-                <property name="use_stock">True</property>
+                <property name="can-focus">True</property>
+                <property name="can-default">True</property>
+                <property name="receives-default">False</property>
+                <property name="double-buffered">False</property>
+                <property name="use-stock">True</property>
                 <signal name="clicked" handler="on_ok_clicked" swapped="no"/>
               </object>
               <packing>
@@ -74,106 +72,106 @@
           <packing>
             <property name="expand">False</property>
             <property name="fill">False</property>
-            <property name="pack_type">end</property>
+            <property name="pack-type">end</property>
             <property name="position">2</property>
           </packing>
         </child>
         <child>
           <object class="GtkBox" id="vbox1">
             <property name="visible">True</property>
-            <property name="can_focus">False</property>
+            <property name="can-focus">False</property>
             <property name="orientation">vertical</property>
             <child>
               <object class="GtkFrame" id="frameEmergeOptions">
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="border_width">3</property>
-                <property name="label_xalign">0.5</property>
+                <property name="can-focus">False</property>
+                <property name="border-width">3</property>
+                <property name="label-xalign">0.5</property>
                 <child>
+                  <!-- n-columns=5 n-rows=6 -->
                   <object class="GtkGrid" id="table2">
                     <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="border_width">2</property>
-                    <property name="row_spacing">1</property>
-                    <property name="column_spacing">2</property>
-                    <property name="row_homogeneous">True</property>
-                    <property name="column_homogeneous">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="border-width">2</property>
+                    <property name="row-spacing">1</property>
+                    <property name="column-spacing">2</property>
+                    <property name="row-homogeneous">True</property>
+                    <property name="column-homogeneous">True</property>
                     <child>
                       <object class="GtkCheckButton" id="cbAlphabetical">
                         <property name="label" translatable="yes">alphabetical</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">0</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbAsk">
                         <property name="label" translatable="yes">ask</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">1</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbBuildPkg">
                         <property name="label" translatable="yes">buildpkg</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbBuildPkg_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">2</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">2</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbBuildPkgOnly">
                         <property name="label" translatable="yes">buildpkgonly</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbBuildPkgOnly_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">3</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">3</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkBox" id="hbox9">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
+                        <property name="can-focus">False</property>
                         <property name="halign">start</property>
                         <child>
                           <object class="GtkLabel" id="label4">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
-                            <property name="halign">start</property>
+                            <property name="can-focus">False</property>
+                            <property name="halign">center</property>
                             <property name="valign">start</property>
+                            <property name="margin-start">6</property>
                             <property name="hexpand">False</property>
                             <property name="label" translatable="yes">color</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
                           </object>
                           <packing>
                             <property name="expand">False</property>
@@ -185,11 +183,11 @@
                           <object class="GtkCheckButton" id="cbColorY">
                             <property name="label" translatable="yes">y</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
                             <property name="halign">start</property>
-                            <property name="use_underline">True</property>
-                            <property name="draw_indicator">True</property>
+                            <property name="use-underline">True</property>
+                            <property name="draw-indicator">True</property>
                             <signal name="clicked" handler="on_cbColorY_clicked" swapped="no"/>
                             <signal name="toggled" handler="on_toggled" swapped="no"/>
                           </object>
@@ -203,11 +201,11 @@
                           <object class="GtkCheckButton" id="cbColorN">
                             <property name="label" translatable="yes">n</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
                             <property name="halign">start</property>
-                            <property name="use_underline">True</property>
-                            <property name="draw_indicator">True</property>
+                            <property name="use-underline">True</property>
+                            <property name="draw-indicator">True</property>
                             <signal name="clicked" handler="on_cbColorN_clicked" swapped="no"/>
                             <signal name="toggled" handler="on_toggled" swapped="no"/>
                           </object>
@@ -219,282 +217,280 @@
                         </child>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">4</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">4</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbDebug">
                         <property name="label" translatable="yes">debug</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">0</property>
-                        <property name="top_attach">5</property>
+                        <property name="left-attach">0</property>
+                        <property name="top-attach">5</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbDeep">
                         <property name="label" translatable="yes">deep</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">0</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbEmptyTree">
                         <property name="label" translatable="yes">emptytree</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">1</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbFetchOnly">
                         <property name="label" translatable="yes">fetchonly</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">2</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">2</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbFetchAllUri">
                         <property name="label" translatable="yes">fetch-all-uri</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">3</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">3</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbGetBinPkg">
                         <property name="label" translatable="yes">getbinpkg</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbGetBinPkg_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">4</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">4</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbGetBinPkgOnly">
                         <property name="label" translatable="yes">getbinpkgonly</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbGetBinPkgOnly_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">1</property>
-                        <property name="top_attach">5</property>
+                        <property name="left-attach">1</property>
+                        <property name="top-attach">5</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbIgnoreDefaultOptions">
                         <property name="label" translatable="yes">ignore-default-opts</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">0</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbNewUse">
                         <property name="label" translatable="yes">newuse</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">1</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbNoConfMem">
                         <property name="label" translatable="yes">noconfmem</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">2</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">2</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbNoDeps">
                         <property name="label" translatable="yes">nodeps</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbNoDeps_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">3</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">3</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbNoReplace">
                         <property name="label" translatable="yes">noreplace</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">4</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">4</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbNoSpinner">
                         <property name="label" translatable="yes">nospinner</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">2</property>
-                        <property name="top_attach">5</property>
+                        <property name="left-attach">2</property>
+                        <property name="top-attach">5</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbOneShot">
                         <property name="label" translatable="yes">oneshot</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">0</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbOnlyDeps">
                         <property name="label" translatable="yes">onlydeps</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbOnlyDeps_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">1</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbPretend">
                         <property name="label" translatable="yes">pretend</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">2</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">2</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkBox" id="hbox7">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
+                        <property name="can-focus">False</property>
                         <child>
                           <object class="GtkLabel" id="label2">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
                             <property name="halign">start</property>
                             <property name="valign">start</property>
                             <property name="label" translatable="yes">      |__</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
                           </object>
                           <packing>
                             <property name="expand">False</property>
@@ -506,12 +502,12 @@
                           <object class="GtkCheckButton" id="cbColumns">
                             <property name="label" translatable="yes">columns</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
                             <property name="halign">start</property>
                             <property name="valign">start</property>
-                            <property name="use_underline">True</property>
-                            <property name="draw_indicator">True</property>
+                            <property name="use-underline">True</property>
+                            <property name="draw-indicator">True</property>
                             <signal name="clicked" handler="on_cbColumns_clicked" swapped="no"/>
                             <signal name="toggled" handler="on_toggled" swapped="no"/>
                           </object>
@@ -523,123 +519,122 @@
                         </child>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">3</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">3</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbQuiet">
                         <property name="label" translatable="yes">quiet</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbQuiet_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">4</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">4</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbTree">
                         <property name="label" translatable="yes">tree</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">3</property>
-                        <property name="top_attach">5</property>
+                        <property name="left-attach">3</property>
+                        <property name="top-attach">5</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbUpdate">
                         <property name="label" translatable="yes">update</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                       </object>
                       <packing>
-                        <property name="left_attach">4</property>
-                        <property name="top_attach">0</property>
+                        <property name="left-attach">4</property>
+                        <property name="top-attach">0</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbUsePkg">
                         <property name="label" translatable="yes">usepkg</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbUsePkg_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">4</property>
-                        <property name="top_attach">1</property>
+                        <property name="left-attach">4</property>
+                        <property name="top-attach">1</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbUsePkgOnly">
                         <property name="label" translatable="yes">usepkgonly</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbUsePkgOnly_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">4</property>
-                        <property name="top_attach">2</property>
+                        <property name="left-attach">4</property>
+                        <property name="top-attach">2</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkCheckButton" id="cbVerbose">
                         <property name="label" translatable="yes">verbose</property>
                         <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="receives_default">False</property>
+                        <property name="can-focus">True</property>
+                        <property name="receives-default">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="use_underline">True</property>
-                        <property name="draw_indicator">True</property>
+                        <property name="use-underline">True</property>
+                        <property name="draw-indicator">True</property>
                         <signal name="clicked" handler="on_cbVerbose_clicked" swapped="no"/>
                       </object>
                       <packing>
-                        <property name="left_attach">4</property>
-                        <property name="top_attach">3</property>
+                        <property name="left-attach">4</property>
+                        <property name="top-attach">3</property>
                       </packing>
                     </child>
                     <child>
                       <object class="GtkBox" id="hbox8">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
+                        <property name="can-focus">False</property>
                         <child>
                           <object class="GtkLabel" id="label3">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
                             <property name="halign">start</property>
                             <property name="valign">start</property>
+                            <property name="margin-start">5</property>
                             <property name="label" translatable="yes">with-bdeps</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
                           </object>
                           <packing>
                             <property name="expand">False</property>
@@ -651,12 +646,12 @@
                           <object class="GtkCheckButton" id="cbWithBDepsY">
                             <property name="label" translatable="yes">y</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
                             <property name="halign">start</property>
                             <property name="valign">start</property>
-                            <property name="use_underline">True</property>
-                            <property name="draw_indicator">True</property>
+                            <property name="use-underline">True</property>
+                            <property name="draw-indicator">True</property>
                             <signal name="clicked" handler="on_cbWithBDepsY_clicked" swapped="no"/>
                             <signal name="toggled" handler="on_toggled" swapped="no"/>
                           </object>
@@ -670,12 +665,12 @@
                           <object class="GtkCheckButton" id="cbWithBDepsN">
                             <property name="label" translatable="yes">n</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
                             <property name="halign">start</property>
                             <property name="valign">start</property>
-                            <property name="use_underline">True</property>
-                            <property name="draw_indicator">True</property>
+                            <property name="use-underline">True</property>
+                            <property name="draw-indicator">True</property>
                             <signal name="clicked" handler="on_cbWithBDepsN_clicked" swapped="no"/>
                             <signal name="toggled" handler="on_toggled" swapped="no"/>
                           </object>
@@ -687,8 +682,8 @@
                         </child>
                       </object>
                       <packing>
-                        <property name="left_attach">4</property>
-                        <property name="top_attach">4</property>
+                        <property name="left-attach">4</property>
+                        <property name="top-attach">4</property>
                       </packing>
                     </child>
                     <child>
@@ -706,23 +701,23 @@
             <child>
               <object class="GtkFrame" id="framePackageOptions">
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="border_width">3</property>
-                <property name="label_xalign">0</property>
+                <property name="can-focus">False</property>
+                <property name="border-width">3</property>
+                <property name="label-xalign">0</property>
                 <child>
                   <object class="GtkBox" id="vbox2">
                     <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="border_width">2</property>
+                    <property name="can-focus">False</property>
+                    <property name="border-width">2</property>
                     <property name="orientation">vertical</property>
                     <child>
                       <object class="GtkBox" id="hbox5">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
+                        <property name="can-focus">False</property>
                         <child>
                           <object class="GtkComboBox" id="cmbEmerge">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
                             <signal name="changed" handler="on_cmbEmerge_changed" swapped="no"/>
                           </object>
                           <packing>
@@ -735,7 +730,7 @@
                         <child>
                           <object class="GtkSeparator" id="vseparator1">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
                             <property name="orientation">vertical</property>
                           </object>
                           <packing>
@@ -748,11 +743,11 @@
                         <child>
                           <object class="GtkLabel" id="lblVerCombo">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
+                            <property name="margin-start">5</property>
+                            <property name="margin-end">5</property>
                             <property name="label" translatable="yes">version</property>
-                            <property name="use_markup">True</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
+                            <property name="use-markup">True</property>
                           </object>
                           <packing>
                             <property name="expand">False</property>
@@ -763,7 +758,8 @@
                         <child>
                           <object class="GtkComboBox" id="cmbVersion">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
+                            <property name="hexpand">True</property>
                             <signal name="changed" handler="on_cmbVersion_changed" swapped="no"/>
                           </object>
                           <packing>
@@ -783,16 +779,16 @@
                     <child>
                       <object class="GtkFrame" id="frameUseFlags">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="border_width">3</property>
-                        <property name="label_xalign">0</property>
+                        <property name="can-focus">False</property>
+                        <property name="hexpand">True</property>
+                        <property name="border-width">3</property>
+                        <property name="label-xalign">0</property>
                         <child>
                           <object class="GtkLabel" id="lblUseFlags">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
+                            <property name="margin-start">5</property>
                             <property name="label" translatable="yes">Use Flags</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
                           </object>
                         </child>
                       </object>
@@ -805,17 +801,16 @@
                     <child>
                       <object class="GtkFrame" id="frameKeywords">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
-                        <property name="vexpand">True</property>
-                        <property name="border_width">4</property>
-                        <property name="label_xalign">0</property>
+                        <property name="can-focus">False</property>
+                        <property name="hexpand">True</property>
+                        <property name="border-width">4</property>
+                        <property name="label-xalign">0</property>
                         <child>
                           <object class="GtkLabel" id="lblKeywords">
                             <property name="visible">True</property>
-                            <property name="can_focus">False</property>
+                            <property name="can-focus">False</property>
+                            <property name="margin-start">5</property>
                             <property name="label" translatable="yes">Keyword to accept</property>
-                            <property name="xalign">0.5</property>
-                            <property name="yalign">0.5</property>
                           </object>
                         </child>
                       </object>
@@ -828,18 +823,18 @@
                     <child>
                       <object class="GtkBox" id="hbox6">
                         <property name="visible">True</property>
-                        <property name="can_focus">False</property>
+                        <property name="can-focus">False</property>
                         <property name="halign">start</property>
                         <property name="valign">start</property>
-                        <property name="border_width">4</property>
+                        <property name="border-width">4</property>
                         <property name="spacing">2</property>
                         <child>
                           <object class="GtkButton" id="btnMakeConf">
                             <property name="label" translatable="yes">Update make.conf</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
-                            <property name="use_underline">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="use-underline">True</property>
                             <signal name="clicked" handler="on_btnMakeConf_clicked" swapped="no"/>
                           </object>
                           <packing>
@@ -852,9 +847,9 @@
                           <object class="GtkButton" id="btnPkgUse">
                             <property name="label" translatable="yes">Update package.use</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
-                            <property name="use_underline">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="use-underline">True</property>
                             <signal name="clicked" handler="on_btnPkgUse_clicked" swapped="no"/>
                           </object>
                           <packing>
@@ -868,15 +863,15 @@
                           <object class="GtkButton" id="btnPkgKeywords">
                             <property name="label" translatable="yes">Update package.keywords</property>
                             <property name="visible">True</property>
-                            <property name="can_focus">True</property>
-                            <property name="receives_default">False</property>
-                            <property name="use_underline">True</property>
+                            <property name="can-focus">True</property>
+                            <property name="receives-default">False</property>
+                            <property name="use-underline">True</property>
                             <signal name="clicked" handler="on_btnPkgKeywords_clicked" swapped="no"/>
                           </object>
                           <packing>
                             <property name="expand">False</property>
                             <property name="fill">False</property>
-                            <property name="pack_type">end</property>
+                            <property name="pack-type">end</property>
                             <property name="position">2</property>
                           </packing>
                         </child>
@@ -899,27 +894,20 @@
             <child>
               <object class="GtkFrame" id="frameCommand">
                 <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="border_width">3</property>
-                <property name="label_xalign">0</property>
+                <property name="can-focus">True</property>
+                <property name="border-width">3</property>
+                <property name="label-xalign">0</property>
                 <child>
-                  <object class="GtkAlignment" id="alignment2">
+                  <object class="GtkTextView" id="command_textview">
                     <property name="visible">True</property>
-                    <property name="can_focus">False</property>
-                    <property name="left_padding">10</property>
-                    <child>
-                      <object class="GtkTextView" id="command_textview">
-                        <property name="visible">True</property>
-                        <property name="can_focus">True</property>
-                        <property name="pixels_below_lines">5</property>
-                        <property name="editable">False</property>
-                        <property name="wrap_mode">word</property>
-                        <property name="left_margin">3</property>
-                        <property name="right_margin">3</property>
-                        <property name="cursor_visible">False</property>
-                        <property name="accepts_tab">False</property>
-                      </object>
-                    </child>
+                    <property name="can-focus">True</property>
+                    <property name="pixels-below-lines">5</property>
+                    <property name="editable">False</property>
+                    <property name="wrap-mode">word</property>
+                    <property name="left-margin">3</property>
+                    <property name="right-margin">3</property>
+                    <property name="cursor-visible">False</property>
+                    <property name="accepts-tab">False</property>
                   </object>
                 </child>
               </object>
