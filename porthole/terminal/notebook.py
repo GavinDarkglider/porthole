@@ -33,6 +33,12 @@ from gi.repository import Gdk
 from gi.repository import Gtk
 from gi.repository import Pango
 
+print("PyGObject version:", gi.__version__)
+print("GTK major.minor.micro:",
+      Gtk.get_major_version(),
+      Gtk.get_minor_version(),
+      Gtk.get_micro_version())
+
 from gettext import gettext as _
 
 from porthole.terminal.constants import (

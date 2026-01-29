@@ -41,6 +41,15 @@ except:
 
 print("Porthole: python version = ", sys.version)
 
+import gi
+print("PyGObject version:", gi.__version__)
+gi.require_version('Gtk', '3.0')  # your current requirement
+from gi.repository import Gtk
+print("GTK major.minor.micro:",
+      Gtk.get_major_version(),
+      Gtk.get_minor_version(),
+      Gtk.get_micro_version())
+
 def usage():
     tabs = "\t\t"
     print("Usage: porthole [OPTION...]\n")
