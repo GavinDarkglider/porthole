@@ -108,8 +108,8 @@ class TerminalNotebook:
             if fg: view.modify_text(Gtk.StateType.NORMAL, Gdk.color_parse(fg))
             if font: view.modify_font(Pango.FontDescription(font))
         del buff
-        widget_labels = ["scrolledwindow2", "scrolledwindow8", "scrolledwindow7",
-                         "scrolledwindow5", "scrolledwindow4"]
+        widget_labels = ["process_scrolled_window", "warnings_window", "cautions_window",
+                         "info_window", "queue_window"]
         for x in widget_labels:
             window = self.wtree.get_object(x)
             self.scrolled_window += [window]

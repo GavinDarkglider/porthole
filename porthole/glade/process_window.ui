@@ -712,7 +712,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkScrolledWindow" id="scrolledwindow8">
+              <object class="GtkScrolledWindow" id="warnings_window">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <child>
@@ -773,7 +773,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkScrolledWindow" id="scrolledwindow7">
+              <object class="GtkScrolledWindow" id="cautions_window">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <child>
@@ -834,7 +834,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkScrolledWindow" id="scrolledwindow5">
+              <object class="GtkScrolledWindow" id="info_window">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <child>
@@ -895,7 +895,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkScrolledWindow" id="scrolledwindow4">
+              <object class="GtkScrolledWindow" id="queue_window">
                 <property name="visible">True</property>
                 <property name="can-focus">True</property>
                 <child>
