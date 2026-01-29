@@ -235,14 +235,17 @@ class TerminalNotebook:
     def copy_selected(self, *widget):
         """ Copy selected text to clipboard """
         buffer = self.view_buffer[self.current_tab]
+        textview = self.scrolled_window[self.current_tab]
+        # Get the clipboard (safe on GTK 3 and required on GTK 4)
+        self.clipboard = textview.get_clipboard(Gdk.SELECTION_CLIPBOARD)
+
         # make sure there is a selection
         if buffer.get_has_selection():
-            buffer.copy_clipboard()
+            buffer.copy_clipboard(self.clipboard)
         else:
             # or copy everything if nothing selected
             buffer.select_range(buffer.get_start_iter(), buffer.get_end_iter())
-            buffer.copy_clipboard()
-        self.clipboard = buffer
+            buffer.copy_clipboard(self.clipboard)
 
     def clear_buffers(self, *widget):
         """ Clear the text buffers """
