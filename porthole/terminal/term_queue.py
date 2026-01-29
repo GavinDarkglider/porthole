@@ -310,7 +310,9 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: restart()")
         self.queue_paused = False
         self.update_pause_play_state(self.queue_paused)
-        self.set_icon(PENDING, self.paused_id, self.paused_path)
+        debug.dprint("TERM_QUEUE: restart(); self.paused_id = " + str(self.paused_id))
+        if self.paused_id:
+            self.set_icon(PENDING, self.paused_id, self.paused_path)
         if self.task_completed:
             debug.dprint("TERM_QUEUE: restart(); task is completed, calling start()")
             self.start(False)
@@ -367,7 +369,10 @@ class TerminalQueue:
         if self.last_run_iter == None:
             self.process_iter = self.queue_model.get_iter_first()
             debug.dprint("TERM_QUEUE: next(); setting process_iter to iter_first()" )
-            self.last_run_iter = self.process_iter.copy()
+            if self.process_iter:
+                self.last_run_iter = self.process_iter.copy()
+            else:
+                self.last_run_iter = None
             return
         elif self.last_run_iter and not self.process_iter:
             self.process_iter = self.last_run_iter.copy()
@@ -389,11 +394,12 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: pause(); pausing queue at id = " + str(self.paused_id))
         self.queue_paused = True
         self.update_pause_play_state(self.queue_paused)
-        self.paused_path = self.queue_model.get_path(self.process_iter)[0] +1
-        if self.paused_path < len(self.queue_model):
-            self.paused_iter = self.queue_model.get_iter(self.paused_path)
-            if self.paused_iter:
-                self.set_icon(PAUSED, self.paused_id)
+        if self.process_iter:
+            self.paused_path = self.queue_model.get_path(self.process_iter)[0] +1
+            if self.paused_path < len(self.queue_model):
+                self.paused_iter = self.queue_model.get_iter(self.paused_path)
+                if self.paused_iter:
+                    self.set_icon(PAUSED, self.paused_id)
         debug.dprint("TERM_QUEUE: pause(); queue paused... returning, paused_iter = " + str(self.paused_iter))
         return True
 
@@ -630,6 +636,9 @@ class TerminalQueue:
     def locate_id( self, process_id ):
         debug.dprint("TERM_QUEUE: locate_id(); looking for process_id = " + str(process_id))
         # try to be smart about it
+        if not process_id:
+            debug.dprint("TERM_QUEUE: locate_id(); No process_id, returning ")
+            return
         path = int(process_id) -1
         try:
             self.locate_iter = self.queue_model.get_iter(path)
@@ -648,7 +657,8 @@ class TerminalQueue:
                         break
             else:
                 debug.dprint("TERM_QUEUE: locate_id();  failed to get a self.locate_iter from get_iter_first()")
-        debug.dprint("TERM_QUEUE: locate_id(); ended up with locate_iter id = %d, looking for %d" \
+        if self.locate_iter:
+            debug.dprint("TERM_QUEUE: locate_id(); ended up with locate_iter id = %d, looking for %d" \
                     %(self.queue_model.get_value(self.locate_iter,self.queue_model.column['id']),process_id))
         return
 
@@ -690,7 +700,8 @@ class TerminalQueue:
         else: # no icon
             self.locate_id(process_id)
             #debug.dprint("TERM_QUEUE: set_icon(): back from locate_id()")
-            self.queue_model.set_value(self.locate_iter, self.queue_model.column['icon'], None)
+            if self.locate_iter:
+                self.queue_model.set_value(self.locate_iter, self.queue_model.column['icon'], None)
 
 
     def render_icon(self, icon):
@@ -787,10 +798,11 @@ class TerminalQueue:
     def resume( self, *widget):
         # add resume to the command only if it's queue id matches.
         # this allows Resume to restart the queue if the killed process was removed from the queue
-        if self.killed_id == self.queue_model.get_value(self.process_iter, self.queue_model.column['id']):
-            command = self.get_command()
-            command += " --resume"
-            self.queue_model.set_value(self.process_iter, self.queue_model.column['command'], command)
+        if self.Process_iter:
+            if self.killed_id == self.queue_model.get_value(self.process_iter, self.queue_model.column['id']):
+                command = self.get_command()
+                command += " --resume"
+                self.queue_model.set_value(self.process_iter, self.queue_model.column['command'], command)
         self.start(False)
 
     def resume_skip_first(self, widget):
