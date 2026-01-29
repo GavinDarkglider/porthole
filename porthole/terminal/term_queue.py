@@ -47,10 +47,8 @@
 import gi
 gi.require_version('Gtk', '3.0')
 
-from gi.repository import Gdk
 from gi.repository import GdkPixbuf
 from gi.repository import Gtk
-from gi.repository import Gladeui
 from gi.repository import GObject
 
 from gettext import gettext as _
@@ -175,20 +173,14 @@ class TerminalQueue:
         self.play_menu = self.wtree.get_object("resume_queue")
         self.pause_btn = self.wtree.get_object("pause_button")
         self.pause_menu = self.wtree.get_object("pause")
-        #debug.dprint("TERM_QUEUE: Attempting to change the pause, paly button image colors")
-        """ Set up different colors for the pause & play buttons depending on it's state
-            Gtk.StateType.NORMAL    State during normal operation.
-            Gtk.StateType.ACTIVE    State of a currently active widget, such as a depressed button.
-            Gtk.StateType.PRELIGHT  State indicating that the mouse pointer is over the widget and the widget will respond to mouse clicks.
-            Gtk.StateType.SELECTED  State of a selected item, such the selected row in a list.
-            Gtk.StateType.INSENSITIVE   State indicating that the widget is unresponsive to user actions.
-        """
-        self.pause_btn.modify_fg(Gtk.StateType.INSENSITIVE, Gdk.color_parse("#962A1C"))
-        self.pause_btn.modify_fg(Gladeui.PropertyState.NORMAL, Gdk.color_parse("#DA311B"))
-        self.pause_btn.modify_fg(Gtk.StateType.PRELIGHT, Gdk.color_parse("#F65540"))
-        self.play_btn.modify_fg(Gtk.StateType.INSENSITIVE, Gdk.color_parse("#3C6E38"))
-        self.play_btn.modify_fg(Gladeui.PropertyState.NORMAL, Gdk.color_parse("#4EBA44"))
-        self.play_btn.modify_fg(Gtk.StateType.PRELIGHT, Gdk.color_parse("#58F64A"))
+
+        # debug.dprint("TERM_QUEUE: Setting up pause/play button colors via CSS classes")
+        # Add CSS classes to the buttons (only once, but safe to call multiple times)
+        self.pause_btn.get_style_context().add_class("pause-btn")
+        self.play_btn.get_style_context().add_class("play-btn")
+        # No more modify_fg() calls here — colors are now handled by CSS
+        # The state changes (paused vs playing) will be managed by adding/removing "active" class
+
         # initialize the model
         self.queue_model = QueueModel()
         # initialize some variables
@@ -224,7 +216,7 @@ class TerminalQueue:
         self.queue_tree.set_model(self.queue_model)
         self.new_window = False
         # set the buttons and menu options sensitive state
-        self.set_btn_menus()
+        self.update_pause_play_state(self.queue_paused)
         self.show_queue()
 
     def add(self, package_name, command_string, callback, sender):
@@ -317,7 +309,7 @@ class TerminalQueue:
         """re-start the queue"""
         debug.dprint("TERM_QUEUE: restart()")
         self.queue_paused = False
-        self.set_btn_menus()
+        self.update_pause_play_state(self.queue_paused)
         self.set_icon(PENDING, self.paused_id, self.paused_path)
         if self.task_completed:
             debug.dprint("TERM_QUEUE: restart(); task is completed, calling start()")
@@ -396,7 +388,7 @@ class TerminalQueue:
         self.paused_id = self.process_id + 1
         debug.dprint("TERM_QUEUE: pause(); pausing queue at id = " + str(self.paused_id))
         self.queue_paused = True
-        self.set_btn_menus()
+        self.update_pause_play_state(self.queue_paused)
         self.paused_path = self.queue_model.get_path(self.process_iter)[0] +1
         if self.paused_path < len(self.queue_model):
             self.paused_iter = self.queue_model.get_iter(self.paused_path)
@@ -808,13 +800,24 @@ class TerminalQueue:
         self.queue_model.set_value(self.process_iter, self.queue_model.column['command'], command)
         self.start(False)
 
-    def set_btn_menus( self ):
-        """sets the menu and buttons according to the paused state"""
-        active = self.queue_paused
-        self.play_menu.set_sensitive(active)
-        self.play_btn.set_sensitive(active)
-        self.pause_menu.set_sensitive(not active)
-        self.pause_btn.set_sensitive(not active)
+    def update_pause_play_state(self, is_paused):
+        """
+        Update visual state of pause/play buttons.
+        Call this whenever pause state changes.
+        """
+        ctx_pause = self.pause_btn.get_style_context()
+        ctx_play  = self.play_btn.get_style_context()
+
+        # Remove all state classes first to avoid stacking
+        ctx_pause.remove_class("active")
+        ctx_play.remove_class("active")
+
+        if is_paused:
+            ctx_pause.add_class("active")     # pause button "active" = red/normal
+            ctx_play.remove_class("active")   # play button "inactive" = green/dim
+        else:
+            ctx_pause.remove_class("active")  # pause inactive = dark red
+            ctx_play.add_class("active")      # play active = bright green
 
     def resume_dialog(self, message):
         """ Handle response when user tries to re-add killed process to queue """

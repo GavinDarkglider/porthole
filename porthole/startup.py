@@ -68,12 +68,47 @@ RUN_LOCAL = False
 DIR_LIST = [LOG_FILE_DIR, DB_FILE_DIR]
 
 
-#from thread import *
-import gi; gi.require_version("Gtk", "3.0") # make sure we have the right version
 while EPREFIX + '/usr/bin' in sys.path: # and now importing gtk re-adds it! Grrrr, rude
     sys.path.remove(EPREFIX + '/usr/bin')
 import locale
 import gettext
+
+import gi
+gi.require_version('Gtk', '3.0')
+from gi.repository import Gtk, Gdk
+
+# One-time CSS setup for pause/play buttons (and any other styled widgets)
+def setup_css():
+    provider = Gtk.CssProvider()
+    provider.load_from_data(b"""
+        .pause-btn {
+            color: #962A1C;              /* insensitive/default */
+        }
+        .pause-btn.active {
+            color: #DA311B;              /* normal/playing */
+        }
+        .pause-btn:hover {
+            color: #F65540;              /* prelight */
+        }
+        .play-btn {
+            color: #3C6E38;
+        }
+        .play-btn.active {
+            color: #4EBA44;
+        }
+        .play-btn:hover {
+            color: #58F64A;
+        }
+    """)
+
+    Gtk.StyleContext.add_provider_for_screen(
+        Gdk.Screen.get_default(),
+        provider,
+        Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+    )
+
+# Call it once at startup
+setup_css()
 
 
 def create_dir(new_dir):
