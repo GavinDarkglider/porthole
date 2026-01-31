@@ -204,6 +204,9 @@ class ConfigDialog:
             ##['globals', 'enable_all_keywords'],
             ['globals', 'use_custom_browser'],
             ['advemerge', 'show_make_conf_button'],
+            ['views', 'show_installed'],
+            ['views', 'show_dl'],
+            ['views', 'show_recommended'],
         ]
         self.syncmethods = config.Prefs.globals.Sync_methods
 

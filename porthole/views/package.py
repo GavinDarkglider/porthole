@@ -108,6 +108,7 @@ class PackageView(CommonTreeView):
         self._checkbox_column = Gtk.TreeViewColumn()
         self._checkbox_column.set_resizable(False)
         self.append_column(self._checkbox_column)
+
         # Setup the Installed Column
         self._installed_column = Gtk.TreeViewColumn(_("Installed"))
         self.append_column(self._installed_column)
@@ -115,6 +116,8 @@ class PackageView(CommonTreeView):
         self._installed_column.set_min_width(10)
         #self._installed_column.set_expand(False)
         self._installed_column.set_sort_column_id(MODEL_ITEM["installed"])
+        self._installed_column.set_visible(config.Prefs.views.show_installed)
+
         # Setup the Latest Column
         self._latest_column = Gtk.TreeViewColumn(_("Recommended"))
         self.append_column(self._latest_column)
@@ -122,6 +125,8 @@ class PackageView(CommonTreeView):
         self._latest_column.set_min_width(10)
         #self._latest_column.set_expand(False)
         self._latest_column.set_sort_column_id(MODEL_ITEM["recommended"])
+        self._latest_column.set_visible(config.Prefs.views.show_recommended)
+
         # setup the packagesize column
         self._size_column = Gtk.TreeViewColumn(_("Download Size"))
         self.append_column(self._size_column)
@@ -129,6 +134,8 @@ class PackageView(CommonTreeView):
         self._size_column.set_min_width(10)
         #self._size_column.set_expand(False)
         self._size_column.set_sort_column_id(MODEL_ITEM["size"])
+        self._size_column.set_visible(config.Prefs.views.show_dl)
+
         # setup the Description column
         self._desc_column = Gtk.TreeViewColumn(_("Description"))
         self.append_column(self._desc_column)
@@ -138,10 +145,14 @@ class PackageView(CommonTreeView):
 
         self.clickable_columns = [
             self._column,
-            self._installed_column,
-            self._latest_column,
-            self._size_column,
         ]
+        for col, value in [
+            (self._installed_column, config.Prefs.views.show_installed),
+            (self._latest_column, config.Prefs.views.show_recommended),
+            (self._size_column, config.Prefs.views.show_dl),
+            ]:
+            if value:
+                self.clickable_columns.append(col)
 
         # make it easier to read across columns
         self.set_rules_hint(True)
@@ -208,21 +219,25 @@ class PackageView(CommonTreeView):
         self._column.pack_start(text, expand = True)
         self._column.add_attribute(text, "text",MODEL_ITEM["name"])
         self._column.set_cell_data_func(text, self.cell_data_func, None)
+
         text_size = Gtk.CellRendererText()
-        text_installed = Gtk.CellRendererText()
-        text_latest = Gtk.CellRendererText()
         self._size_column.pack_start(text_size, expand = False)
         self._size_column.add_attribute(text_size, "text", MODEL_ITEM["size"])
         self._size_column.set_cell_data_func(text_size, self.cell_data_func, None)
+        #self._size_column.set_sizing(Gtk.TreeViewColumnSizing.GROW_ONLY)
+
+        text_installed = Gtk.CellRendererText()
         self._installed_column.pack_start(text_installed, expand = False)
         self._installed_column.add_attribute(text_installed, "text", MODEL_ITEM["installed"])
         self._installed_column.set_cell_data_func(text_installed, self.cell_data_func, None)
+        #self._installed_column.set_sizing(Gtk.TreeViewColumnSizing.GROW_ONLY)
+
+        text_latest = Gtk.CellRendererText()
         self._latest_column.pack_start(text_latest, expand = False)
         self._latest_column.add_attribute(text_latest, "text", MODEL_ITEM["recommended"])
         self._latest_column.set_cell_data_func(text_latest, self.cell_data_func, None)
         #self._latest_column.set_sizing(Gtk.TreeViewColumnSizing.GROW_ONLY)
-        #self._installed_column.set_sizing(Gtk.TreeViewColumnSizing.GROW_ONLY)
-        #self._size_column.set_sizing(Gtk.TreeViewColumnSizing.GROW_ONLY)
+
         text_desc = Gtk.CellRendererText()
         self._desc_column.pack_start(text_desc, expand=False)
         self._desc_column.add_attribute(text_desc, 'text', MODEL_ITEM["description"])
@@ -412,7 +427,9 @@ class PackageView(CommonTreeView):
         """ Populate the current view with packages """
         debug.dprint("VIEWS: Populating package view")
         debug.dprint("VIEWS: PackageView.populate(); process_id = %s" %str(os.getpid()))
-        self._installed_column.set_visible(True)
+        self._installed_column.set_visible(config.Prefs.views.show_installed)
+        self._latest_column.set_visible(config.Prefs.views.show_recommended)
+        self._size_column.set_visible(config.Prefs.views.show_dl)
         if not packages:
             debug.dprint("VIEWS: clearing package view model")
             self.get_model().clear()
@@ -479,6 +496,8 @@ class PackageView(CommonTreeView):
         debug.dprint("VIEWS: Populating package view")
         debug.dprint("VIEWS: PackageView.populate_cpv(); process_id = %s" %str(os.getpid()))
         self._installed_column.set_visible(False)
+        self._latest_column.set_visible(False)
+        self._size_column.set_visible(False)
         if not packages:
             debug.dprint("VIEWS: clearing package view model")
             self.get_model().clear()
@@ -556,14 +575,15 @@ class PackageView(CommonTreeView):
                 #Gtk.threads_enter()
                 package = model.get_value(iter, MODEL_ITEM["package"])
                 if not self.deprecated_info: # else pass
-                    #debug.dprint("VIEWS: populate_info(); getting latest_installed")
-                    latest_installed = package.get_latest_installed()
-                    #debug.dprint("VIEWS: populate_info(); latest_installed: %s, getting best_ebuild" %str(latest_installed))
                     best_ebuild = package.get_best_dep_ebuild()
                     #debug.dprint("VIEWS: populate_info(); best_dep_ebuild: %s, getting latest_ebuild" %str(best_ebuild))
                     latest_ebuild = package.get_latest_ebuild(include_masked = False)
                     #debug.dprint("VIEWS: populate_info(); latest_ebuild: %s" %str(latest_ebuild))
-                    model.set_value(iter, MODEL_ITEM["installed"], backends.portage_lib.get_version(latest_installed)) # installed
+                    if config.Prefs.views.show_installed:
+                        #debug.dprint("VIEWS: populate_info(); getting latest_installed")
+                        latest_installed = package.get_latest_installed()
+                        #debug.dprint("VIEWS: populate_info(); latest_installed: %s, getting best_ebuild" %str(latest_installed))
+                        model.set_value(iter, MODEL_ITEM["installed"], backends.portage_lib.get_version(latest_installed)) # installed
                 else:
                     ebuild = model.get_value(iter,MODEL_ITEM["name"])
                     #debug.dprint("VIEWS: populate_info(); ebuild: '%s', getting latest..." % str(ebuild))
@@ -577,21 +597,26 @@ class PackageView(CommonTreeView):
                     latest_ebuild = package.get_latest_ebuild(include_masked = False)
                     debug.dprint("VIEWS: populate_info(); latest_ebuild: %s" %str(latest_ebuild))
 
-                try:
-                    size = package.get_size()
-                    #debug.dprint("VIEWS: populate_info(); size = " + size)
-                    model.set_value(iter, MODEL_ITEM["size"], size) # Size
-                except:
-                    debug.dprint("VIEWS: populate_info(); Had issues getting size for '%s'" % str(package.full_name))
-                if best_ebuild:
-                    model.set_value(iter, MODEL_ITEM["recommended"], backends.portage_lib.get_version(best_ebuild)) #  recommended by portage
-                    #debug.dprint("VIEWS populate_info(): got best ebuild for '%s' = %s" % (package.full_name, best_ebuild))
-                elif latest_ebuild:
-                    model.set_value(iter, MODEL_ITEM["recommended"], "(" + backends.portage_lib.get_version(latest_ebuild) + ")") # latest
-                    #debug.dprint("VIEWS populate_info(): got latest ebuild for '%s' = %s" % (package.full_name, latest_ebuild))
-                else:
-                    model.set_value(iter, MODEL_ITEM["recommended"], "masked") # hard masked - don't display
-                    #debug.dprint("VIEWS populate_info(): got masked ebuild for '%s' = %s" % (package.full_name, "masked"))
+                # Conditionaly populate the download size column
+                if config.Prefs.views.show_dl:
+                    try:
+                        size = package.get_size()
+                        #debug.dprint("VIEWS: populate_info(); size = " + size)
+                        model.set_value(iter, MODEL_ITEM["size"], size) # Size
+                    except:
+                        debug.dprint("VIEWS: populate_info(); Had issues getting size for '%s'" % str(package.full_name))
+
+                # Conditionaly populate the recommended column
+                if config.Prefs.views.show_recommended:
+                    if best_ebuild:
+                        model.set_value(iter, MODEL_ITEM["recommended"], backends.portage_lib.get_version(best_ebuild)) #  recommended by portage
+                        #debug.dprint("VIEWS populate_info(): got best ebuild for '%s' = %s" % (package.full_name, best_ebuild))
+                    elif latest_ebuild:
+                        model.set_value(iter, MODEL_ITEM["recommended"], "(" + backends.portage_lib.get_version(latest_ebuild) + ")") # latest
+                        #debug.dprint("VIEWS populate_info(): got latest ebuild for '%s' = %s" % (package.full_name, latest_ebuild))
+                    else:
+                        model.set_value(iter, MODEL_ITEM["recommended"], "masked") # hard masked - don't display
+                        #debug.dprint("VIEWS populate_info(): got masked ebuild for '%s' = %s" % (package.full_name, "masked"))
                 try:
                     model.set_value(iter, MODEL_ITEM["description"], package.get_properties().description) # Description
                 except:

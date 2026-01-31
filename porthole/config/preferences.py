@@ -240,7 +240,10 @@ class PortholePreferences:
             ['downgradable_fg', '#FA0000'],
             ['upgradable_fg', '#0000FF'],
             ['normal_fg','#000000'],
-            ['normal_bg','#FFFFFF']
+            ['normal_bg','#FFFFFF'],
+            ['show_dl', True],
+            ['show_installed', True],
+            ['show_recommended', True],
         ]
         self.views = OptionsClass()
         for option, default in viewoptions:
@@ -427,6 +430,9 @@ class PortholePreferences:
         dom.additem('/views/downgradable_fg', self.views.downgradable_fg)
         dom.additem('/views/normal_fg', self.views.normal_fg)
         dom.additem('/views/normal_bg', self.views.normal_bg)
+        dom.additem('/views/show_dl', self.views.show_dl)
+        dom.additem('/views/show_installed', self.views.show_installed)
+        dom.additem('/views/show_recommended', self.views.show_recommended)
         dom.additem('/summary/showtable', self.summary.showtable)
         dom.additem('/summary/showkeywords', self.summary.showkeywords)
         dom.additem('/summary/showinstalled', self.summary.showinstalled)
