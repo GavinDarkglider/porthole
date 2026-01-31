@@ -509,7 +509,12 @@ class Summary(Gtk.TextView):
                             append( ', ')
                         append_url(license, self.license_dir + license, "blue")
                         x += 1
-                nl()
+                nl(2)
+
+            # Download size
+            append(_("Download size: "), "property")
+            append(backends.portage_lib.get_size(ebuild))
+            nl()
 
         def show_flags( use_flags, ebuild_use_flags, id_overrides=False, first_flag=True):
             """runs through the list of flags and formats and prints them"""
