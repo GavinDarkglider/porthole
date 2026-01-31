@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Generated with glade 3.40.0 -->
 <interface>
-  <requires lib="gtk+" version="3.20"/>
+  <requires lib="gtk+" version="3.24"/>
   <object class="GtkWindow" id="process_window">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
@@ -33,13 +33,31 @@
                       <object class="GtkMenu" id="menuitem4_menu1">
                         <property name="can-focus">False</property>
                         <child>
-                          <object class="GtkImageMenuItem" id="resume">
-                            <property name="label" translatable="yes">_Resume</property>
+                          <object class="GtkMenuItem" id="resume">
                             <property name="visible">True</property>
-                            <property name="sensitive">False</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">media-playback-start-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Resume</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                             <child type="submenu">
                               <object class="GtkMenu" id="resume_menu">
                                 <property name="can-focus">False</property>
@@ -81,12 +99,31 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="kill_process1">
-                            <property name="label" translatable="yes">_Kill Process</property>
+                          <object class="GtkMenuItem" id="kill_process1">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">media-close-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Kill Process</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                             <signal name="activate" handler="on_kill" swapped="no"/>
                           </object>
                         </child>
@@ -97,33 +134,90 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="save1">
-                            <property name="label" translatable="yes">Save _Log</property>
+                          <object class="GtkMenuItem" id="save1">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_save_log" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">document-save-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Save _Log</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="save_as">
-                            <property name="label" translatable="yes">Save Log _As</property>
+                          <object class="GtkMenuItem" id="save_as">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_save_log_as" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">document-save-as-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Save Log _As</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="open">
-                            <property name="label" translatable="yes">_Open Log</property>
+                          <object class="GtkMenuItem" id="open">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_open_log" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">document-open-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Open Log</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -133,12 +227,32 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="close_window1">
-                            <property name="label" translatable="yes">_Close Window</property>
+                          <object class="GtkMenuItem" id="close_window1">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_quit" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">window-close-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Close Window</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>
@@ -155,14 +269,33 @@
                       <object class="GtkMenu" id="menuitem5_menu">
                         <property name="can-focus">False</property>
                         <child>
-                          <object class="GtkImageMenuItem" id="copy2">
-                            <property name="label">gtk-copy</property>
+                          <object class="GtkMenuItem" id="copy2">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">True</property>
                             <signal name="activate" handler="on_copy" swapped="no"/>
                             <accelerator key="C" signal="activate" modifiers="GDK_CONTROL_MASK"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">edit-copy-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Copy</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -172,14 +305,33 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="clear2">
-                            <property name="label">gtk-clear</property>
+                          <object class="GtkMenuItem" id="clear2">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">True</property>
                             <signal name="activate" handler="on_clear" swapped="no"/>
-                          </object>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">edit-clear-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Clear</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
+                         </object>
                         </child>
                       </object>
                     </child>
@@ -202,33 +354,90 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="pause">
-                            <property name="label">gtk-media-pause</property>
+                          <object class="GtkMenuItem" id="pause">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">True</property>
                             <signal name="activate" handler="on_pause_activate" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">media-pause-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Pause</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="resume_queue">
-                            <property name="label" translatable="yes">Re_sume</property>
+                          <object class="GtkMenuItem" id="resume_queue">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_resume_queue_activate" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">go-next-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Re_sume</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="timer">
-                            <property name="label" translatable="yes">Ti_mer</property>
+                          <object class="GtkMenuItem" id="timer">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_timer_activate" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">chronometer-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Ti_mer</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -238,45 +447,119 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="move_top">
-                            <property name="label" translatable="yes">Move _Top</property>
+                          <object class="GtkMenuItem" id="move_top">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_move_top" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">go-top-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Move _Top</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="move_up1">
-                            <property name="label" translatable="yes">Move _Up</property>
+                          <object class="GtkMenuItem" id="move_up1">
                             <property name="visible">True</property>
-                            <property name="sensitive">False</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_move_up" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">go-up-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Move _Up</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="move_down1">
-                            <property name="label" translatable="yes">Move _Down</property>
+                          <object class="GtkMenuItem" id="move_down1">
                             <property name="visible">True</property>
-                            <property name="sensitive">False</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_move_down" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">go-down-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Move _Down</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="move_bottom">
-                            <property name="label" translatable="yes">Move _Bottom</property>
+                          <object class="GtkMenuItem" id="move_bottom">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">False</property>
                             <signal name="activate" handler="on_move_bottom" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">go-bottom-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">Move _Bottom</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
@@ -286,24 +569,61 @@
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="remove1">
-                            <property name="label">gtk-remove</property>
+                          <object class="GtkMenuItem" id="remove1">
                             <property name="visible">True</property>
-                            <property name="sensitive">False</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">True</property>
                             <signal name="activate" handler="on_remove" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">edit-clear-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Remove</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                         <child>
-                          <object class="GtkImageMenuItem" id="clear_queue">
-                            <property name="label">gtk-clear</property>
+                          <object class="GtkMenuItem" id="clear_queue">
                             <property name="visible">True</property>
-                            <property name="can-focus">False</property>
-                            <property name="use-underline">True</property>
-                            <property name="use-stock">True</property>
                             <signal name="activate" handler="on_clear_queue" swapped="no"/>
+                            <child>
+                              <object class="GtkBox">
+                                <property name="visible">True</property>
+                                <property name="orientation">horizontal</property>
+                                <property name="spacing">6</property>
+
+                                <child>
+                                  <object class="GtkImage">
+                                    <property name="visible">True</property>
+                                    <property name="icon-name">media-clear-symbolic</property>
+                                    <property name="icon-size">1</property>
+                                  </object>
+                                </child>
+
+                                <child>
+                                  <object class="GtkLabel">
+                                    <property name="visible">True</property>
+                                    <property name="label" translatable="yes">_Clear Queue</property>
+                                    <property name="use-underline">True</property>
+                                  </object>
+                                </child>
+                              </object>
+                            </child>
                           </object>
                         </child>
                       </object>
@@ -328,6 +648,10 @@
           <object class="GtkNotebook" id="notebook1">
             <property name="visible">True</property>
             <property name="can-focus">True</property>
+            <property name="margin-start">5</property>
+            <property name="margin-end">5</property>
+            <property name="margin-top">5</property>
+            <property name="margin-bottom">5</property>
             <child>
               <object class="GtkScrolledWindow" id="process_scrolled_window">
                 <property name="visible">True</property>
@@ -357,11 +681,10 @@
                     <property name="height-request">16</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="double-buffered">False</property>
                     <property name="margin-start">3</property>
                     <property name="margin-end">3</property>
-                    <property name="icon_name">system-run-symbolic</property>
-                    <property name="icon_size">1</property>
+                    <property name="icon-name">system-run-symbolic</property>
+                    <property name="icon-size">1</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -373,7 +696,8 @@
                   <object class="GtkLabel" id="process_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="margin-left">5</property>
+                    <property name="margin-start">5</property>
+                    <property name="margin-end">3</property>
                     <property name="label" translatable="yes">Process</property>
                   </object>
                   <packing>
@@ -417,11 +741,10 @@
                     <property name="height-request">16</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="double-buffered">False</property>
                     <property name="margin-start">3</property>
                     <property name="margin-end">3</property>
-                    <property name="icon_name">dialog-warning-symbolic</property>
-                    <property name="icon_size">1</property>
+                    <property name="icon-name">dialog-warning-symbolic</property>
+                    <property name="icon-size">1</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -433,7 +756,8 @@
                   <object class="GtkLabel" id="warnings_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="margin-left">5</property>
+                    <property name="margin-start">6</property>
+                    <property name="margin-end">3</property>
                     <property name="label" translatable="yes">Warnings! </property>
                   </object>
                   <packing>
@@ -478,11 +802,10 @@
                     <property name="height-request">16</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="double-buffered">False</property>
                     <property name="margin-start">3</property>
                     <property name="margin-end">3</property>
-                    <property name="icon_name">dialog-warning-symbolic</property>
-                    <property name="icon_size">1</property>
+                    <property name="icon-name">dialog-warning-symbolic</property>
+                    <property name="icon-size">1</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -494,7 +817,8 @@
                   <object class="GtkLabel" id="cautions_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="margin-left">5</property>
+                    <property name="margin-start">5</property>
+                    <property name="margin-end">3</property>
                     <property name="label" translatable="yes">Cautions </property>
                   </object>
                   <packing>
@@ -539,11 +863,10 @@
                     <property name="height-request">16</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="double-buffered">False</property>
                     <property name="margin-start">3</property>
                     <property name="margin-end">3</property>
-                    <property name="icon_name">dialog-info-symbolic</property>
-                    <property name="icon_size">1</property>
+                    <property name="icon-name">dialog-info-symbolic</property>
+                    <property name="icon-size">1</property>
                   </object>
                   <packing>
                     <property name="expand">False</property>
@@ -555,7 +878,8 @@
                   <object class="GtkLabel" id="info_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="margin-left">5</property>
+                    <property name="margin-start">5</property>
+                    <property name="margin-end">3</property>
                     <property name="label" translatable="yes">Information </property>
                   </object>
                   <packing>
@@ -598,7 +922,6 @@
                     <property name="height-request">16</property>
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="double-buffered">False</property>
                     <property name="margin-start">3</property>
                     <property name="margin-end">3</property>
                     <property name="icon-name">view-list-symbolic</property>
@@ -613,7 +936,8 @@
                   <object class="GtkLabel" id="queue_label">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="margin-left">5</property>
+                    <property name="margin-start">5</property>
+                    <property name="margin-end">3</property>
                     <property name="label" translatable="yes">Emerge Queue</property>
                   </object>
                   <packing>
@@ -649,7 +973,7 @@
                   <object class="GtkImage" id="image487">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="icon_name">media-playback-pause-symbolic</property>
+                    <property name="icon-name">media-playback-pause-symbolic</property>
                   </object>
                 </child>
               </object>
@@ -669,8 +993,8 @@
                   <object class="GtkImage" id="image486">
                     <property name="visible">True</property>
                     <property name="can-focus">False</property>
-                    <property name="icon_name">media-playback-start-symbolic</property>
-                    <property name="icon_size">1</property>
+                    <property name="icon-name">media-playback-start-symbolic</property>
+                    <property name="icon-size">1</property>
                   </object>
                 </child>
               </object>
@@ -716,7 +1040,6 @@
                         <property name="height-request">16</property>
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
-                        <property name="double-buffered">False</property>
                         <property name="icon-name">window-close-symbolic</property>
                         <property name="icon-size">1</property>
                       </object>
@@ -731,6 +1054,8 @@
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>
                         <property name="double-buffered">False</property>
+                        <property name="margin-start">3</property>
+                        <property name="margin-end">3</property>
                         <property name="label" translatable="yes">_Kill</property>
                         <property name="use-underline">True</property>
                       </object>
