@@ -302,10 +302,10 @@ class ProcessManager: #dbus.service.Object):
                                 config.Prefs.terminal.width_verbose or
                                 config.Prefs.terminal.width),
                                 config.Prefs.terminal.height)
-            # MUST! do this command last, or nothing else will _init__
-            # after it until emerge is finished.
-            # Also causes runaway recursion.
-            # self.window.connect("size_request", self.on_size_request)
+        # MUST! do this command last, or nothing else will _init__
+        # after it until emerge is finished.
+        # Also causes runaway recursion.
+        self.window.connect("size-allocate", self.on_size_request)
 
     #~ @dbus.service.method(CONN_INTERFACE, in_signature='ss', out_signature='', sender_keyword='sender')
     #~ def request_add( self, name, command, sender ):
@@ -327,10 +327,11 @@ class ProcessManager: #dbus.service.Object):
     def reply():
         pass
 
-    def on_size_request(self, window, gbox):
+    def on_size_request(self, window, new_size):
         """ Store new size in prefs """
         # get the width and height of the window
-        width, height = window.get_size()
+        width = new_size.width
+        height = new_size.height
         # set the preferences
         if config.Prefs.emerge.verbose:
             config.Prefs.terminal.width_verbose = width
