@@ -2,7 +2,6 @@
 
 import datetime
 _id = datetime.datetime.now().microsecond
-from gi.repository import GObject
 from gi.repository import Gtk
 
 from gettext import gettext as _
@@ -16,7 +15,7 @@ from porthole.backends.utilities import (get_reduced_flags,
 class UseFlagCheckbuttons(Gtk.HBox):
    def __init__(self, useflag, default_status):
       Gtk.HBox.__init__(self)
-      debug.dprint("USEFLAGCHECKBUTTONS: __INIT__()")
+      debug.dprint("USEFLAGS: UseFlagCheckbuttons.__INIT__()")
       self.homogenous = False # Not all widgets are created equal
       self.flag = useflag
 
@@ -61,7 +60,8 @@ class UseFlagWidget(Gtk.Table):
       Gtk.Table.__init__(self)
       self.ebuild = ebuild
       self.parent_window = parent_window
-      debug.dprint("USEFLAGDIALOG: __INIT__()")
+      #debug.dprint("USEFLAGS: UseFlagWidget.__INIT__(), ebuild: " + str(ebuild))
+      #debug.dprint("USEFLAGS: use_flags" +str(use_flags))
 
       size = len(use_flags)
       maxcol = 3
@@ -82,6 +82,9 @@ class UseFlagWidget(Gtk.Table):
       col = 0
       row = 0
       ebuild_use_flags = get_reduced_flags(ebuild)
+      #debug.dprint("USEFLAGS: ebuild_use_flags: " +str(ebuild_use_flags))
+      ebuild_use_desc = backends.portage_lib.get_metadata(ebuild).usedescription
+      #debug.dprint("USEFLAGS: ebuild_use_desc: " +str(ebuild_use_desc))
 
       for flag in use_flags:
          if flag[0] == '-':
@@ -91,7 +94,9 @@ class UseFlagWidget(Gtk.Table):
          else:
                button = UseFlagCheckbuttons(flag, "")
          myflag = abs_flag(flag)
-         if flag in ebuild_use_flags:
+         #debug.dprint("USEFLAGS: myflag: " + myflag)
+
+         if myflag in ebuild_use_flags:
             button.enable_box.set_active(True)
          if flag[0] == '-':
                button.disable_box.set_active(True)
@@ -101,9 +106,14 @@ class UseFlagWidget(Gtk.Table):
 
          button.set_has_tooltip=True
          try:
-            button.set_tooltip_text(backends.portage_lib.settings.UseFlagDict[myflag.lower()][2])
+            button.set_tooltip_text(backends.portage_lib.settings.UseFlagDict[myflag])
+            debug.dprint("USEFLAGS: global TOOLTIP added :)")
          except KeyError:
-            button.set_tooltip_text(_('Unsupported use flag'))
+            if ebuild_use_desc and ebuild_use_desc[myflag]:
+                debug.dprint("USEFLAGS: ebuild_use_desc[myflag]:" +str(ebuild_use_desc[myflag]))
+                button.set_tooltip_text(ebuild_use_desc[myflag])
+            else:
+                button.set_tooltip_text(_('Unsupported use flag'))
          table.attach(button, col, col+1, row, row+1)
          #connect to grab-focus so we can detect changes
          button.connect('grab-focus', self.on_toggled)

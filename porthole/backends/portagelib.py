@@ -35,6 +35,7 @@ import importlib
 import os
 
 from gettext import gettext as _
+from glob import glob
 from sys import exit, stderr
 import _thread
 
@@ -50,7 +51,7 @@ from porthole.utils.caches import lru_cache
 from porthole.sterminal import SimpleTerminal
 from porthole.backends.properties import Properties
 from porthole import config
-from porthole.backends.metadata import parse_metadata
+from porthole.backends.metadata import Metadata
 from porthole.backends.utilities import read_bash
 
 try:  # >=portage 2.2 modules
@@ -64,6 +65,7 @@ try:  # >=portage 2.2 modules
 
     # print "PORTAGELIB: imported portage-2.2 manifest"
     from _emerge.actions import load_emerge_config as _load_emerge_config
+    from portage.xml.metadata import MetaDataXML
 
     PORTAGE22 = True
     print("PORTAGELIB: imported portage-2.2 modules")
@@ -277,36 +279,52 @@ def split_atom_pkg(pkg):
 
 
 def get_use_flag_dict(portdir):
-    """Get all the use flags and return them as a dictionary
-    key = use flag forced to lowercase
-    data = list[0] = 'local' or 'global'
-           list[1] = 'package-name'
-           list[2] = description of flag
+    """Get global and expanded USE flag variables from
+    PORTDIR/profiles/use.desc and PORTDIR/profiles/desc/*.desc respectively.
+    Adapted tp porthole from gentoolkit.
+
+    @rtype: dict
+    @return: {'flag_name': 'flag description', ...}
     """
-    _dict = {}
 
-    # process standard use flags
+    global_usedesc = {}
+    # Get global USE flag descriptions
+    try:
+        path = os.path.join(portdir, "profiles", "use.desc")
+        with open(path) as open_file:
+            for line in open_file:
+                if line.startswith("#"):
+                    continue
+                # Ex. of fields: ['syslog', 'Enables support for syslog\n']
+                fields = line.split(" - ", 1)
+                if len(fields) == 2:
+                    global_usedesc[fields[0]] = fields[1].rstrip()
+    except OSError:
+        debug.dprint("PORTAGELIB: get_use_flag_dict(); "
+            "Could not load USE flag descriptions from %s" % path
+        )
 
-    List = portage.grabfile(portdir + "/profiles/use.desc")
-    for item in List:
-        index = item.find(" - ")
-        _dict[item[:index].strip().lower()] = ["global", "", item[index + 3 :]]
-
-    # process local (package specific) use flags
-
-    List = portage.grabfile(portdir + "/profiles/use.local.desc")
-    for item in List:
-        index = item.find(" - ")
-        data = item[:index].lower().split(":")
-        try:  # got an error starting porthole==> added code to catch it, but it works again???
-            _dict[data[1].strip()] = ["local", data[0].strip(), item[index + 3 :]]
-        except:
+    del path, open_file
+    # Add USE_EXPANDED variables to usedesc hash -- Bug #238005
+    for path in glob(os.path.join(portdir, "profiles", "desc", "*.desc")):
+        try:
+            with open(path) as open_file:
+                for line in open_file:
+                    if line.startswith("#"):
+                        continue
+                    fields = [field.strip() for field in line.split(" - ", 1)]
+                    if len(fields) == 2:
+                        expanded_useflag = "{}_{}".format(
+                            path.split("/")[-1][0:-5],
+                            fields[0],
+                        )
+                        global_usedesc[expanded_useflag] = fields[1]
+        except OSError:
             debug.dprint(
-                "PORTAGELIB: get_use_flag_dict(); error in index??? data[0].strip, item[index:]"
-            )
-            debug.dprint(data[0].strip())
-            debug.dprint(item[index:])
-    return _dict
+                "PORTAGELIB: get_use_flag_dict(); Could not load USE flag descriptions from %s" % path
+                )
+
+    return global_usedesc
 
 
 def get_portage_environ(var):
@@ -742,21 +760,35 @@ def get_metadata(cpv):
     This will take into account the overlay it is in.
     Failing that it will default to the main tree
     """
+    debug.dprint("PORTAGELIB: get_metadata(); cpv = " + cpv)
+    metad = Metadata(_metadata(cpv))
+    return metad
+
+
+def _metadata(cpv):
+    """Instantiate a L{portage.xml.MetaDataXML} object here.
+    Copied from gentoolkit"""
+
+    metadata_path = os.path.join(get_pkg_path(cpv), "metadata.xml")
+    projects_path = os.path.join(
+        settings.portdir, "metadata/projects.xml"
+    )
+
+    debug.dprint(
+                    "PORTAGELIB: _metadata(); "
+                    "metadata_path %s, projects_path %s"
+                    % (metadata_path, projects_path)
+                )
     try:
-        debug.dprint("PORTAGELIB: get_metadata(); cpv = " + cpv)
-        return parse_metadata(os.path.join(get_pkg_path(cpv), "metadata.xml"))
-    except:
-        try:
-            debug.dprint(
-                "PORTAGELIB: get_metadata(); "
-                "failed to get %s, using main tree"
-                % os.path.join(get_pkg_path(cpv), "metadata.xml")
-            )
-            return parse_metadata(
-                os.path.join(settings.portdir, get_full_name(cpv), "metadata.xml")
-            )
-        except:
-            return None
+        metadata = MetaDataXML(metadata_path, projects_path)
+    except OSError as error:
+        import errno
+
+        if error.errno != errno.ENOENT:
+            raise
+        return None
+
+    return metadata
 
 
 def get_system_pkgs():  # lifted from gentoolkit

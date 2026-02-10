@@ -51,12 +51,16 @@ def normalize_whitespace(text):
 
 class Metadata:
     """Represents the information in the metadata file."""
-    def __init__(self):
-        self.longdescription = None
-        self.herds = []
-        self.maintainers = []
+    def __init__(self, metdata):
+        self.longdescription = metdata.descriptions() or None
+        self.maintainers = metdata.maintainers() or []
         self.usedescription = {}
+        for flag in metdata.use():
+            self.usedescription[flag.name] = flag.description
+        self.herds = metdata.herds() or []
 
+
+# Deprecated. using  portage.xml.metadata import MetaDataXML
 class MetadataHandler(ContentHandler):
 
     def __init__(self, target):

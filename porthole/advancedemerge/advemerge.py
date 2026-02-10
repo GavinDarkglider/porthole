@@ -428,7 +428,7 @@ class AdvancedEmergeDialog:
             iuse = props.get_use_flags()
             final_use, use_expand_hidden, usemasked, useforced = backends.portage_lib.get_cpv_use(ebuild)
             myflags = filter_flags(iuse, use_expand_hidden, usemasked, useforced)
-            info["use_flags"] = abs_list(myflags)
+            info["use_flags"] = myflags
             info["stable"] = ebuild in nonmasked
             info["hard_masked"] = ebuild in hardmasked
             info["available"] = ebuild in portage_versions

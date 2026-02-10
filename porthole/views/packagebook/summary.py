@@ -677,10 +677,6 @@ class Summary(Gtk.TextView):
             table.remove(tag)
         self.url_tags = []
 
-        # fixme unused system_use_flags
-        # get system use flags
-        system_use_flags = backends.portage_lib.settings.SystemUseFlags
-
         #############################
         # Begin adding text to tab
         #############################
