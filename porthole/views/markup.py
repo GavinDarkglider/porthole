@@ -113,9 +113,8 @@ class MarkupView (object):
         """ Append (unicode) text to summary buffer """
         iter = self.buffer.get_end_iter()
         buffer = self.buffer
-        # if tag: buffer.insert_with_tags_by_name(iter, text, tag)
-        # else: buffer.insert(iter, text)
-        buffer.insert(iter, text)
+        if tag: buffer.insert_with_tags_by_name(iter, str(text), tag)
+        else: buffer.insert(iter, str(text))
 
     def append_url(self, text, url, colour):
         """ Append URL to textbuffer and connect an event """
