@@ -183,14 +183,14 @@ class AdvancedEmergeDialog:
 
         # emerge / unmerge combobox:
         self.emerge_combolist = Gtk.ListStore(str)
-        iter = self.emerge_combolist.append(["emerge"])
+        _iter = self.emerge_combolist.append(["emerge"])
         self.emerge_combolist.append(["unmerge"])
         self.emerge_combobox = self.wtree.get_object("cmbEmerge")
         self.emerge_combobox.set_model(self.emerge_combolist)
         cell = Gtk.CellRendererText()
         self.emerge_combobox.pack_start(cell, True)
         self.emerge_combobox.add_attribute(cell, 'text', 0)
-        self.emerge_combobox.set_active_iter(iter)
+        self.emerge_combobox.set_active_iter(_iter)
 
         # Set any emerge options the user wants defaulted
         if config.Prefs.emerge.pretend:
@@ -235,9 +235,9 @@ class AdvancedEmergeDialog:
     def version_changed(self, widget):
         """ Version has changed, update the dialog window """
         debug.dprint("ADVEMERGE: changing version")
-        iter = self.combobox.get_active_iter()
+        _iter = self.combobox.get_active_iter()
         model = self.combobox.get_model()
-        sel_ver = model.get_value(iter, 0)
+        sel_ver = model.get_value(_iter, 0)
         if len(sel_ver) > 2:
             verInfo = self.current_verInfo = self.get_verInfo(sel_ver)
             # Reset use flags
@@ -249,9 +249,9 @@ class AdvancedEmergeDialog:
     def emerge_changed(self, widget):
         """ Swap between emerge and unmerge """
         debug.dprint("ADVEMERGE: emerge_changed()")
-        iter = self.emerge_combobox.get_active_iter()
+        _iter = self.emerge_combobox.get_active_iter()
         model = self.emerge_combobox.get_model()
-        self.emerge_unmerge = model.get_value(iter, 0)
+        self.emerge_unmerge = model.get_value(_iter, 0)
         self.display_emerge_command()
 
     def set_all(self, widget, *args):
@@ -518,9 +518,9 @@ class AdvancedEmergeDialog:
 
     def get_command(self):
         # Get selected version from combo list
-        iter = self.combobox.get_active_iter()
+        _iter = self.combobox.get_active_iter()
         model = self.combobox.get_model()
-        sel_ver = model.get_value(iter, 0)
+        sel_ver = model.get_value(_iter, 0)
 
         # Get version info of selected version
         verInfo = self.get_verInfo(sel_ver)
