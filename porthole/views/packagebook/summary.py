@@ -62,8 +62,8 @@ class Summary(Gtk.TextView):
         margin = 10
         self.set_left_margin(margin)
         self.set_right_margin(margin)
-        tagtable = self.create_tag_table()
-        self.buffer = Gtk.TextBuffer.new(tagtable)
+        self.buffer = Gtk.TextBuffer()
+        self.create_tag_table()
         self.set_buffer(self.buffer)
         self.license_dir = "file://"+ backends.portage_lib.settings.portdir + "/licenses/"
         self.package = None
@@ -184,28 +184,18 @@ class Summary(Gtk.TextView):
 
     def create_tag_table(self):
         """ Define all markup tags """
-        def create(descs):
-            table = Gtk.TextTagTable()
-            for name, properties in descs.items():
-                tag = Gtk.TextTag.new(name)
-                table.add(tag)
-                for property, value in properties.items():
-                    tag.set_property(property, value)
-            return table
-
-        table = create(
-            {'name': ({'weight': Pango.Weight.BOLD,
-                       'scale': 1.44, # Pango.SCALE_X_LARGE,
-                       'pixels-above-lines': 5}),
-             'description': ({"style": Pango.Style.ITALIC}),
-             'url': ({'foreground': 'blue'}),
-             'property': ({'weight': Pango.Weight.BOLD}),
-             'value': ({}),
-             'useset': ({'foreground':'darkgreen'}),
-             'useunset':({'foreground':'red'}),
-             'masked': ({"style": Pango.Style.ITALIC}),
-             })
-        return table
+        self.buffer.create_tag('name', weight=Pango.Weight.BOLD,
+                                scale=1.44, #Pango.SCALE_X_LARGE,
+                                pixels_above_lines=5,
+                              )
+        self.buffer.create_tag('description', style=Pango.Style.ITALIC)
+        self.buffer.create_tag('url', foreground='blue')
+        self.buffer.create_tag('property', weight=Pango.Weight.BOLD)
+        self.buffer.create_tag('value',)
+        self.buffer.create_tag('atom', foreground='magenta')
+        self.buffer.create_tag('useset', foreground='darkgreen')
+        self.buffer.create_tag('useunset', foreground='red')
+        self.buffer.create_tag('masked', style=Pango.Style.ITALIC)
 
     def on_url_event(self, tag, widget, event, _iter):
         """ Catch when the user clicks the URL """
