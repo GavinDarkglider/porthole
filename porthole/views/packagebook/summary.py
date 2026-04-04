@@ -665,8 +665,6 @@ class Summary(Gtk.TextView):
         debug.dprint("IUSE_FLAGS: %s" % use_flags)
         keywords = props.get_keywords()
         licenses = props.license
-        # fixme unused slot
-        slot = str(props.get_slot())
 
         # Sort the versions in release order
         versions = ver_sort(versions)
@@ -942,15 +940,12 @@ class Summary(Gtk.TextView):
         db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, add="~"+arch, callback=self.update_callback)
 
     def add_keyword(self, widget, arch):
-        #arch = self.arch(True)
         name = self.package.full_name
         string = name + " " + arch + "\n"
         debug.dprint("Summary: Package view add_keyword(); %s" %string)
         db.userconfigs.set_user_config('KEYWORDS', name=name, add="~"+arch, callback=self.update_callback)
 
     def remove_keyword_ebuild(self, menuitem_widget):
-        # fixme unused arch
-        arch = self.arch(True)
         ebuild = "=" + self.selected_ebuild
         db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, remove=ebuild, callback=self.update_callback)
 
