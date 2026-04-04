@@ -41,7 +41,7 @@ from porthole import backends
 from porthole import db
 from porthole.backends.version_sort import ver_sort
 from porthole.backends.utilities import (
-    abs_list,
+    # abs_list,
     filter_flags
 )
 from porthole.loaders.loaders import load_web_page
@@ -106,7 +106,7 @@ class AdvancedEmergeDialog:
 
         self.command_textview = self.wtree.get_object("command_textview")
         self.command_buffer = self.command_textview.get_buffer()
-        style = self.keywords_frame.get_style().copy()
+        # style = self.keywords_frame.get_style().copy()
 # Fixme needs porting ???
 # <<<<<<< ours
         # #self.bgcolor = style.bg[Gtk.StateType.NORMAL]
@@ -284,9 +284,8 @@ class AdvancedEmergeDialog:
                 removelist.append('-' + item)
         addlist = [item[1:] if item.startswith('+') else item for item in addlist]
         #debug.dprint("ADVEMERGE: on_package_use_commit(); addlist:%s,\n removelist:%s" %(str(addlist), str(removelist)))
-        # fixme okay not used
-        okay = db.userconfigs.set_user_config('USE', name=self.package.full_name, add=addlist,
-                                                                remove=removelist, callback=self.reload, parent_window = self.window )
+        db.userconfigs.set_user_config('USE', name=self.package.full_name, add=addlist,
+                                       remove=removelist, callback=self.reload, parent_window = self.window )
         self.version_changed(button_widget)
 
     def on_make_conf_commit(self, button_widget):
@@ -318,8 +317,7 @@ class AdvancedEmergeDialog:
             removelist = ["-" + keyword]
         verInfo = self.current_verInfo
         ebuild = verInfo["name"]
-        # fixme okay not used
-        okay = db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, add=addlist, remove=removelist, callback=self.reload)
+        db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, add=addlist, remove=removelist, callback=self.reload)
 
     #------------------------------------------
     # Support function definitions start here
