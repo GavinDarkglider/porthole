@@ -625,24 +625,6 @@ def get_size(mycpv):
     return mysum[1]
 
 
-def get_digest(ebuild):  ## deprecated
-    """Returns digest of an ebuild"""
-    mydigest = settings.portdb.finddigest(ebuild)
-    digest_file = []
-    if mydigest != "":
-        try:
-            myfile = open(mydigest, "r")
-            for line in myfile.readlines():
-                digest_file.append(line.split(" "))
-            myfile.close()
-        # Fixme unused e
-        except SystemExit as e:
-            raise  # Needed else can't exit
-        except Exception as e:
-            debug.dprint("PORTAGELIB: get_digest(): Exception: %s" % e)
-    return digest_file
-
-
 def get_properties(ebuild):
     """Get all ebuild variables in one chunk."""
     ebuild = str(ebuild)  # just in case

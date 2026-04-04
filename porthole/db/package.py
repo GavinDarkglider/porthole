@@ -55,7 +55,6 @@ class Package:
 
         self.latest_installed = None
         self.size = None
-        self.digest_file = None
         self.in_world = full_name in backends.portage_lib.settings.get_world()
         self.is_checked = False
         self.deprecated = False
@@ -177,13 +176,6 @@ class Package:
                 #debug.dprint("PACKAGE: get_size(); returning backends.portage_lib.get_size(ebuild)")
                 self.size = backends.portage_lib.get_size(ebuild)
         return self.size
-
-    def get_digest(self):
-        if self.full_name == _("None"):
-            return ''
-        if self.digest_file == None:
-            self.digest_file = backends.portage_lib.get_digest( self.get_latest_ebuild() )
-        return self.digest_file
 
     def get_latest_installed(self, refresh = False):
         if self.full_name == _("None"):
