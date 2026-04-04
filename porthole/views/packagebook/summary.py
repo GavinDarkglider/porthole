@@ -207,7 +207,7 @@ class Summary(Gtk.TextView):
              })
         return table
 
-    def on_url_event(self, tag, widget, event, iter):
+    def on_url_event(self, tag, widget, event, _iter):
         """ Catch when the user clicks the URL """
         if event.type == Gdk.EventType.BUTTON_RELEASE:
             load_web_page(tag.get_property("name"))
@@ -242,10 +242,10 @@ class Summary(Gtk.TextView):
 
         def append(text, tag = None):
             """ Append (unicode) text to summary buffer """
-            iter = self.buffer.get_end_iter()
+            end_iter = self.buffer.get_end_iter()
             buffer = self.buffer
-            if tag: buffer.insert_with_tags_by_name(iter, str(text), tag)
-            else: buffer.insert(iter, str(text))
+            if tag: buffer.insert_with_tags_by_name(end_iter, str(text), tag)
+            else: buffer.insert(end_iter, str(text))
 
         def append_url(text, url, colour):
             """ Append URL to textbuffer and connect an event """
@@ -425,8 +425,8 @@ class Summary(Gtk.TextView):
             table.set_border_width(1)
             tablebox = boxify(table, "darkgrey")
             tablebox.show_all()
-            iter = self.buffer.get_end_iter()
-            anchor = self.buffer.create_child_anchor(iter)
+            end_iter = self.buffer.get_end_iter()
+            anchor = self.buffer.create_child_anchor(end_iter)
             self.add_child_at_anchor(tablebox, anchor)
             nl(2)
 
