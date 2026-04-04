@@ -20,7 +20,7 @@ from porthole.utils import debug
 from porthole.views.list import ListView
 from porthole.views.markup import MarkupView
 from porthole import backends
-from porthole.loaders.loaders import load_web_page
+#from porthole.loaders.loaders import load_web_page
 
 
 class ChangeLogView (ListView, MarkupView):
@@ -73,7 +73,9 @@ class ChangeLogView (ListView, MarkupView):
         if not text:
             return
         lines = text.split('\n')
+        debug.dprint("ChangeLogView: set_text(); len(lines) = %d" %len(lines))
         while lines[0].startswith('#'):
+            #debug.dprint("ChangeLogView: set_text(); appending line[0]: %d" %line[0]))
             self.append(lines[0], "header")
             self.nl()
             lines = lines[1:]
@@ -140,7 +142,7 @@ class ChangeLogView (ListView, MarkupView):
                 getattr(self, 'append_%s' %self.word_fn[x])(word)
             else:
                 #debug.dprint("ChangeLogView: _all_(), adding as text: " + word)
-                self.append(word, 'normal')
+                self.append(word)
         self.nl()
         return
 

@@ -15,6 +15,8 @@ based on accumulated code fron the original summary.py module
 """
 
 
+import gi
+gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk
 from gi.repository import Gtk
 from gi.repository import Pango
@@ -49,24 +51,9 @@ class MarkupView (object):
         margin = 10
         self.set_left_margin(margin)
         self.set_right_margin(margin)
-        self.tags = {'new_ver': ({'weight': Pango.Weight.BOLD,
-                        'scale': 1.2, #Pango.SCALE_LARGE,
-                        'pixels-above-lines': 5}),
-                        'description': ({"style": Pango.Style.ITALIC}),
-                        'url': ({'foreground': 'blue'}),
-                        'update': ({'weight': Pango.Weight.BOLD}),
-                        'developer':({'foreground': 'darkblue'}),
-                        'normal': ({}),
-                        'atom':({'foreground': 'magenta'}),
-                        'added': ({'foreground':'darkgreen'}),
-                        'removed':({'foreground':'red'}),
-                        'masked': ({"style": Pango.Style.ITALIC}),
-                        'date':({'foreground': 'darkorange'}),
-                        'header':({'foreground': 'green'}),
-        }
 
-        tagtable = self._create_tag_table()
         self.buffer = Gtk.TextBuffer()
+        self._create_tag_table()
         self.set_buffer(self.buffer)
 
         # Capture any mouse motion in this tab so we
@@ -99,22 +86,22 @@ class MarkupView (object):
         num = self.bug_re.search(bug).group()
         text = self.bug_re.split(bug)
         if text[0]:
-            self.append(text[0],'normal')
+            self.append(text[0])
         # need to track tag-id's due to multiple occurances of bug #
         _id = 'tag_id-%d' %self.bug_id
         self.bug_id += 1
         self.bugs[_id] = num
         self.append_url(num, _id, self.url_color)
         if text[1]:
-            self.append(text[1],'normal')
+            self.append(text[1])
         return
 
     def append(self, text, tag = None):
         """ Append (unicode) text to summary buffer """
-        iter = self.buffer.get_end_iter()
+        end_iter = self.buffer.get_end_iter()
         buffer = self.buffer
-        if tag: buffer.insert_with_tags_by_name(iter, str(text), tag)
-        else: buffer.insert(iter, str(text))
+        if tag: buffer.insert_with_tags_by_name(end_iter, str(text), tag, -1)
+        else: buffer.insert(end_iter, str(text), -1)
 
     def append_url(self, text, url, colour):
         """ Append URL to textbuffer and connect an event """
@@ -130,19 +117,20 @@ class MarkupView (object):
 
     def _create_tag_table(self):
         """ Define all markup tags """
-        def create(descs):
-            table = Gtk.TextTagTable()
-            for name, properties in list(descs.items()):
-                tag = Gtk.TextTag()
-                tag.name = name
-                table.add(tag)
-                for property, value in list(properties.items()):
-                    tag.set_property(property, value)
-            return table
-
-        table = create(self.tags)
-        self.url_color = self.tags["url"]['foreground']
-        return table
+        self.buffer.create_tag('new_ver', weight=Pango.Weight.BOLD,
+                                scale=1.2, #Pango.SCALE_LARGE,
+                                pixels_above_lines=5,
+                              )
+        self.buffer.create_tag('description', style=Pango.Style.ITALIC)
+        self.buffer.create_tag('url', foreground='blue')
+        self.buffer.create_tag('update', weight=Pango.Weight.BOLD)
+        self.buffer.create_tag('developer', foreground='darkblue')
+        self.buffer.create_tag('atom', foreground='magenta')
+        self.buffer.create_tag('added', foreground='darkgreen')
+        self.buffer.create_tag('removed', foreground='red')
+        self.buffer.create_tag('masked', style=Pango.Style.ITALIC)
+        self.buffer.create_tag('date', foreground='darkorange')
+        self.buffer.create_tag('header', foreground='green')
 
     def on_url_event(self, tag, widget, event, iter):
         """ Catch when the user clicks the URL """
