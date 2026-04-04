@@ -123,11 +123,11 @@ def can_gksu(specific=None):
 def get_treeview_selection( treeview, num = None):
         """Get the value of whatever is selected in a treeview,
         num is the column, if num is nothing, the iter is returned"""
-        model, iter = treeview.get_selection().get_selected()
-        selection = iter
-        if iter:
+        model, _iter = treeview.get_selection().get_selected()
+        selection = _iter
+        if _iter:
             if num:
-                selection = model.get_value(iter, num)
+                selection = model.get_value(_iter, num)
         return selection
 
 def get_user_home_dir():

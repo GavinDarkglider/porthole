@@ -105,16 +105,16 @@ class QueueModel(Gtk.ListStore):
             return a tuple of the data in the correct order
         """
         #debug.dprint("QueueModel: copy(); mytype = " + mytype)
-        iter = self.get_iter(path)
+        _iter = self.get_iter(path)
         if mytype == 'tuple':
             myval = []
             for i in self.column:
-                myval.append(self.get_value(iter, self.column[i]))
+                myval.append(self.get_value(_iter, self.column[i]))
             return tuple(myval)
         elif mytype == 'dict':
             myval = {}
             for i in self.column:
-                myval[i] = self.get_value(iter, self.column[i])
+                myval[i] = self.get_value(_iter, self.column[i])
             return myval
 
     def get_column_list(self):
@@ -122,16 +122,16 @@ class QueueModel(Gtk.ListStore):
         """
         return self.column.copy()
 
-    def set_data(self, iter, data):
-        if iter:
+    def set_data(self, _iter, data):
+        if _iter:
             if isinstance(data, dict):
                 debug.dprint("QueueModel: set_data(); DictType data['icon'] type = " + str(type(data['icon'])))
                 for i in data:
-                    self.set_value(iter,self.column[i], data[i])
+                    self.set_value(_iter,self.column[i], data[i])
             elif isinstance(data, list):
                 debug.dprint("QueueModel: set_data(); ListType data = " + str(data))
                 #if type(data[self.column['icon']]) is NoneType:
-                self.set(iter, self.column['icon'], data[self.column['icon']],
+                self.set(_iter, self.column['icon'], data[self.column['icon']],
                                     self.column['name'], data[self.column['name']],
                                     self.column['command'], data[self.column['command']],
                                     self.column['id'], data[self.column['id']],
@@ -537,14 +537,14 @@ class TerminalQueue:
         if not _id or  path == None:
             return
         try:
-            iter = self.queue_model.get_iter(path)
-            while iter:
-                self.queue_model.set_value(iter, self.queue_model.column['id'], _id)
-                iter = self.queue_model.iter_next(iter)
+            _iter = self.queue_model.get_iter(path)
+            while _iter:
+                self.queue_model.set_value(_iter, self.queue_model.column['id'], _id)
+                _iter = self.queue_model.iter_next(_iter)
                 _id += 1
         except:
             debug.dprint("TERM_QUEUE: renum_ids; exception raised during renumber, path, id = " +str(path) + ", " + str(id))
-        del iter
+        del _iter
 
     def clicked(self, *widget):
         """Handle clicks to the queue treeview"""
@@ -680,9 +680,9 @@ class TerminalQueue:
         if icon:
             if path:
                 debug.dprint("TERM_QUEUE: set_icon(): have valid icon and path")
-                iter = self.queue_model.get_iter(path)
+                _iter = self.queue_model.get_iter(path)
                 #if not self.get_completed():
-                self.queue_model.set_value(iter, self.queue_model.column['icon'], self.render_icon(icon))
+                self.queue_model.set_value(_iter, self.queue_model.column['icon'], self.render_icon(icon))
             else:
                 try:
                     current_id = self.get_id()

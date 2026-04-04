@@ -132,20 +132,20 @@ class DependsTree(Gtk.TreeStore):
                 #        % (atom.get_depname(), atom.mytype, satisfied))
                 if satisfied == []:
                     satisfied = False
-                iter = self.insert_before(parent_iter, None)
-                add_kids, add_satisfied = self.update_row(iter, atom, satisfied,
+                _iter = self.insert_before(parent_iter, None)
+                add_kids, add_satisfied = self.update_row(_iter, atom, satisfied,
                     add_satisfied, depends_view)
                 #debug.dprint(
                 #    "DependsTree:_add_list(); 136 atom '%s', mytype '%s', add_kids=%s satisfied '%s'"
                 #    % (atom.get_depname(), atom.mytype, add_kids, satisfied))
                 self.update_kids(atom, add_kids, add_satisfied, satisfied, depth,
-                    dep_depth, depends_view, iter)
+                    dep_depth, depends_view, _iter)
         return
 
-    def update_row(self, iter, atom, satisfied, add_satisfied, depends_view):
+    def update_row(self, _iter, atom, satisfied, add_satisfied, depends_view):
         """Update the treeview row @ iter with info for atom
 
-        @param iter: a treeview iter set to the row to update
+        @param _iter: a treeview iter set to the row to update
         @param atom: a DependAtom instance to display info for
         """
         # establish some defaults
@@ -160,21 +160,21 @@ class DependsTree(Gtk.TreeStore):
             getattr(self, "_%s_" %atom.mytype)(satisfied, add_satisfied, icon)
 
         if icon:
-            self.set_value(iter, self.column["icon"], depends_view.render_icon(icon,
+            self.set_value(_iter, self.column["icon"], depends_view.render_icon(icon,
                               size = Gtk.IconSize.MENU, detail = None))
-        self.set_value(iter, self.column["depend"], text)
-        self.set_value(iter, self.column["satisfied"], bool(satisfied))
-        self.set_value(iter, self.column["required_use"], atom.get_required_use())
-        self.set_value(iter, self.column["atom_key"], atom.key)
+        self.set_value(_iter, self.column["depend"], text)
+        self.set_value(_iter, self.column["satisfied"], bool(satisfied))
+        self.set_value(_iter, self.column["required_use"], atom.get_required_use())
+        self.set_value(_iter, self.column["atom_key"], atom.key)
         if atom.mytype in ['DEP', 'BLOCKER', 'REVISIONABLE']:
             pack = self._get_package(atom)
-            self.set_value(iter, self.column["package"], pack)
+            self.set_value(_iter, self.column["package"], pack)
             # treeview's populate_info() callback
-            GObject.idle_add(self.populate_info,self, self.get_path(iter), iter)
+            GObject.idle_add(self.populate_info,self, self.get_path(_iter), _iter)
         return add_kids, add_satisfied
 
     def update_kids(self, atom, add_kids, add_satisfied, satisfied,
-                    depth, dep_depth, depends_view, iter):
+                    depth, dep_depth, depends_view, _iter):
         #debug.dprint("DependsTree: update_kids() 176: add_kids = "  + str(add_kids) +
         #    " add_satisfied = " + str(add_satisfied) + " depth=%d, dep-depth=%d"
         #    %(depth, dep_depth))
@@ -182,24 +182,24 @@ class DependsTree(Gtk.TreeStore):
         if add_kids < 0 and add_satisfied != -1:
             if depth <= self.max_depth:
                 #debug.dprint(" * DependsTree: update_kids():182 adding kids")
-                self._add_list(atom.children, depends_view, iter,
+                self._add_list(atom.children, depends_view, _iter,
                     add_kids, is_new_child = True, depth=depth+1, )
                 #
             else:
                 #debug.dprint(" * DependsTree: update_row():187 adding lazy kids, parent=%s"
                 #    %(atom.mytype+atom.useflag+atom.atom+atom.parent))
-                self._add_lazy(atom, depends_view, iter, add_kids=0, depth=depth)
+                self._add_lazy(atom, depends_view, _iter, add_kids=0, depth=depth)
         elif add_kids  > 0 and not satisfied and depth <= self.max_depth:
             #debug.dprint(" * DependsTree: update_kids():195 adding kids")
-            self._add_kids(atom, depends_view, iter, add_kids, depth,
-                self.get_value(iter, self.column["package"]), dep_depth)
+            self._add_kids(atom, depends_view, _iter, add_kids, depth,
+                self.get_value(_iter, self.column["package"]), dep_depth)
         elif add_kids > 0 and not satisfied:
             #debug.dprint(" * DependsTree: update_kids(): 195 adding lazy kids")
-            self._add_lazy(atom, depends_view, iter, add_kids, depth)
+            self._add_lazy(atom, depends_view, _iter, add_kids, depth)
         return
 
 
-    def _add_kids(self, atom, depends_view, iter, add_kids,
+    def _add_kids(self, atom, depends_view, _iter, add_kids,
             depth, pack, dep_depth):
         """Adds a dependencies children to the tree model
         """
@@ -211,7 +211,7 @@ class DependsTree(Gtk.TreeStore):
             if dep_atomized_list == None: dep_atomized_list = []
             #debug.dprint("DependsTree: _add_kids(): new atomized_list for: "
             #    +atom.get_depname()+' = '+str(dep_atomized_list)+' '+str(dep_ebuild))
-            self._add_list(dep_atomized_list, depends_view, iter,
+            self._add_list(dep_atomized_list, depends_view, _iter,
                 add_kids, ebuild = dep_ebuild, is_new_child = True, depth=depth+1,
                 dep_depth=dep_depth)
         else:
@@ -220,7 +220,7 @@ class DependsTree(Gtk.TreeStore):
         return
 
 
-    def _add_lazy(self, atom, depends_view, iter, add_kids, depth):
+    def _add_lazy(self, atom, depends_view, _iter, add_kids, depth):
         """Add a lazy dependency placeholder to be filled in when it's parent
         tree node is expanded
         """
@@ -234,10 +234,10 @@ class DependsTree(Gtk.TreeStore):
             lazy_atom = self.dep_parser.cache.get(key)
             #debug.dprint("DependsTree: _add_lazy():key=%s, lazy_atom=%s"
                 #%(key,str(lazy_atom)))
-            kid_iter = self.insert_before(iter, None)
+            kid_iter = self.insert_before(_iter, None)
             add_kids, add_satisfied = self.update_row(kid_iter, lazy_atom, satisfied=0,
                 add_satisfied=1, depends_view= depends_view)
-            #self._add_list(mylist, depends_view, iter,
+            #self._add_list(mylist, depends_view, _iter,
             #    add_kids, ebuild=dep_ebuild, is_new_child=True, depth=depth+1)
         else:
             debug.dprint("DependsTree: _add_lazy(): Failed to get dep_ebuild for " +
@@ -266,10 +266,10 @@ class DependsTree(Gtk.TreeStore):
         return dep_ebuild
 
 
-    def expand_lazy(self, treeview, iter, path):
+    def expand_lazy(self, treeview, _iter, path):
         #debug.dprint("DependsTree:  expand_lazy(): activated by  'test-expand-row'")
         # first find out if there are already kids to expand
-        kid_iter = self.iter_children(iter)
+        kid_iter = self.iter_children(_iter)
         if kid_iter:
             # determine if it a lazy atom
             if self.get_value(kid_iter, self.column["depend"]) != LAZYNAME:
@@ -283,15 +283,15 @@ class DependsTree(Gtk.TreeStore):
                         " valid after lazy_atom removed")
                 self.dep_parser.cache.remove(lazy_key)
         # get the atom to expand
-        key = self.get_value(iter, self.column["atom_key"])
+        key = self.get_value(_iter, self.column["atom_key"])
         atom = self.dep_parser.cache.get(key)
         # check if there are kids already populated
         if atom.children:
-            self._add_list(atom.children, treeview, parent_iter=iter,
+            self._add_list(atom.children, treeview, parent_iter=_iter,
                 is_new_child = True)
         else:
             pack = self._get_package(atom)
-            self._add_kids(atom=atom, depends_view=treeview, iter=iter,
+            self._add_kids(atom=atom, depends_view=treeview, _iter=_iter,
                 add_kids=True, depth=0, pack=pack, dep_depth=0)
         return True
 

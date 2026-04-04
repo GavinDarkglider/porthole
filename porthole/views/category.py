@@ -80,8 +80,8 @@ class CategoryView(CommonTreeView):
 
     def _clicked(self, treeview, *args):
         """ Handle treeview clicks """
-        model, iter = treeview.get_selection().get_selected()
-        if iter: category = model.get_value(iter, C_ITEM["full_name"])
+        model, _iter = treeview.get_selection().get_selected()
+        if _iter: category = model.get_value(_iter, C_ITEM["full_name"])
         else: category = self.last_category
         # has the selection really changed?
         if category != self.last_category:
@@ -164,19 +164,19 @@ class CategoryView(CommonTreeView):
                             while p > 0:
                                 path = path[:p]
                                 #debug.dprint(" VIEWS: CategoryView.populate(): 178 update parent counts path = "+str(path))
-                                iter = self.model.get_iter( path)
-                                prev_count = self.model.get_value( iter, C_ITEM["count"] )
+                                _iter = self.model.get_iter( path)
+                                prev_count = self.model.get_value( _iter, C_ITEM["count"] )
                                 #debug.dprint(" VIEWS: CategoryView.populate(): 181 p = "+str(p)+" prev_count = "+str(prev_count)+" new count = " + str(counts[cat]) +" new parent total = " +str(counts[cat]+int(prev_count)))
-                                self.model.set_value( iter, C_ITEM["count"], str(counts[cat]+ int(prev_count)) )
+                                self.model.set_value( _iter, C_ITEM["count"], str(counts[cat]+ int(prev_count)) )
                                 p -= 1
 
 
     def populate_search( self, categories, counts ):
         debug.dprint("VIEWS: populating category view with search history")
         for string in categories:
-            iter = self.model.insert_before(None, None)
-            self.model.set_value( iter, C_ITEM["short_name"], string )
-            self.model.set_value( iter, C_ITEM["full_name"], string )
+            _iter = self.model.insert_before(None, None)
+            self.model.set_value( _iter, C_ITEM["short_name"], string )
+            self.model.set_value( _iter, C_ITEM["full_name"], string )
             if counts != None: # and counts[string] != 0:
                 #debug.dprint("VIEWS: Counts: %s = %s" %(cat, str(counts[string])))
-                self.model.set_value( iter, C_ITEM["count"], str(counts[string]) )
+                self.model.set_value( _iter, C_ITEM["count"], str(counts[string]) )

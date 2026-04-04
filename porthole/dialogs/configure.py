@@ -303,13 +303,13 @@ class ConfigDialog:
                 if not command.startswith('#'):
                     tempiter = store.append([command])
                     if command == config.Prefs.globals.Sync:
-                        iter = tempiter
+                        _iter = tempiter
             widget.set_model(store)
             cell = Gtk.CellRendererText()
             widget.pack_start(cell, True)
             widget.add_attribute(cell, 'text', 0)
             if tempiter:
-                widget.set_active_iter(iter)
+                widget.set_active_iter(_iter)
 
         # Custom Command History
         for x in [1, 2, 3, 4, 5]:
@@ -421,8 +421,8 @@ class ConfigDialog:
         widget = self.builder.get_object('sync_combobox')
         if widget:
             model = widget.get_model()
-            iter = widget.get_active_iter()
-            sync_command = model.get_value(iter, 0)
+            _iter = widget.get_active_iter()
+            sync_command = model.get_value(_iter, 0)
             for command, label in self.syncmethods:
                 if command == sync_command:
                     config.Prefs.globals.Sync = command

@@ -290,9 +290,9 @@ class TerminalNotebook:
                 # goes wrong!
                 line = int(iStart.get_text(iEnd)[0:6]) - 1
                 # Get the iter based on the line number index
-                iter = self.view_buffer[TAB_PROCESS].get_iter_at_line_index(line,0)
+                _iter = self.view_buffer[TAB_PROCESS].get_iter_at_line_index(line,0)
                 # Scroll to the line, try to position mid-screen
-                self.view[TAB_PROCESS].scroll_to_iter(iter, 0.0, True, 0, 0.5)
+                self.view[TAB_PROCESS].scroll_to_iter(_iter, 0.0, True, 0, 0.5)
                 # Turn off auto scroll
                 self.auto_scroll[TAB_PROCESS] = False
                 # Display the tab
@@ -387,19 +387,19 @@ class TerminalNotebook:
         #debug.dprint("Notebook: overwrite() -- num= " + str(num) + "..." + text)
         #debug.dprint(self.current_tab)
         line_number = self.view_buffer[TAB_PROCESS].get_line_count()
-        iter = self.view_buffer[num].get_iter_at_line(line_number)
-        if iter.get_chars_in_line() >= 7:
-            iter.set_line_offset(7)
+        _iter = self.view_buffer[num].get_iter_at_line(line_number)
+        if _iter.get_chars_in_line() >= 7:
+            _iter.set_line_offset(7)
         else:
             debug.dprint("*** Notebook: overwrite: less than 7 chars in line... no linenumber???")
-            iter.set_line_offset(0)
-        end = iter.copy()
+            _iter.set_line_offset(0)
+        end = _iter.copy()
         end.forward_line()
-        self.view_buffer[num].delete(iter, end)
+        self.view_buffer[num].delete(_iter, end)
         if tagname == None:
-           self.view_buffer[num].insert_with_tags_by_name(iter, text, *self.current_tagnames)
+           self.view_buffer[num].insert_with_tags_by_name(_iter, text, *self.current_tagnames)
         else:
-           self.view_buffer[num].insert_with_tags_by_name(iter, text, tagname)
+           self.view_buffer[num].insert_with_tags_by_name(_iter, text, tagname)
 
     def append(self, num, text, tagname = None):
         """ Append text to a text buffer.  Line numbering based on
@@ -412,16 +412,16 @@ class TerminalNotebook:
         #debug.dprint("Notebook: append() -- num= " + str(num) + "..." + text)
         #debug.dprint(self.current_tab)
         line_number = self.view_buffer[TAB_PROCESS].get_line_count()
-        iter = self.view_buffer[num].get_end_iter()
+        _iter = self.view_buffer[num].get_end_iter()
         lntext = str(line_number).zfill(6) + ' '
         if self.last_text[num].endswith('\n'):
-            self.view_buffer[num].insert_with_tags_by_name(iter, lntext, 'linenumber')
+            self.view_buffer[num].insert_with_tags_by_name(_iter, lntext, 'linenumber')
         if tagname == None:
             #self.view_buffer[num].insert(iter, text)
             #debug.dprint("Notebook: append(): attempting to set text with tagnames " + str(self.current_tagnames))
-            self.view_buffer[num].insert_with_tags_by_name(iter, text, *self.current_tagnames)
+            self.view_buffer[num].insert_with_tags_by_name(_iter, text, *self.current_tagnames)
         else:
-            self.view_buffer[num].insert_with_tags_by_name(iter, text, tagname)
+            self.view_buffer[num].insert_with_tags_by_name(_iter, text, tagname)
         if self.auto_scroll[num] and num == self.current_tab:
             self.scroll_current_view()
         self.last_text[num] = text

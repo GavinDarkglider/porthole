@@ -167,7 +167,7 @@ class RunDialog:
         debug.dprint("COMMAND: changing entry item")
         return # not needed at this time
         model = widget.get_model()
-        iter = widget.get_active_iter()
+        _iter = widget.get_active_iter()
         # fixme unused selection
-        selection = model.get_value(iter, 0)
+        selection = model.get_value(_iter, 0)
 

@@ -169,46 +169,46 @@ class DependsView(CommonTreeView):
         self.model.fill_depends_tree(treeview, package, ebuild)
         #self.model.foreach(self.populate_info)
 
-    def expand_row(self, treeview, iter, path):
-        self.model.expand_lazy(treeview, iter, path)
+    def expand_row(self, treeview, _iter, path):
+        self.model.expand_lazy(treeview, _iter, path)
 
 
-    def populate_info(self, model, path, iter):
+    def populate_info(self, model, path, _iter):
         """ Populate the current view with packages """
         debug.dprint("DependsView: DependsView.populate_info()")
-        if model.get_value(iter, model.column["depend"]): # == "None":
-                debug.dprint("DependsView: populate_info(); dependency name = " + model.get_value(iter, model.column["depend"]))
+        if model.get_value(_iter, model.column["depend"]): # == "None":
+                debug.dprint("DependsView: populate_info(); dependency name = " + model.get_value(_iter, model.column["depend"]))
                 try:
-                    package = model.get_value(iter, model.column["package"])
+                    package = model.get_value(_iter, model.column["package"])
                     name = package.full_name
                     debug.dprint("DependsView: populate_info(); found package: " + name)
                     latest_installed = package.get_latest_installed()
                     debug.dprint("DependsView: populate_info(); latest_installed: %s, getting best_ebuild" %str(latest_installed))
-                    best_ebuild, keyworded_ebuild, masked_ebuild = backends.portage_lib.get_dep_ebuild(model.get_value(iter,model.column["depend"]))
+                    best_ebuild, keyworded_ebuild, masked_ebuild = backends.portage_lib.get_dep_ebuild(model.get_value(_iter,model.column["depend"]))
                     debug.dprint("DependsView: populate_info(); best_ebuild: %s, getting latest_ebuild" %str(best_ebuild))
                     #latest_ebuild = package.get_latest_ebuild(False) # include_masked = False
                     #debug.dprint("DependsView: populate_info(); latest_ebuild: %s" %str(latest_ebuild))
-                    model.set_value(iter, model.column["installed"], backends.portage_lib.get_version(latest_installed)) # installed
-                    #debug.dprint("DependsView: populate_info(); model.latest_installed version = " + model.get_value(iter, model.column["installed"]))
+                    model.set_value(_iter, model.column["installed"], backends.portage_lib.get_version(latest_installed)) # installed
+                    #debug.dprint("DependsView: populate_info(); model.latest_installed version = " + model.get_value(_iter, model.column["installed"]))
                     keywords = ''
                     if best_ebuild != '':
-                        model.set_value(iter, model.column["latest"], backends.portage_lib.get_version(best_ebuild)) #  recommended by portage
+                        model.set_value(_iter, model.column["latest"], backends.portage_lib.get_version(best_ebuild)) #  recommended by portage
                         name = backends.portage_lib.get_full_name(best_ebuild)
                         keywords = self.get_relevant_keywords(package, best_ebuild)
                     elif keyworded_ebuild != '':
-                        model.set_value(iter, model.column["latest"], "(" + backends.portage_lib.get_version(keyworded_ebuild) + ")") # latest
+                        model.set_value(_iter, model.column["latest"], "(" + backends.portage_lib.get_version(keyworded_ebuild) + ")") # latest
                         name = backends.portage_lib.get_full_name(keyworded_ebuild)
                         keywords = self.get_relevant_keywords(package, keyworded_ebuild)
                     elif masked_ebuild != '':
-                        model.set_value(iter, model.column["latest"], "M(" + backends.portage_lib.get_version(masked_ebuild) + ")") # hard masked
+                        model.set_value(_iter, model.column["latest"], "M(" + backends.portage_lib.get_version(masked_ebuild) + ")") # hard masked
                         name = backends.portage_lib.get_full_name(masked_ebuild)
                         keywords = self.get_relevant_keywords(package, masked_ebuild)
                     if latest_installed:
                         name = backends.portage_lib.get_full_name(latest_installed)
                     if "virtual" in name:
                         name = backends.portage_lib.get_virtual_dep(name)
-                    model.set_value(iter, model.column["name"], name)
-                    model.set_value(iter, model.column["keyword"], keywords)
+                    model.set_value(_iter, model.column["name"], name)
+                    model.set_value(_iter, model.column["keyword"], keywords)
                 except Exception as e:
                     if "'NoneType' object has no attribute " not in str(e):
                         debug.dprint("DependsView: populate_info(): Stopping due to exception %s" % e)
@@ -242,10 +242,10 @@ class DependsView(CommonTreeView):
     def get_selected(self):
         """get the selected treeview package and name"""
         debug.dprint("DependsView: get_selected()")
-        model, iter = self.get_selection().get_selected()
-        if iter:
-            name = model.get_value(iter, model.column["name"])
-            package =  model.get_value(iter, model.column["package"])
+        model, _iter = self.get_selection().get_selected()
+        if _iter:
+            name = model.get_value(_iter, model.column["name"])
+            package =  model.get_value(_iter, model.column["package"])
             return name, package
         else:
             return self._last_selected, None
@@ -388,9 +388,9 @@ class DependsView(CommonTreeView):
         self.dep_window['label'].set_text(self.parent_name)
         self.set_tip_tree()
         # get the package for the popup
-        model, iter = treeview.get_selection().get_selected()
-        if iter:
-            package =  model.get_value(iter, model.column["package"])
+        model, _iter = treeview.get_selection().get_selected()
+        if _iter:
+            package =  model.get_value(_iter, model.column["package"])
         if package:
             #debug.dprint("DependsView: do_dep_window() valid package : " + package.full_name)
             self.dep_window["notebook"].set_package(package)
