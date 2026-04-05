@@ -113,7 +113,10 @@ class CategoryHandler(PackageHandler):
         self.package_view.populate(packages, category)
 
     def _mode_readers_(self, category, mode):
-        packages = self.pkg_list[INDEX_TYPES[mode]][category]
+        try:
+            packages = self.pkg_list[INDEX_TYPES[mode]][category]
+        except KeyError:
+            packages = {}
         self.package_view.populate(packages,
             self.current_pkg_name[INDEX_TYPES[mode]])
 
