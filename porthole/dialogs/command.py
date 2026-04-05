@@ -166,8 +166,8 @@ class RunDialog:
         """Updates the Gtk.Entry with the history item selected"""
         debug.dprint("COMMAND: changing entry item")
         return # not needed at this time
-        model = widget.get_model()
-        _iter = widget.get_active_iter()
-        # fixme unused selection
-        selection = model.get_value(_iter, 0)
+        # model = widget.get_model()
+        # _iter = widget.get_active_iter()
+        # # fixme unused selection
+        # selection = model.get_value(_iter, 0)
 

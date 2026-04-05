@@ -243,7 +243,7 @@ def set_package_mask(filename, name='', ebuild='', comment='', username='', add=
     #dprint(" * SET_CONFIG: set_package_mask(): filename = " + filename)
     configlines =  get_configlines(filename, username)
     # fixme unused groups
-    groups = group_by_blanklines(configlines)
+    # groups = group_by_blanklines(configlines)
 
     # do some more stuff
 
@@ -311,9 +311,9 @@ class MakeConf:
     And then modified and extended for porthole's use by Brian Dolbec
     """
     # define some re's
-    regex = {'USE': re.compile('USE\s*=\s*"([^"]*)"'),
+    regex = {'USE': re.compile('USE\\s*=\\s*"([^"]*)"'),
                     # 'PORTDIR_OVERLAY': re.compile('PORTDIR_OVERLAY\s*=\s*"([^"]*)"'),
-                    'PORTAGE_NICENESS': re.compile('PORTAGE_NICENESS\s*=\s*([0-9]*)\s*\n')
+                    'PORTAGE_NICENESS': re.compile('PORTAGE_NICENESS\\s*=\\s*([0-9]*)\\s*\n')
     }
 
     def __init__(self, path, config = None, overlays = None):
@@ -334,7 +334,7 @@ class MakeConf:
         """creates the property reg expression and saves it to
         the regex dictionary for use"""
         if not _property in self.regex:
-            self.regex[_property] = re.compile(('%s\s*=\s*"([^"]*)"') %_property)
+            self.regex[_property] = re.compile(('%s\\s*=\\s*"([^"]*)"') %_property)
 
     # def add_overlay(self, overlay):
         # '''Add an overlay to make.conf.'''

@@ -40,7 +40,7 @@ from porthole.views.changelog import ChangeLogView
 from porthole.views.useflags import UseFlagWidget
 from porthole.loaders.loaders import load_installed_files
 from porthole.backends.utilities import (
-    abs_list,
+    # abs_list,
     filter_flags
 )
 #from timeit import Timer

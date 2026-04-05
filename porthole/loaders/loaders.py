@@ -33,12 +33,6 @@ from porthole import config
 # if using gnome, see if we can import it
 try:
     import gnome
-    try:
-        # fixme unused import
-        import gnomevfs
-    except: # try the depricated module
-        #no it's too old now ##  import gnome.vfs
-        pass
 except ImportError:
     # no gnome module
     #print >>stderr, ('Module "gnome" not found. '
@@ -92,11 +86,11 @@ def load_textfile(view, package, mode, version = None):
             elif mode != "changelog":
                 installed = package.get_installed()
                 # fixme unused versions
-                versions = package.get_versions()
+                # versions = package.get_versions()
                 nonmasked = package.get_versions(include_masked = False)
-                if package.depricated or mode == "installed_ebuild":
+                # if package.depricated or mode == "installed_ebuild":
                     # fixme unused ebuild_path
-                    ebuild_path = backends.portage_lib.get_vdb
+                    # ebuild_path = backends.portage_lib.get_vdb
                 if mode == "best_ebuild":
                     best = backends.portage_lib.best(installed + nonmasked)
                     if best == "": # all versions are masked and the package is not installed

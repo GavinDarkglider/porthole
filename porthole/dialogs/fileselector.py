@@ -29,12 +29,9 @@
 
 import gi; gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
-from gi.repository import GObject
 
 import os
 import os.path
-
-from gettext import gettext as _
 
 from porthole.utils import debug
 

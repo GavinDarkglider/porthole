@@ -38,8 +38,7 @@ def get_git_info(prop):
         branch = ''
         try:
             from subprocess import Popen, PIPE
-            # fixme unused mp
-            mp= os.path.dirname(os.path.abspath(__file__))
+            # mp= os.path.dirname(os.path.abspath(__file__))
             data = Popen([b"git",b"log", b"HEAD^..HEAD"],stdout=PIPE).communicate()[0].split(b'\n')
             branches = Popen([b"git",b"branch"],stdout=PIPE).communicate()[0].split(b'\n')
         except:

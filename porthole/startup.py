@@ -167,7 +167,8 @@ def set_backend(arg):
         BACKEND = Choices[arg]
         print("***** BACKEND set to:", BACKEND)
     else:
-        usage()
+        pass
+        # usage()
 
 def insert_path():
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -195,13 +196,12 @@ def main():
         ["PORTAGE", BACKEND],
         ["EPREFIX", EPREFIX]
     ]
-    #print "STARTUP: main(); loading preferences"
+    # print "STARTUP: main(); loading preferences"
     config.Prefs = preferences.PortholePreferences(prefs_additions)
-    #print config.Prefs
-    #print "STARTUP: main(); importing version"
-    # fixme unused version
-    from porthole.version import version
-    #print "STARTUP: main(); importing utils"
+    # print config.Prefs
+    # print "STARTUP: main(); importing version"
+    # from porthole.version import version
+    # print "STARTUP: main(); importing utils"
     from porthole.utils import debug
     from porthole import backends
     from porthole.backends import load
@@ -237,9 +237,8 @@ def main():
     Gtk.main()
     # save the prefs to disk for next time
     config.Prefs.save()
-    # fixme unused hits, misses
-    hits = backends.portage_lib.get_metadata.hits
-    misses = backends.portage_lib.get_metadata.misses
+    # hits = backends.portage_lib.get_metadata.hits
+    # misses = backends.portage_lib.get_metadata.misses
     print("metadata", backends.portage_lib.get_metadata.cache_info())
     sys.exit(0)
 

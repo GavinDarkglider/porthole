@@ -82,7 +82,7 @@ class AboutDialog:
         self.window.connect("response", self.on_response)
 
     def run(self):
-        debug.dprint(f"ABOUT: showing window...")
+        debug.dprint("ABOUT: showing window...")
         self.window.show_all()
 
     def on_response(self, dialog, response_id):

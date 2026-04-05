@@ -329,8 +329,8 @@ class TerminalQueue:
             debug.dprint("TERM_QUEUE: start();         ==> skipping killed process")
             self.resume_available = False
             if self.term.tab_showing[TAB_QUEUE]:
-                # update the queue tree wait for it to return, it might prevent crashes
-                result = self.clicked(self.queue_tree)
+                # update the queue tree
+                self.clicked(self.queue_tree)
             # remove process from list
             next(self)
         # check for pending processes, and run them
@@ -438,7 +438,7 @@ class TerminalQueue:
             debug.dprint("TERM_QUEUE: cannot move first or last item")
 
         # We're done, reset queue moves
-        result = self.clicked(self.queue_tree)
+        self.clicked(self.queue_tree)
         del path, selected_iter, destination_iter, sel_id, sel_icon, destination_id, destination_icon
 
     def move_item_up(self, widget):
@@ -472,7 +472,7 @@ class TerminalQueue:
         self.renum_ids(self.paused_path, self.paused_id)
         self.set_icon(PAUSED,self.paused_id, self.paused_path)
         # We're done, reset queue moves
-        result = self.clicked(self.queue_tree)
+        self.clicked(self.queue_tree)
         del paused, selected_iter
 
     def move_item_bottom(self, widget):
@@ -503,7 +503,7 @@ class TerminalQueue:
                 debug.dprint("TERM_QUEUE: move_item_bottom(); exception resetting paused_iter, exception :" + str(e))
         self.renum_ids(path, _id)
         # We're done, reset queue moves
-        result = self.clicked(self.queue_tree)
+        self.clicked(self.queue_tree)
         del end_iter, selected_iter, _id, path, paused
 
     def remove_item(self, widget):
@@ -558,7 +558,7 @@ class TerminalQueue:
             debug.dprint("TERM_QUEUE: Couldn't get queue view treeiter path, " \
                     "there is probably nothing selected.")
             del selected_iter
-            return False
+            return
         # if the item is already run
         # don't make the controls sensitive and return
         name = get_treeview_selection(self.queue_tree, self.queue_model.column['name'])
@@ -574,7 +574,7 @@ class TerminalQueue:
             self.set_queue_moves(state)
             debug.dprint("TERM_QUEUE: clicked(); finished... returning")
             del selected_iter, _id, name, killed, state
-            return True
+            return
         # if we reach here it's still needs to be processed
         # set the correct directions sensitive
         # shouldn't be able to move the top item up, etc...
@@ -602,7 +602,7 @@ class TerminalQueue:
         self.set_queue_moves(state)
         #debug.dprint("TERM_QUEUE: clicked(); finished... returning")
         del _id, name, killed, state
-        return True
+        return
 
     def clear( self, *widget ):
         debug.dprint("TERM_QUEUE: clear();")
@@ -734,7 +734,7 @@ class TerminalQueue:
             self.start(False)
         if self.term.tab_showing[TAB_QUEUE]:
             # update the queue tree
-            wait_for = self.clicked()
+            self.clicked()
             del wait_for
 
     def get_callback( self ):
