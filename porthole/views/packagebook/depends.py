@@ -29,6 +29,9 @@ from porthole import backends
 from porthole.backends.utilities import dep_split
 import datetime
 
+from portage.dep import Atom
+from portage.exception import InvalidAtom
+
 #from exceptions import Exception
 
 
@@ -163,6 +166,26 @@ class DependAtom(DependKey):
         @param use_flags: string of space separated use flags
         @rtype: non-empty if satisfied'"""
         return backends.portage_lib.get_installed(self.get_depname() + self.get_required_use())
+
+    def unsatisfied_reason(self):
+        """Why a package dependency isn't satisfied, for a tooltip (bug #150)"""
+        if self.mytype not in ('DEP', 'REVISIONABLE'):
+            return None
+        installed = backends.portage_lib.get_installed(self.get_depname())
+        if not installed:
+            try:
+                others = backends.portage_lib.get_installed(Atom(self.get_depname()).cp)
+            except InvalidAtom:
+                others = []
+            if others:
+                return (_("%(installed)s is installed, but this needs %(atom)s")
+                        % {"installed": ", ".join(others), "atom": self.get_depname()})
+            return _("Not installed")
+        if self.required_use:
+            return (_("%(installed)s is installed, but not with the USE flags "
+                      "this needs: %(use)s")
+                    % {"installed": ", ".join(installed), "use": self.required_use})
+        return _("No installed version matches %s") % self.get_depname()
 
     def _BLOCKER_is_satisfied(self, use_flags):
         """ self.mytype == 'BLOCKER

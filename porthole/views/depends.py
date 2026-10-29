@@ -54,6 +54,7 @@ class DependsView(CommonTreeView):
         self.dispatch = dispatcher
         # setup the model
         self.model = DependsTree(self.populate_info)
+        self.set_tooltip_column(self.model.column["reason"])
         # setup the column
         column = Gtk.TreeViewColumn(_("Dependencies"))
         pixbuf = Gtk.CellRendererPixbuf()

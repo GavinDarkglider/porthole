@@ -56,7 +56,8 @@ class DependsTree(Gtk.TreeStore):
                 GObject.TYPE_STRING,       # latest recommended version
                 GObject.TYPE_STRING,       # keyword
                 GObject.TYPE_STRING,       # use flags required to be enabled
-                GObject.TYPE_PYOBJECT      # atom key
+                GObject.TYPE_PYOBJECT,     # atom key
+                GObject.TYPE_STRING        # why it isn't satisfied (tooltip)
         )
 
         self.column = {
@@ -69,7 +70,8 @@ class DependsTree(Gtk.TreeStore):
             "latest" : 6,
             "keyword":7,
             "required_use":8,
-            "atom_key":9
+            "atom_key":9,
+            "reason":10
         }
         self.populate_info = populate_info
         self.dep_depth = 0
@@ -165,6 +167,11 @@ class DependsTree(Gtk.TreeStore):
         self.set_value(_iter, self.column["satisfied"], bool(satisfied))
         self.set_value(_iter, self.column["required_use"], atom.get_required_use())
         self.set_value(_iter, self.column["atom_key"], atom.key)
+        if not satisfied:
+            reason = atom.unsatisfied_reason()
+            if reason:
+                # the tooltip column is read as markup
+                self.set_value(_iter, self.column["reason"], GLib.markup_escape_text(reason))
         if atom.mytype in ['DEP', 'BLOCKER', 'REVISIONABLE']:
             pack = self._get_package(atom)
             self.set_value(_iter, self.column["package"], pack)
