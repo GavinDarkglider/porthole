@@ -113,7 +113,8 @@ class Database(DBBase):
             _db = {'sync_date': sync_time, 'descriptions': self.descriptions}
             debug.dprint("DATABASE: save(); Pickling 'db' to file: " + self._DBFile)
             # pickle it baby, yeah!
-            pickle.dump(_db, open(self._DBFile, "w"))
+            with open(self._DBFile, "wb") as f:
+                pickle.dump(_db, f)
             del _db
 
     def load(self, filename = None):
@@ -122,7 +123,12 @@ class Database(DBBase):
         _db = None
         current, self.valid_sync = get_sync_info()
         if self.valid_sync and os.access(self._DBFile, os.F_OK):
-            _db = pickle.load(open(self._DBFile))
+            try:
+                with open(self._DBFile, "rb") as f:
+                    _db = pickle.load(f)
+            except (OSError, EOFError, pickle.UnpicklingError) as e:
+                debug.dprint("DATABASE: load(); unreadable cache %s: %s" % (self._DBFile, e))
+                return -1
         elif not self.valid_sync:
             debug.dprint("DATABASE: load(); Current portage tree did Not return a valid sync timestamp, not loading descriptions from the saved file" )
             return -1

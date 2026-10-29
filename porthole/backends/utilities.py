@@ -83,7 +83,8 @@ def get_sync_info():
     try:
         #debug.dprint("BACKENDS Utilities: get_sync_info(); timestamp path = " \
         #    + backends.portage_lib.settings.portdir + "/metadata/timestamp")
-        f = open(backends.portage_lib.settings.portdir + "/metadata/timestamp")
+        f = open(backends.portage_lib.settings.portdir + "/metadata/timestamp",
+                 encoding="utf_8", errors="replace")
         #debug.dprint("BACKENDS Utilities: get_sync_info(); file open")
         data = f.read()
         #debug.dprint("BACKENDS Utilities: get_sync_info(); file read")
@@ -91,17 +92,8 @@ def get_sync_info():
         #debug.dprint("BACKENDS Utilities: get_sync_info(); file closed")
         #debug.dprint("BACKENDS Utilities: get_sync_info(); data = " + data)
         if data:
-            try:
-                #debug.dprint("BACKENDS Utilities: get_sync_info(); trying utf_8 encoding")
-                last_sync = (str(data).decode('utf_8').encode("utf_8",'replace'))
-                valid_sync = True
-            except:
-                try:
-                    #debug.dprint("BACKENDS Utilities: get_sync_info(); trying iso-8859-1 encoding")
-                    last_sync = (str(data).decode('iso-8859-1').encode('utf_8', 'replace'))
-                    valid_sync = True
-                except:
-                    debug.dprint("BACKENDS Utilities: get_sync_info(); Failure = unknown encoding")
+            last_sync = data
+            valid_sync = True
         else:
             debug.dprint("BACKENDS Utilities: get_sync_info(); No data read")
     #except os.error:

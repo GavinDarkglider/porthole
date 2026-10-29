@@ -33,16 +33,22 @@ ver_info = {}
 def get_git_info(prop):
     global ver_info
     if ver_info == {}:
-        commit = ''
-        date = ''
-        branch = ''
+        commit = b''
+        date = b''
+        branch = b'unknown'
+        # ask the checkout this file lives in, not the current directory;
+        # safe.directory lets root (pkexec) read a user's checkout
+        src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        git = ["git", "-C", src, "-c", "safe.directory=" + src]
         try:
-            from subprocess import Popen, PIPE
-            # mp= os.path.dirname(os.path.abspath(__file__))
-            data = Popen([b"git",b"log", b"HEAD^..HEAD"],stdout=PIPE).communicate()[0].split(b'\n')
-            branches = Popen([b"git",b"branch"],stdout=PIPE).communicate()[0].split(b'\n')
-        except:
+            from subprocess import DEVNULL, PIPE, run
+            data = run(git + ["log", "-1"], stdout=PIPE,
+                       stderr=DEVNULL).stdout.split(b'\n')
+            branches = run(git + ["branch"], stdout=PIPE,
+                           stderr=DEVNULL).stdout.split(b'\n')
+        except OSError:
             print("Error obtaining git log and branch info")
+            data = branches = []
 
         for item in data:
             if item.startswith(b'commit'):
@@ -50,7 +56,9 @@ def get_git_info(prop):
             elif item.startswith(b'Date'):
                 date = item.split(b":", 1)[-1].lstrip()
 
-        branch = [x.split()[-1].strip() for x in branches if x.startswith(b'*')][0]
+        current = [x.split()[-1].strip() for x in branches if x.startswith(b'*')]
+        if current:
+            branch = current[0]
 
         ver_info['commit'] = commit[:10].decode()
         ver_info['date'] = date.decode()
@@ -62,7 +70,8 @@ def get_version():
     global version
     if 'git' in version:
         rev = get_git_info('commit')
-        login = os.getenv("LOGNAME")
+        # pkexec doesn't set LOGNAME
+        login = os.getenv("LOGNAME") or os.getenv("USER") or ""
         version = version + get_git_info('branch') + "-rev:" + rev + "--"+login
     return version
 
