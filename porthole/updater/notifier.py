@@ -33,7 +33,7 @@ from porthole.updater.commands import icon_path, script_command
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE
 from porthole.updater.service import PLAN_FILE, STATE_DIR, STATE_FILE, read_json
-from porthole.updater.viewer import JobWindow, current_job, describe, read_jobs
+from porthole.updater.viewer import current_job, describe, read_jobs
 
 APP_ID = "org.porthole.UpdateNotifier"
 NOTIFIER_STATE = os.path.join(
@@ -157,7 +157,7 @@ class Notifier(Gtk.Application):
         self.reload_pending = False
         self.activated = False
         self.seen = read_json(NOTIFIER_STATE, {}) or {}
-        self.job_window = None
+        self.job_timer = None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -171,6 +171,7 @@ class Notifier(Gtk.Application):
             ("Show progress", self.show_progress),
             ("Show report", self.show_report),
             ("Check now", self.check_now),
+            ("Cancel update", self.cancel_update),
         ):
             item = Gtk.MenuItem(label=label)
             item.connect("activate", lambda w, cb=callback: cb())
@@ -224,6 +225,11 @@ class Notifier(Gtk.Application):
                   and self.seen.get("failed_seen") != job["id"])
         self.check_item.set_sensitive(not running and not active)
         self.items["Show progress"].set_visible(bool(jobs))
+        self.items["Cancel update"].set_visible(active and job["kind"] == "update")
+        # while a job runs, refresh often: the tooltip shows its progress
+        # (and setting it again revives a tray tooltip that stopped showing)
+        if active and self.job_timer is None:
+            self.job_timer = GLib.timeout_add_seconds(15, self.job_tick)
 
         pending = bool(self.plan) and self.plan.get("status") in PENDING
         title, body = summarize(self.plan) if self.plan else ("No update check yet", "")
@@ -307,10 +313,31 @@ class Notifier(Gtk.Application):
         else:
             self.show_report()
 
+    def job_tick(self):
+        job = current_job()
+        if not job or job["status"] not in ACTIVE:
+            self.job_timer = None
+            self.reload()
+            return False
+        self.reload()
+        return True
+
+    def cancel_update(self):
+        dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.YES_NO, text="Stop the update?")
+        dialog.set_title("Porthole")
+        dialog.format_secondary_text(
+            "The package being built is stopped; packages already installed stay "
+            "installed. Porthole then checks what is left, so you can start the rest "
+            "later.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            run_as_root(service("cancel"), lambda ok, out: self.reload())
+
     def show_progress(self):
-        if self.job_window is None:
-            self.job_window = JobWindow(application=self)
-        self.job_window.present_job()
+        # Porthole's terminal: colours, warnings and cautions tabs, summary
+        self.spawn(script_command("porthole") + ["--follow-job"])
         job = current_job()
         if job and job["status"] == "failed":
             self.seen["failed_seen"] = job["id"]

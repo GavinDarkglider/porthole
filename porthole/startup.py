@@ -63,6 +63,7 @@ BACKEND = Choices["portage"]
 DATA_PATH = EPREFIX + "/usr/share/porthole/"
 i18n_DIR = DATA_PATH + 'i18n'
 REVIEW = False
+FOLLOW_JOB = False
 RUN_LOCAL = False
 DIR_LIST = [LOG_FILE_DIR, DB_FILE_DIR]
 
@@ -153,6 +154,12 @@ def set_review():
     REVIEW = True
 
 
+def set_follow_job():
+    """Only open a terminal window following the current update job"""
+    global FOLLOW_JOB
+    FOLLOW_JOB = True
+
+
 def set_debug(arg):
     from porthole.utils import debug
     debug.set_debug(True)
@@ -236,6 +243,12 @@ def main():
     config.Config.set_path(DATA_PATH)
     config.Config.load()
     config.Prefs.use_gladefile = "not assigned"
+    if FOLLOW_JOB:
+        from porthole.updater.follow import show_in_terminal
+        show_in_terminal(on_close=Gtk.main_quit)
+        Gtk.main()
+        config.Prefs.save()
+        sys.exit(0)
     # create the main window
     window = MainWindow() #config.Prefs, config.Config)
     if REVIEW:

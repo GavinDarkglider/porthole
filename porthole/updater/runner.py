@@ -53,6 +53,8 @@ PROGRESS_EVERY = 2.0
 
 ACTIVE = ("queued", "running")
 EMERGING = re.compile(rb">>> Emerging (?:binary )?\((\d+) of (\d+)\) (\S+)")
+# colour codes, removed before looking for emerge's progress
+ANSI = re.compile(rb"\x1b\[[0-9;]*m")
 
 
 class JobError(Exception):
@@ -130,9 +132,18 @@ def stage_shell(stage):
     if stage.get("config"):
         steps.append("printf '%s\\n' " + " ".join(shlex.quote(line) for line in
                      stage["config"]["use"]) + " > " + shlex.quote(temp))
-    steps.extend(shlex.join(command) for command in stage["commands"])
+    steps.extend(shlex.join(_coloured(command)) for command in stage["commands"])
     # pick up a compiler switched by an earlier stage
     return ". /etc/profile >/dev/null 2>&1; " + " && ".join(steps)
+
+
+def _coloured(command):
+    """emerge turns colour off when not writing to a terminal; the log is
+    shown in Porthole's terminal, which colours it, so ask for it"""
+    if command and command[0] == "emerge" and not any(
+            a.startswith("--color") for a in command):
+        return [command[0], "--color=y"] + command[1:]
+    return command
 
 
 # -- the job list ----------------------------------------------------------
@@ -424,7 +435,8 @@ class Runner:
         return code == 0 and (read_json(PLAN_FILE) or {}).get("generated") != plan_before
 
     def step_shell(self, job_id, step, log):
-        env = dict(os.environ, NOCOLOR="true", TERM="dumb")
+        env = dict(os.environ, TERM="xterm")
+        env.pop("NOCOLOR", None)
         log("$ " + step["shell"])
         proc = subprocess.Popen(["/bin/bash", "-c", step["shell"]], env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -441,7 +453,7 @@ class Runner:
             lines = (partial + data).split(b"\n")
             partial = lines.pop()
             for line in lines:
-                latest = EMERGING.search(line) or latest
+                latest = EMERGING.search(ANSI.sub(b"", line)) or latest
             if latest and time.monotonic() - last >= PROGRESS_EVERY:
                 last = time.monotonic()
                 self.update(job_id, progress={

@@ -28,7 +28,7 @@ from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
 from porthole.updater.service import PLAN_FILE, STATE_DIR, read_json
-from porthole.updater.viewer import JobWindow, read_jobs
+from porthole.updater.viewer import read_jobs
 
 
 def _label(text, mono=False, bold=False, markup=None, selectable=False, **props):
@@ -97,6 +97,8 @@ class UpdateAssistant(Gtk.Window):
         self.recheck_button.connect("clicked", self.on_recheck)
         self.progress_button = Gtk.Button(label="Show progress")
         self.progress_button.connect("clicked", lambda b: self.show_progress())
+        self.cancel_button = Gtk.Button(label="Cancel update")
+        self.cancel_button.connect("clicked", self.on_cancel)
         settings = Gtk.Button(label="Settings")
         settings.connect("clicked", lambda b: self.mainwindow.configure_porthole(page="updates"))
         close = Gtk.Button(label="Close")
@@ -107,13 +109,14 @@ class UpdateAssistant(Gtk.Window):
         buttons.pack_start(self.news_button, False, False, 0)
         buttons.pack_start(self.recheck_button, False, False, 0)
         buttons.pack_start(self.progress_button, False, False, 0)
+        buttons.pack_start(self.cancel_button, False, False, 0)
         buttons.pack_start(settings, False, False, 0)
         buttons.pack_end(self.start_button, False, False, 0)
         buttons.pack_end(close, False, False, 0)
         outer.pack_start(buttons, False, False, 0)
         self.add(outer)
 
-        self.job_window = None
+        self.job_terminal = None
         self.finished_jobs = self.finished_job_ids()
         # the service replaces its files with a rename, so watch the directory
         self.monitor = None
@@ -442,6 +445,8 @@ class UpdateAssistant(Gtk.Window):
         self.start_button.set_sensitive(can_start and not stale and not busy and not changed)
         self.recheck_button.set_sensitive(not busy)
         self.progress_button.set_visible(bool(jobs))
+        self.cancel_button.set_visible(any(j["status"] in ACTIVE and j["kind"] == "update"
+                                           for j in jobs))
         if busy:
             self.start_button.set_tooltip_text("An update or check is running")
         elif changed:
@@ -502,9 +507,28 @@ class UpdateAssistant(Gtk.Window):
         self.load()
 
     def show_progress(self):
-        if self.job_window is None:
-            self.job_window = JobWindow()
-        self.job_window.present_job()
+        """Follow the job in a Porthole terminal (tabs, colours, summary)"""
+        if self.job_terminal is not None and self.job_terminal.window_visible:
+            self.job_terminal.window.present()
+            return
+        from porthole.updater.follow import show_in_terminal
+        self.job_terminal = show_in_terminal()
+
+    def on_cancel(self, button):
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.YES_NO, text="Stop the update?")
+        dialog.format_secondary_text(
+            "The package being built is stopped; packages already installed stay "
+            "installed. Porthole then checks what is left, so you can start the rest "
+            "later.")
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            button.set_sensitive(False)
+            run_as_root(service("cancel"), lambda ok, out: (
+                button.set_sensitive(True), None if ok else self.error(
+                    "Couldn't cancel", out or "Cancelled."), self.load()))
 
     def finished_job_ids(self):
         return {j["id"] for j in read_jobs() if j["status"] not in ACTIVE}
