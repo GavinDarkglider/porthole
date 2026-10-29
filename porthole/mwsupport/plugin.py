@@ -62,7 +62,10 @@ class PluginHandler(ActionHandler):
         self.plugin_root_menu.set_submenu(self.plugin_menu)
         # shown only once a plugin is enabled (show_all mustn't reveal it)
         self.plugin_root_menu.set_no_show_all(True)
-        self.wtree.get_object("menubar").append(self.plugin_root_menu)
+        # before Help, which stays last
+        menubar = self.wtree.get_object("menubar")
+        help_menu = self.wtree.get_object("menuitem4")
+        menubar.insert(self.plugin_root_menu, menubar.get_children().index(help_menu))
         self.plugin_manager = PluginManager(self)
         self.plugin_package_tabs = {}
         self.packagebook = None

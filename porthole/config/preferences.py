@@ -130,7 +130,7 @@ def theme_is_dark():
     except (ImportError, ValueError, RuntimeError):
         return False
     return 0.299 * color.red + 0.587 * color.green + 0.114 * color.blue > 0.5
-from porthole.utils.utils import get_user_home_dir, can_gksu
+from porthole.utils.utils import get_user_home_dir
 
 
 class OptionsClass(object):
@@ -383,16 +383,8 @@ class PortholePreferences:
         for arch in self.globals.archlist:
             self.globals.keyworded_archlist.append('~'+arch)
 
-        if can_gksu(self.globals.su.split(' ')[0]) == False:
-            # If the current su option is not valid, try some others.
-            if can_gksu('gksudo'):
-                self.globals.su = 'gksudo -g'
-            elif can_gksu('gksu'):
-                self.globals.su = 'gksu -g'
-            elif can_gksu('gnomesu'):
-                self.globals.su = 'gnomesu'
-            elif can_gksu('kdesu'):
-                self.globals.su = 'kdesu'
+        # globals.su is no longer used: changes that need root go through
+        # sudo (or polkit), see porthole.updater.elevate
 
         self.globals.Sync_methods = [['emerge --sync', _('Sync')],
                                      ['emerge-webrsync', _('WebRsync')]]

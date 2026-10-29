@@ -577,7 +577,7 @@ if __name__ == "__main__":
 
     if 'make.conf' in filename:
         set_make_conf(_property, add, remove, replace)
-    elif 'package.mask' in _file:
+    elif 'package.mask' in filename:
         set_package_mask(filename, name, ebuild, comment, username, add, remove)
     else:
         set_user_config(filename, name, ebuild, comment, username, add, remove)

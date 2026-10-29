@@ -28,14 +28,11 @@ print("USERCONFIGS: id initialized to ", _id)
 from gettext import gettext as _
 import os
 
-from porthole import config
 from porthole.backends.utilities import (
     read_bash,
     reduce_flags
 )
 from porthole.backends import set_config
-from porthole.utils.dispatcher import Dispatcher
-from porthole.sterminal import SimpleTerminal
 from porthole.dialogs.fileselector import FileSelector2 #as FileSelector
 from porthole import backends
 from porthole.utils import debug
@@ -319,7 +316,6 @@ class UserConfigs:
         #debug.dprint("USER_CONFIGS: set_user_config()")
         self.set_callback = callback
         self.set_type = mytype
-        command = ''
         if mytype not in CONFIG_TYPES:
             debug.dprint("USER_CONFIGS: set_user_config(): unsupported " +
                 "config mytype '%s'" % mytype)
@@ -379,33 +375,19 @@ class UserConfigs:
                 add=add, remove=remove)
             self.set_config_callback()
         else:
-            commandlist = [config.Prefs.globals.su, '"python',
-                set_config.__file__ + ' -d -f ' + file]
+            # as root, the way the update assistant asks (sudo, else polkit)
+            args = ['-f', file, '-u', os.getenv("LOGNAME") or os.getenv("USER") or '']
             if name != '':
-                commandlist.append('-n %s' %name)
+                args += ['-n', name]
             if ebuild != '':
-                commandlist.append('-e %s' %ebuild)
-            comment = '' # for now. TODO add comment input dialog
-            if comment != '':
-                commandlist.append('-c %s' %comment)
-            commandlist.append('-u %s' %os.getenv("LOGNAME"))
-            if add != '':
-                items = add.split()
-                for item in items:
-                    commandlist.append('-a %s' % item)
-            if remove != '':
-                items = remove.split()
-                for item in items:
-                    commandlist.append('-r %s' % item)
-            command = ' '.join(commandlist) + '"'
-            debug.dprint(" * USER_CONFIGS: set_user_config(): command = %s"
-                %command )
-            # add code to update_config()
-            mycallback = self.set_config_callback #backends.portage_lib.reload_portage
-            app = SimpleTerminal(command, False,
-                dprint_output='SET_USER_CONFIG CHILD APP: ',
-                callback=Dispatcher(mycallback))
-            app._run()
+                args += ['-e', ebuild]
+            for item in add.split():
+                args += ['-a', item]
+            for item in remove.split():
+                args += ['-r', item]
+            debug.dprint(" * USER_CONFIGS: set_user_config(): set_config %s" % args)
+            from porthole.updater.elevate import run_set_config
+            run_set_config(args, self.set_config_callback)
         return True
 
 

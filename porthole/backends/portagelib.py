@@ -47,9 +47,8 @@ IMPORT_DONE = False
 
 from porthole.utils import debug
 from porthole.utils.utils import is_root
-from porthole.utils.dispatcher import Dispatcher, Dispatch_wait
+from porthole.utils.dispatcher import Dispatch_wait
 from porthole.utils.caches import lru_cache
-from porthole.sterminal import SimpleTerminal
 from porthole.backends.properties import Properties
 from porthole import config
 from porthole.backends.metadata import Metadata
@@ -166,7 +165,6 @@ def set_make_conf(property, add="", remove="", replace="", callback=None):
     e.g. set_make_conf('PORTAGE_NICENESS', replace='15')
     """
     debug.dprint("PORTAGELIB: set_make_conf()")
-    command = ""
     _file = "make.conf"
     if isinstance(add, list):
         add = " ".join(add)
@@ -175,30 +173,17 @@ def set_make_conf(property, add="", remove="", replace="", callback=None):
     if isinstance(replace, list):
         replace = " ".join(replace)
     if not os.access(os.path.join(portage.root, portage_const.MAKE_CONF_FILE), os.W_OK):
-        command = (
-            config.Prefs.globals.su
-            + ' "python '
-            + config.Prefs.DATA_PATH
-            + "backends/set_config.py -d -f %s " % _file
-        )
-        command = command + "-p %s " % property
-        if add != "":
-            command = command + "-a %s " % ("'" + add + "'")
-        if remove != "":
-            command = command + "-r %s" % ("'" + remove + "'")
-        command = command + '"'
-        debug.dprint(" * PORTAGELIB: set_make_conf(); command = %s" % command)
-        if not callback:
-            callback = reload_portage
-        dispatcher = Dispatcher(callback)
-        app = SimpleTerminal(
-            command,
-            False,
-            dprint_output="SET_MAKE_CONF CHILD APP: ",
-            callback=dispatcher,
-        )
-        app._run()
-        del dispatcher
+        # as root, the way the update assistant asks (sudo, else polkit)
+        args = ["-f", _file, "-p", property]
+        for item in add.split():
+            args += ["-a", item]
+        for item in remove.split():
+            args += ["-r", item]
+        if replace != "":
+            args += ["-R", replace]
+        debug.dprint(" * PORTAGELIB: set_make_conf(); set_config %s" % args)
+        from porthole.updater.elevate import run_set_config
+        run_set_config(args, callback or reload_portage)
     else:
         add = add.split()
         remove = remove.split()

@@ -201,6 +201,10 @@ class ConfigDialog:
                 # show_all() later must not bring it back
                 widget.set_no_show_all(True)
                 widget.hide()
+        # root is asked for through sudo or polkit now, not a su program
+        su_row = self.builder.get_object('su_client').get_parent()
+        su_row.set_no_show_all(True)
+        su_row.hide()
         # hide unimplemented notebook tabs
         # removelist = [ # [notebook, tab to remove]
         #     ['terminal_notebook', 'filter_tab'],

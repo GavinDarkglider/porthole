@@ -17,6 +17,7 @@
 
 import os
 import shutil
+import sys
 
 from gi.repository import Gio, GLib
 
@@ -50,6 +51,29 @@ def run_as_root(argv, callback):
             else _spawn(["pkexec"] + argv, callback)), env)
     else:
         _spawn(["pkexec"] + argv, callback)
+
+
+def run_set_config(args, on_done=None):
+    """Run porthole's config file editor (backends/set_config.py) as root,
+    for edits to make.conf and /etc/portage/package.* the user can't
+    write. on_done() runs after a successful edit; a failure is shown."""
+    from porthole.backends import set_config
+    argv = [sys.executable, set_config.__file__] + list(args)
+
+    def done(ok, output):
+        if ok:
+            if on_done:
+                on_done()
+            return
+        from gi.repository import Gtk
+        dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
+                                   buttons=Gtk.ButtonsType.CLOSE,
+                                   text="The change wasn't saved")
+        dialog.set_title("Porthole")
+        dialog.format_secondary_text(output or "Cancelled.")
+        dialog.run()
+        dialog.destroy()
+    run_as_root(argv, done)
 
 
 def _spawn(argv, callback, env=None):
