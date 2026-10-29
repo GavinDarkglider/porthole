@@ -139,7 +139,12 @@ class MainBase(object):
         see changines in any config files
         e.g. /etc/make.conf USE flags changed"""
         PMS_LIB.reload_portage()
-        self.view_filter_changed(self.widget["view_filter"])
+        # packages cache what the old portage told them (best version,
+        # masking, ...), e.g. from an overlay added since (bug #149)
+        if hasattr(self, "reload_db"):
+            self.reload_db()
+        else:
+            self.view_filter_changed(self.widget["view_filter"])
         return
 
     def set_cancel_btn(self, state):

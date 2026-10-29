@@ -274,10 +274,12 @@ class UserConfigs:
                 return result
             for atom in atoms:
                 acpv = atom.acpv()
-                match = backends.portage_lib.xmatch('match-all', acpv, mylist=[ebuild])
+                # portage ignores xmatch's old mylist argument, so check
+                # that this ebuild is among the atom's matches (bug #153)
+                match = ebuild in backends.portage_lib.xmatch('match-all', acpv)
                 if match:
                     if mytype in masktypes:
-                        result.extend(acpv) # package.mask/unmask
+                        result.append(acpv) # package.mask/unmask
                     else:
                         result.extend(atom.value[:]) # package.use/keywords
             return result

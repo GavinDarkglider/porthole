@@ -38,6 +38,7 @@ from gettext import gettext as _
 from glob import glob
 from sys import exit, stderr
 import _thread
+import threading
 
 # from itertools import izip
 
@@ -224,6 +225,8 @@ def reload_portage():
     importlib.reload(portage)
     debug.dprint("PORTAGELIB: new portage version = " + portage.VERSION)
     settings.reset()
+    # metadata looked up through the old trees may be out of date
+    get_metadata.cache_clear()
 
 
 def get_sets_list(filename):
@@ -408,8 +411,8 @@ def xmatch(*args, **kwargs):
     """Pass arguments on to portage's caching match function.
     xmatch('match-all',package-name) returns all ebuilds of <package-name> in a list,
     xmatch('match-visible',package-name) returns non-masked ebuilds,
-    xmatch('match-list',package-name,mylist=list) checks for <package-name> in <list>
-    There are more possible arguments.
+    There are more possible arguments. ('match-list' and mylist= are gone
+    from portage; test membership in the 'match-all' result instead.)
     package-name may be, for example:
        gnome-base/control-center            ebuilds for gnome-base/control-center
        control-center                       ebuilds for gnome-base/control-center
@@ -859,6 +862,41 @@ class BinPkgs(object):
         self.bintree = None
 
 
+def sqlite_per_thread(portdb):
+    """Give each thread its own connection to a sqlite metadata cache.
+
+    Portage opens one connection per process, but porthole's readers
+    look packages up from threads, and sqlite3 refuses a connection made
+    in another thread (bug #138).
+    """
+    try:
+        from portage.cache.sqlite import database as sqlite_database
+    except ImportError:
+        return
+    for cache in portdb.auxdb.values():
+        if isinstance(cache, sqlite_database) and not isinstance(cache, _PerThreadSqlite):
+            cache.__class__ = _per_thread_class(type(cache))
+            cache._porthole_local = threading.local()
+
+
+class _PerThreadSqlite:
+    """Mixin keeping the sqlite connection info per thread"""
+
+    @property
+    def _db_connection_info(self):
+        return getattr(self._porthole_local, "info", None)
+
+    @_db_connection_info.setter
+    def _db_connection_info(self, value):
+        self._porthole_local.info = value
+
+
+def _per_thread_class(cls, _made={}):
+    if cls not in _made:
+        _made[cls] = type("PerThread" + cls.__name__, (_PerThreadSqlite, cls), {})
+    return _made[cls]
+
+
 class PortageSettings:
     def __init__(self):
         # declare some globals
@@ -902,9 +940,7 @@ class PortageSettings:
         debug.dprint("PORTAGELIB: reset_globals();")
         self.settings, self.trees, self.mtimedb = self.my_load_emerge_config()
         self.portdb = self.trees[self.settings["ROOT"]]["porttree"].dbapi
-        # self.db=self.portdb.auxdbmodule._db_module
-        # print >>stderr, self.db.__dict__.keys()
-        # self.db.dbapi2.check_same_thread  = False
+        sqlite_per_thread(self.portdb)
         self.portdir = self.settings.repositories.mainRepoLocation()
         self.config_root = self.settings["PORTAGE_CONFIGROOT"]
         # is PORTDIR_OVERLAY always defined?
