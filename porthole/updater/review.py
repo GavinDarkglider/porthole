@@ -22,6 +22,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gio, GLib, Gtk
 
 from porthole.updater.analyze import CONFIG_DIRS, KIND_NAMES, OWNED_NAME, format_report, summarize
+from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
 from porthole.updater.service import PLAN_FILE, STATE_DIR, read_json
@@ -55,7 +56,10 @@ def _section(title):
 class UpdateAssistant(Gtk.Window):
     def __init__(self, parent, mainwindow):
         super().__init__(title="Porthole: update assistant")
-        self.set_transient_for(parent)
+        # a window of its own, not transient for Porthole's: window managers
+        # keep transients above their parent and won't minimize them alone
+        if icon_path():
+            self.set_icon_from_file(icon_path())
         self.set_default_size(860, 700)
         self.mainwindow = mainwindow
         self.plan = None
@@ -336,7 +340,6 @@ class UpdateAssistant(Gtk.Window):
     def show_progress(self):
         if self.job_window is None:
             self.job_window = JobWindow()
-            self.job_window.set_transient_for(None)
         self.job_window.present_job()
 
     def finished_job_ids(self):
@@ -360,7 +363,7 @@ class UpdateAssistant(Gtk.Window):
         return False
 
     def error(self, title, text):
-        dialog = Gtk.MessageDialog(transient_for=self.get_transient_for(), modal=True,
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.ERROR,
                                    buttons=Gtk.ButtonsType.CLOSE, text=title)
         dialog.set_title("Porthole")

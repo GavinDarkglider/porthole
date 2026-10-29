@@ -21,6 +21,7 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
+from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, JOBS_FILE
 from porthole.updater.service import read_json
@@ -77,6 +78,8 @@ class JobWindow(Gtk.Window):
         if application:
             self.set_application(application)
         self.set_default_size(860, 620)
+        if icon_path():
+            self.set_icon_from_file(icon_path())
         self.connect("delete-event", lambda *a: self.hide() or True)
         self.job_id = None
         self.log_path = None

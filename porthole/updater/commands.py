@@ -23,3 +23,11 @@ def script_command(name):
     if LOCAL:
         return [sys.executable, os.path.join(SRC, "scripts", name), "--local"]
     return [shutil.which(name) or os.path.join("/usr/bin", name)]
+
+
+def icon_path():
+    for base in (os.path.join(SRC, "porthole"), "/usr/share/porthole"):
+        path = os.path.join(base, "pixmaps", "porthole-icon.png")
+        if os.path.exists(path):
+            return path
+    return None

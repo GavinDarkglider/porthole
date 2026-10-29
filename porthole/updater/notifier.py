@@ -29,7 +29,7 @@ gi.require_version("Notify", "0.7")
 from gi.repository import Gio, GLib, Gtk, Notify
 
 from porthole.updater.analyze import format_report, summarize
-from porthole.updater.commands import SRC as _SRC, script_command
+from porthole.updater.commands import icon_path, script_command
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE
 from porthole.updater.service import PLAN_FILE, STATE_DIR, STATE_FILE, read_json
@@ -45,14 +45,6 @@ SPAWN_LOG = os.path.join(
 # a check that has claimed to be running this long has died
 STALE_RUN = 3 * 3600
 PENDING = ("ready", "needs-approval", "needs-help")
-
-def icon_path():
-    for base in (os.path.join(_SRC, "porthole"), "/usr/share/porthole"):
-        path = os.path.join(base, "pixmaps", "porthole-icon.png")
-        if os.path.exists(path):
-            return path
-    return None
-
 
 class TrayIcon:
     """Gtk.StatusIcon (XEmbed trays such as lxpanel) or an AppIndicator"""

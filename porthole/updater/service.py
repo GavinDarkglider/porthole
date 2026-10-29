@@ -22,7 +22,7 @@
 
         [updater]
         # days between checks, 1 or more
-        interval_days = 1
+        interval_days = 7
         # sync the repositories before checking
         sync = yes
         # don't start a check while running on battery
@@ -60,7 +60,7 @@ DAY = 24 * 3600
 SLACK = 3600
 
 DEFAULTS = {
-    "interval_days": "1",
+    "interval_days": "7",
     "sync": "yes",
     "skip_on_battery": "yes",
 }
@@ -74,7 +74,7 @@ def load_config(path=CONFIG_FILE):
     try:
         interval = int(section.get("interval_days"))
     except ValueError:
-        interval = 1
+        interval = int(DEFAULTS["interval_days"])
     return {
         # syncing more than once a day is unfair to the mirrors
         "interval_days": max(1, interval),
