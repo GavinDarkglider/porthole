@@ -56,6 +56,8 @@ TOOLCHAIN = ("sys-devel/binutils", "sys-kernel/linux-headers", "sys-libs/glibc",
              "sys-libs/musl", "sys-devel/gcc")
 # programs still linked to libraries an update replaced
 PRESERVED_ARGS = ["--oneshot", "@preserved-rebuild"]
+# rounds of removing what holds the update back
+MAX_REMOVAL_ROUNDS = 3
 # give up after breaking this many cycles in a row
 MAX_CYCLES = 8
 # suggestions to try on one cycle before giving up on it
@@ -108,7 +110,9 @@ class ScratchConfig:
         self.portage_dir = os.path.join(self.root, "etc", "portage")
 
     def __enter__(self):
-        shutil.copytree(self.source, self.portage_dir, symlinks=True)
+        # gnupg/ is the sync signing keyring: private, and not needed to resolve
+        shutil.copytree(self.source, self.portage_dir, symlinks=True,
+                        ignore=lambda d, names: ["gnupg"] if d == self.source else [])
         # relative links (make.profile) must keep pointing at the real targets
         for dirpath, dirnames, filenames in os.walk(self.portage_dir):
             for name in dirnames + filenames:
@@ -294,6 +298,14 @@ def _solution_cost(solution):
     return (expand, enables, len(changes))
 
 
+def _badness(result):
+    """Lower is better: a failed resolution, then each kind of trouble"""
+    return (not result.get("success"),
+            len(result.get("slot_conflicts") or []) + len(result.get("blockers") or [])
+            + bool(result.get("circular")) + len(result.get("unsatisfied") or []),
+            len(result.get("missed_updates") or []))
+
+
 def _is_exact_pin(atom):
     """True for atoms that pin one version: =cat/pkg-1.0 or ~cat/pkg-1.0"""
     return atom.lstrip("!").startswith(("=", "~"))
@@ -303,6 +315,10 @@ class Analyzer:
     def __init__(self, targets=None, config_root="/", log=None):
         self.targets = targets or WORLD_ARGS
         self.config_root = config_root
+        # installed packages the plan removes (from world, or entirely);
+        # dry runs then resolve against a scratch ROOT without them
+        self.removed = []
+        self.scratch_root = None
         self.log = log or (lambda msg: print(msg, file=sys.stderr, flush=True))
 
     # -- fixes -----------------------------------------------------------
@@ -417,7 +433,8 @@ class Analyzer:
                 scratch.add_lines(fix["kind"], [fix["line"]])
             if temp_use:
                 scratch.add_lines("use", list(temp_use), TEMP_NAME)
-            return run_worker(VERIFY_ARGS + (args or self.targets), scratch.root)
+            return run_worker(VERIFY_ARGS + self.world_args(args or self.targets),
+                              scratch.root)
 
     def break_cycles(self, fixes, check):
         """Break cycles one at a time with portage's USE suggestions.
@@ -452,9 +469,12 @@ class Analyzer:
                 self.log("  trying temporary USE: " + line)
                 result = self.verify(fixes, temp_use + [line])
                 new = result.get("circular")
-                if result.get("success") or (new and not _same_cycle(new["cycle"], seen)):
-                    self.log("    breaks it" + ("" if result.get("success")
-                                                 else ", next cycle found"))
+                # gone, or replaced by a different cycle; other problems (a
+                # slot conflict, say) are someone else's to solve
+                if result.get("success") or not new or not _same_cycle(new["cycle"], seen):
+                    self.log("    breaks it" + ("" if result.get("success") else
+                                                 ", next cycle found" if new else
+                                                 ", other problems remain"))
                     temp_use.append(line)
                     broken.append({"cycle": circ["cycle"], "temp_use": line, "package": pkg})
                     next_check = result
@@ -686,9 +706,243 @@ class Analyzer:
             })
         return checks
 
+    # -- updates portage leaves out ----------------------------------------
+
+    def target_root(self):
+        for arg in self.targets:
+            if arg.startswith("--root="):
+                return arg.split("=", 1)[1]
+        return "/"
+
+    def world_entries(self):
+        """The world file and world_sets, as emerge reads them"""
+        entries = []
+        base = os.path.join(self.target_root(), "var", "lib", "portage")
+        for name in ("world", "world_sets"):
+            try:
+                with open(os.path.join(base, name)) as f:
+                    entries.extend(line.strip() for line in f
+                                   if line.strip() and not line.startswith("#"))
+            except OSError:
+                pass
+        return entries
+
+    def without_removed(self):
+        """A scratch ROOT that looks like the target system without the
+        packages being removed: its vdb links to the real entries, its
+        world file leaves them out. Resolving against it is a dry run of
+        the removal; nothing real is touched."""
+        self.drop_scratch_root()
+        if not self.removed:
+            return
+        real = self.target_root()
+        # a soft-blocked package is only taken out of world; the update
+        # itself uninstalls it, so it stays installed in the dry run
+        removed_cpvs = {r["cpv"] for r in self.removed
+                        if r["kind"] == "orphan" or r.get("hard")}
+        removed_cps = {r["cp"] for r in self.removed}
+        scratch = tempfile.mkdtemp(prefix="porthole-root-")
+        vdb = os.path.join(real, "var", "db", "pkg")
+        for cat in os.listdir(vdb):
+            if not os.path.isdir(os.path.join(vdb, cat)):
+                continue
+            os.makedirs(os.path.join(scratch, "var", "db", "pkg", cat))
+            for pf in os.listdir(os.path.join(vdb, cat)):
+                if "%s/%s" % (cat, pf) not in removed_cpvs:
+                    os.symlink(os.path.join(vdb, cat, pf),
+                               os.path.join(scratch, "var", "db", "pkg", cat, pf))
+        lib = os.path.join(scratch, "var", "lib", "portage")
+        os.makedirs(lib)
+        for name in ("world", "world_sets"):
+            try:
+                with open(os.path.join(real, "var", "lib", "portage", name)) as f:
+                    lines = f.read().splitlines()
+            except OSError:
+                continue
+            with open(os.path.join(lib, name), "w") as f:
+                for line in lines:
+                    try:
+                        if not line.startswith("@") and Atom(line.strip()).cp in removed_cps:
+                            continue
+                    except Exception:
+                        pass
+                    f.write(line + "\n")
+        self.scratch_root = scratch
+
+    def drop_scratch_root(self):
+        if getattr(self, "scratch_root", None):
+            shutil.rmtree(self.scratch_root, ignore_errors=True)
+        self.scratch_root = None
+
+    def world_args(self, args):
+        """args aimed at the scratch ROOT while packages are being removed"""
+        if not getattr(self, "scratch_root", None):
+            return list(args)
+        out = [a for a in args if not a.startswith(("--root=", "--sysroot="))]
+        return out + ["--root=" + self.scratch_root, "--sysroot=" + self.scratch_root]
+
+    def try_removals(self, result, check, fixes=None, temp_use=()):
+        """Dry-run removing what holds the update back (found in result or
+        check); keep the removals if they help. With fixes, they are judged
+        by verifying with the fixes and cycle breakers in place, since a
+        plain resolution may stop at a cycle before reaching the problem.
+        Returns the resolution to plan from."""
+        known = {r["cpv"] for r in self.removed}
+        new = [r for r in self.find_removals(check) + self.find_removals(result)
+               if r["cpv"] not in known]
+        new = list({r["cpv"]: r for r in new}.values())
+        if not new:
+            return result
+        self.removed += new
+        self.without_removed()
+        self.log("Trying without: " + ", ".join(r["cpv"] for r in new))
+        without = run_worker(SOLVE_ARGS + self.world_args(self.targets), self.config_root)
+        if fixes is not None:
+            better = _badness(self.verify(fixes, temp_use)) < _badness(check)
+        else:
+            better = _badness(without) < _badness(result)
+        if "merge_list" in without and better:
+            held = {m["cpv"] for m in result.get("missed_updates") or []}
+            freed = held - {m["cpv"] for m in without.get("missed_updates") or []}
+            self.log("  that frees: " + (", ".join(sorted(freed)) or "the update"))
+            return without
+        self.log("  doesn't help")
+        self.removed = self.removed[:-len(new)]
+        self.without_removed()
+        return result
+
+    def find_removals(self, result):
+        """Installed packages whose removal would unblock the update:
+        orphans (no ebuild left, nothing needs them) holding updates back,
+        and world packages a new version blocks"""
+        dependents = result.get("dependents") or {}
+        world = set()
+        for entry in self.world_entries():
+            try:
+                world.add(Atom(entry).cp)
+            except Exception:
+                pass
+        removals = {}
+        for missed in result.get("missed_updates") or []:
+            for p in missed["parents"]:
+                if not p.get("installed") or p.get("in_repos") or dependents.get(p["parent"]):
+                    continue
+                r = removals.setdefault(p["parent"], {
+                    "kind": "orphan", "cpv": p["parent"], "cp": _cp(p["parent"]),
+                    "holds": [], "atoms": [], "in_world": _cp(p["parent"]) in world})
+                r["holds"].append(missed["cpv"])
+                r["atoms"].append(p["atom"])
+        # an installed package that can't be rebuilt, pinning one side of a
+        # slot conflict (typically a subslot it was built against)
+        unrebuildable = set((result.get("system") or {}).get("unrebuildable") or ())
+        for conflict in result.get("slot_conflicts") or []:
+            for pkg in conflict["packages"]:
+                for p in pkg["parents"]:
+                    if p["parent"] not in unrebuildable or dependents.get(p["parent"]):
+                        continue
+                    r = removals.setdefault(p["parent"], {
+                        "kind": "orphan", "cpv": p["parent"], "cp": _cp(p["parent"]),
+                        "holds": [], "atoms": [], "in_world": _cp(p["parent"]) in world})
+                    # the newest version wanted is the one being held back
+                    wanted = [q for q in conflict["packages"] if not q["installed"]]
+                    if wanted:
+                        newest = max(wanted, key=cmp_to_key(
+                            lambda a, b: vercmp(a["version"], b["version"])))["cpv"]
+                        if newest not in r["holds"]:
+                            r["holds"].append(newest)
+                    if p["atom"] not in r["atoms"]:
+                        r["atoms"].append(p["atom"])
+        for blocker in result.get("blockers") or []:
+            for blocked in blocker["blocked"]:
+                if (not blocked["installed"] or blocked["cp"] not in world
+                        or dependents.get(blocked["cpv"])):
+                    continue
+                removals.setdefault(blocked["cpv"], {
+                    "kind": "replaced", "cpv": blocked["cpv"], "cp": blocked["cp"],
+                    "by": [b["cpv"] for b in blocker["blocking"]],
+                    "hard": blocker["atom"].startswith("!!"), "in_world": True})
+        return list(removals.values())
+
+    def removal_stages(self, verified):
+        stages = []
+        root = self.root_options()
+        for r in self.removed:
+            if r["kind"] == "orphan":
+                commands = ([["emerge", "--deselect"] + root + [r["cp"]]] if r["in_world"]
+                            else [])
+                commands.append(["emerge", "--depclean"] + root + [r["cp"]])
+                stages.append({
+                    "title": "Remove %s (no longer in any repository)" % r["cpv"],
+                    "approval": True,
+                    "why": "It holds back %s: it requires %s, and it can't be updated "
+                           "or rebuilt because its ebuild is gone. Nothing else "
+                           "installed needs it."
+                           % (", ".join(r["holds"]), ", ".join(sorted(set(r["atoms"])))),
+                    "commands": commands,
+                    "verified": verified,
+                })
+            else:
+                commands = [["emerge", "--deselect"] + root + [r["cp"]]]
+                if r["hard"]:
+                    commands.append(["emerge", "--unmerge"] + root + [r["cp"]])
+                stages.append({
+                    "title": "Let %s replace %s" % (", ".join(r["by"]), r["cpv"]),
+                    "approval": True,
+                    "why": "%s blocks %s, which is in your world file, so portage won't "
+                           "remove it. Taking it out of world lets the update replace "
+                           "it. Nothing else installed needs it."
+                           % (", ".join(r["by"]), r["cpv"]),
+                    "commands": commands,
+                    "verified": verified,
+                })
+        return stages
+
+    def held_back(self, result):
+        """Updates portage leaves out, explained"""
+        held = []
+        held_cps = {m["cp"] for m in result.get("missed_updates") or []}
+        dependents = result.get("dependents") or {}
+        for missed in result.get("missed_updates") or []:
+            why = []
+            for p in missed["parents"]:
+                atom = p["atom"]
+                try:
+                    atom_cp = Atom(atom.lstrip("!")).cp
+                except Exception:
+                    atom_cp = None
+                if not p.get("installed"):
+                    if atom_cp in held_cps and atom_cp != missed["cp"]:
+                        why.append("%s needs %s, which is held back too."
+                                   % (p["parent"], atom))
+                    else:
+                        why.append("%s needs %s." % (p["parent"], atom))
+                    continue
+                text = "%s (installed) requires %s" % (p["parent"], atom)
+                if atom.endswith("=") and ":" in atom:
+                    text = ("%s was built against the current version's ABI (%s) and "
+                            "has to be rebuilt to use a new one" % (p["parent"], atom))
+                if not p.get("in_repos"):
+                    text += ", and no repository has its ebuild any more, so it can't " \
+                            "be updated or rebuilt"
+                elif not p.get("newer"):
+                    text += "; no version of it supports %s yet" % missed["cpv"]
+                needed_by = dependents.get(p["parent"])
+                if needed_by:
+                    text += ". It is needed by " + _limit(needed_by)
+                why.append(text + ".")
+            held.append({"cpv": missed["cpv"], "selected": missed["selected"],
+                         "reason": missed["reason"], "why": why})
+        return held
+
     # -- main entry -----------------------------------------------------
 
     def analyze(self):
+        try:
+            return self._analyze()
+        finally:
+            self.drop_scratch_root()
+
+    def _analyze(self):
         started = time.monotonic()
         user_keywords = read_config_atoms("keywords", self.config_root)
 
@@ -700,6 +954,7 @@ class Analyzer:
         self.log("  %d packages, %.0fs" % (len(result.get("merge_list") or []),
                                            result.get("seconds", 0)))
 
+        result = self.try_removals(result, result)
         system = result.get("system") or {}
         fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
         for fix in fixes:
@@ -710,20 +965,39 @@ class Analyzer:
             "targets": self.targets,
             "merge_list": result.get("merge_list") or [],
             "fixes": fixes,
-            "news_unread": news_unread(),
+            # eselect only knows the running system
+            "news_unread": news_unread() if self.target_root() == "/" else None,
             "resolver_errors": result.get("errors") or {},
         }
 
-        temp_use, broken = [], []
-        if plan["merge_list"]:
-            # prove it: same targets, our changes only, no autounmask
-            self.log("Verifying %d proposed change(s)..." % len(fixes))
-            check = self.verify(fixes)
-            if not check.get("success") and check.get("circular"):
-                temp_use, broken, check = self.break_cycles(fixes, check)
-        else:
-            check = result  # nothing to update, nothing to prove
+        # each round ends with a verification, so the plan always matches it
+        for round_ in range(MAX_REMOVAL_ROUNDS + 1):
+            temp_use, broken = [], []
+            if plan["merge_list"]:
+                # prove it: same targets, our changes only, no autounmask
+                self.log("Verifying %d proposed change(s)..." % len(fixes))
+                check = self.verify(fixes)
+                if not check.get("success") and check.get("circular"):
+                    temp_use, broken, check = self.break_cycles(fixes, check)
+            else:
+                check = result  # nothing to update, nothing to prove
+            if (check.get("success") and not check.get("missed_updates")
+                    or round_ == MAX_REMOVAL_ROUNDS):
+                break
+            # what is still in the way may only show once the rest is solved
+            removed_before = len(self.removed)
+            result = self.try_removals(result, check, fixes, temp_use)
+            if len(self.removed) == removed_before:
+                break
+            fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
+            for fix in fixes:
+                self.explain(fix, result, user_keywords)
+            plan.update(merge_list=result.get("merge_list") or [], fixes=fixes)
         verified = bool(check.get("success"))
+        # report what the final check says is held back
+        if verified:
+            result = dict(result, missed_updates=check.get("missed_updates"),
+                          dependents=check.get("dependents") or result.get("dependents"))
 
         for fix in fixes:
             fix["verified"] = verified
@@ -746,6 +1020,12 @@ class Analyzer:
         if temp_use:
             # the temporary USE changes are in place from the first stage on
             stages[0]["config"] = {"use": temp_use, "file": TEMP_NAME}
+        # removals first: the rest was worked out without those packages
+        stages = self.removal_stages(verified) + stages
+        plan["removed"] = self.removed
+        plan["held_back"] = self.held_back(result)
+        plan["missing_world"] = [w for w in result.get("missing_world") or []
+                                 if w not in {r["cp"] for r in self.removed}]
 
         preserved = self.preserved(fixes, temp_use, system)
         rebuilds = (preserved or {}).get("merge_list") or []
@@ -771,7 +1051,9 @@ class Analyzer:
             plan["remaining"] = remaining
             plan["verify_error"] = check.get("error")
 
-        if not plan["merge_list"] and not rebuilds:
+        if not plan["merge_list"] and not rebuilds and plan["held_back"]:
+            plan["status"] = "needs-help"  # not up to date: updates are stuck
+        elif not plan["merge_list"] and not rebuilds:
             plan["status"] = "up-to-date"
         elif not verified or blocked:
             plan["status"] = "needs-help"
@@ -811,7 +1093,10 @@ def format_report(plan):
         "needs-help": "%d updates; could not find a verified solution automatically."
                       % (len(merges) + len(rebuilds)) if not plan.get("verified", True) else
                       "%d updates; fix the problem(s) below before building."
-                      % (len(merges) + len(rebuilds)),
+                      % (len(merges) + len(rebuilds)) if any(
+                          c["severity"] == "error" for c in plan.get("checks") or []) else
+                      "%d update(s) held back; they need a decision from you."
+                      % len(plan.get("held_back") or []),
     }[status])
     if counts:
         out.append("  " + ", ".join("%d %s" % (n, k) for k, n in sorted(counts.items())))
@@ -823,6 +1108,20 @@ def format_report(plan):
                                   c["title"]))
         out.append("  " + c["detail"])
         out.append("  Fix: " + c["fix"])
+
+    held = plan.get("held_back") or []
+    if held:
+        out.append("\nHeld back (portage leaves these out and still reports success):")
+        for h in held:
+            out.append("  %s (staying at %s)" % (h["cpv"], h["selected"] or "nothing"))
+            for line in h["why"]:
+                out.append("    - " + line)
+    if plan.get("missing_world"):
+        out.append("\nIn your world file but no repository has them any more: "
+                   + ", ".join(plan["missing_world"]))
+    for r in plan.get("removed") or []:
+        if r["kind"] == "orphan":
+            out.append("\nRemoving %s frees: %s" % (r["cpv"], ", ".join(r["holds"])))
 
     preserved = plan.get("preserved")
     if preserved:
@@ -892,7 +1191,11 @@ def format_report(plan):
             for sol in cyc.get("solutions") or []:
                 out.append("      %s: %s" % (sol.get("package") or sol["breaks_at"], sol["changes"]))
         for b in rem.get("blockers") or []:
-            out.append("  %s blocks %s" % (b["parent"], b["atom"]))
+            blocked = ", ".join("%s%s (wanted by %s)" % (
+                p["cpv"], " installed" if p["installed"] else "",
+                ", ".join(x["parent"] for x in p["parents"]) or "nothing")
+                for p in b.get("blocked") or []) or b["atom"]
+            out.append("  %s blocks %s" % (b["parent"], blocked))
         for u in rem.get("unsatisfied") or []:
             out.append("  nothing satisfies %s (needed by %s)" % (u["atom"], u["parent"]))
         if plan.get("verify_error"):
@@ -938,6 +1241,10 @@ def summarize(plan):
         title = "%d updates need attention" % count
         body = ["Fix this first or the build will fail: %s."
                 % "; ".join(c["title"] for c in problems)]
+    elif status == "needs-help" and plan.get("verified", True) and plan.get("held_back"):
+        held = len(plan["held_back"])
+        title = "%d update%s held back" % (held, "s" if held != 1 else "")
+        body = ["Something installed stops them; open the report to see what."]
     elif status == "needs-help":
         title = "%d updates need attention" % count
         body = ["A working update plan couldn't be found automatically."]
@@ -945,6 +1252,9 @@ def summarize(plan):
         return "Update check failed", "Open the report for details."
     else:
         return "System is up to date", ""
+    held = len(plan.get("held_back") or [])
+    if held and status in ("ready", "needs-approval"):
+        body.append("%d more update%s held back." % (held, "s are" if held != 1 else " is"))
     gcc = (plan.get("toolchain") or {}).get("gcc") or {}
     if gcc.get("switch_to"):
         body.append("Includes a new compiler: GCC %s." % gcc["major"])

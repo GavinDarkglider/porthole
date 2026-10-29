@@ -153,17 +153,86 @@ def circular_deps(depgraph):
 
 
 def blockers(depgraph):
+    """Unsolvable blockers: who blocks what, and what pulled each side in"""
+    dc = depgraph._dynamic_config
     found = []
-    for blocker in getattr(
-        depgraph._dynamic_config, "_unsatisfied_blockers_for_display", None
-    ) or ():
-        found.append(
-            {
-                "atom": str(blocker.atom),
-                "parent": str(blocker.parent.cpv),
-            }
-        )
+    for blocker in getattr(dc, "_unsatisfied_blockers_for_display", None) or ():
+        blocking = [p for p in dc._blocker_parents.parent_nodes(blocker)
+                    if isinstance(p, Package)]
+        blocked = [p for p in dc._blocked_pkgs.child_nodes(blocker)
+                   if isinstance(p, Package)]
+        found.append({
+            "atom": str(blocker.atom),
+            # the old name for the blocking package, kept for readers
+            "parent": str(blocking[0].cpv) if blocking else None,
+            "blocking": [dict(pkg_info(p), parents=parents_of(depgraph, p))
+                         for p in blocking],
+            "blocked": [dict(pkg_info(p), parents=parents_of(depgraph, p))
+                        for p in blocked],
+        })
     return found
+
+
+def missed_updates(depgraph):
+    """Updates portage quietly left out because something holds them back
+    (emerge only warns and still succeeds)"""
+    found = []
+    for pkg, mask_type, parent_atoms in depgraph._get_missed_updates().values():
+        selected = next(depgraph._dynamic_config._package_tracker.match(
+            pkg.root, pkg.slot_atom), None)
+        parents = []
+        for entry in parent_atoms:
+            # (parent, atom) for conflicts, (parent, root, atom) for missing deps
+            parent, atom = entry[0], entry[-1]
+            info = {"atom": str(getattr(atom, "unevaluated_atom", atom))}
+            if isinstance(parent, Package):
+                porttree = depgraph._frozen_config.trees[parent.root]["porttree"]
+                info.update(parent=str(parent.cpv), installed=parent.installed,
+                            # an installed package whose ebuild is gone can't
+                            # be rebuilt or updated
+                            in_repos=bool(porttree.dbapi.cpv_exists(parent.cpv)),
+                            newer=[str(c) for c in porttree.dbapi.match(parent.cp)
+                                   if c != parent.cpv])
+            else:
+                info["parent"] = str(parent)
+            parents.append(info)
+        found.append({
+            "cpv": str(pkg.cpv),
+            "cp": pkg.cp,
+            "slot_atom": str(pkg.slot_atom),
+            "reason": mask_type,
+            "selected": str(selected.cpv) if selected else None,
+            "parents": parents,
+        })
+    return sorted(found, key=lambda m: m["cpv"])
+
+
+def missing_world(depgraph):
+    """World entries no repository has any (unmasked) ebuild for"""
+    return sorted({str(atom) for _arg, atom in
+                   depgraph._dynamic_config._missing_args})
+
+
+def installed_dependents(vardb, cpvs):
+    """Map each installed cpv to the installed packages that depend on it"""
+    from portage.dep import Atom, use_reduce
+    wanted = {cpv: [] for cpv in cpvs}
+    if not wanted:
+        return wanted
+    for other in vardb.cpv_all():
+        try:
+            deps, use = vardb.aux_get(other, ["RDEPEND", "USE"])
+            atoms = use_reduce(deps, uselist=use.split(), flat=True, token_class=Atom)
+        except Exception:
+            continue
+        for atom in atoms:
+            if not isinstance(atom, Atom) or atom.blocker:
+                continue
+            for cpv in wanted:
+                if other != cpv and vardb.match(atom) and cpv in vardb.match(atom):
+                    if str(other) not in wanted[cpv]:
+                        wanted[cpv].append(str(other))
+    return wanted
 
 
 def unsatisfied(depgraph):
@@ -239,6 +308,12 @@ def preserved_libs(vardb):
             for cpv, files in registry.getPreservedLibs().items()}
 
 
+def unrebuildable(depgraph, root):
+    vardb = depgraph._frozen_config._trees_orig[root]["vartree"].dbapi
+    portdb = depgraph._frozen_config._trees_orig[root]["porttree"].dbapi
+    return sorted(str(cpv) for cpv in vardb.cpv_all() if not portdb.cpv_exists(cpv))
+
+
 def system_info(depgraph, settings):
     """Facts the planner needs about the target system"""
     root = settings["EROOT"]
@@ -250,6 +325,8 @@ def system_info(depgraph, settings):
         "module_packages": module_packages(vardb),
         "multilib_abis": settings.get("MULTILIB_ABIS", "").split(),
         # the depgraph's vartree is a FakeVartree without the registry
+        # installed versions with no ebuild left: they can't be rebuilt
+        "unrebuildable": unrebuildable(depgraph, root),
         "preserved_libs": preserved_libs(
             depgraph._frozen_config._trees_orig[root]["vartree"].dbapi),
     }
@@ -306,6 +383,8 @@ def resolve(emerge_args):
         ("slot_conflicts", lambda: slot_conflicts(depgraph)),
         ("circular", lambda: circular_deps(depgraph)),
         ("blockers", lambda: blockers(depgraph)),
+        ("missed_updates", lambda: missed_updates(depgraph)),
+        ("missing_world", lambda: missing_world(depgraph)),
         ("unsatisfied", lambda: unsatisfied(depgraph)),
         ("system", lambda: system_info(depgraph, settings)),
     )
@@ -315,6 +394,21 @@ def resolve(emerge_args):
         except Exception:
             result[name] = None
             result["errors"][name] = traceback.format_exc()
+    # who else needs the installed packages that hold updates back
+    try:
+        holders = {p["parent"] for m in result.get("missed_updates") or []
+                   for p in m["parents"] if p.get("installed")}
+        holders |= {p["cpv"] for b in result.get("blockers") or []
+                    for p in b["blocked"] if p["installed"]}
+        unrebuildable = set((result.get("system") or {}).get("unrebuildable") or ())
+        holders |= {p["parent"] for c in result.get("slot_conflicts") or []
+                    for pkg in c["packages"] for p in pkg["parents"]
+                    if p["parent"] in unrebuildable}
+        vardb = depgraph._frozen_config._trees_orig[settings["EROOT"]]["vartree"].dbapi
+        result["dependents"] = installed_dependents(vardb, holders)
+    except Exception:
+        result["dependents"] = {}
+        result["errors"]["dependents"] = traceback.format_exc()
     return result
 
 

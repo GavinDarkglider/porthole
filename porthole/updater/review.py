@@ -143,6 +143,7 @@ class UpdateAssistant(Gtk.Window):
             self.content.pack_start(box, False, False, 0)
         else:
             self._approvals(plan)
+            self._held_back(plan)
             self._stages(plan)
             self._notes(plan)
         self._packages(plan)
@@ -200,6 +201,28 @@ class UpdateAssistant(Gtk.Window):
             inner.pack_start(_label(
                 "Temporarily %s to break the circular dependency %s"
                 % (cycle["temp_use"], " → ".join(cycle["cycle"]))), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+
+    def _held_back(self, plan):
+        held = plan.get("held_back") or []
+        if not held and not plan.get("missing_world"):
+            return
+        box, inner = _section("Held back")
+        if held:
+            inner.pack_start(_label("Portage leaves these out of the update (and still "
+                                    "reports success). They need a decision from you."),
+                             False, False, 0)
+        for h in held:
+            item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=12)
+            item.pack_start(_label("%s (staying at %s)" % (h["cpv"], h["selected"] or "nothing"),
+                                   bold=True, selectable=True), False, False, 0)
+            for line in h["why"]:
+                item.pack_start(_label(line, selectable=True), False, False, 0)
+            inner.pack_start(item, False, False, 0)
+        if plan.get("missing_world"):
+            inner.pack_start(_label("In your world file but no repository has them any "
+                                    "more: " + ", ".join(plan["missing_world"]),
+                                    selectable=True), False, False, 0)
         self.content.pack_start(box, False, False, 0)
 
     def _stages(self, plan):
