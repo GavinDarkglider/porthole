@@ -272,9 +272,14 @@ class UpdateAssistant(Gtk.Window):
             return
         box, inner = _section("Kept back by your choices")
         for h in held:
-            inner.pack_start(self._choice(_label("%s: %s" % (h["cp"], h["why"])),
-                                          h["undo"]["list"], h["undo"]["value"]),
-                             False, False, 0)
+            text = _label("%s: %s" % (h["cp"], h["why"]))
+            if h.get("undo"):
+                inner.pack_start(self._choice(text, h["undo"]["list"], h["undo"]["value"]),
+                                 False, False, 0)
+            else:
+                # follows from another choice above; undo that one instead
+                text.set_margin_start(28)
+                inner.pack_start(text, False, False, 0)
         for key in declined:
             kind, _sep, cp = key.partition(":")
             text = {"remove": "Keep %s installed" % cp,
@@ -334,6 +339,8 @@ class UpdateAssistant(Gtk.Window):
             self.show_progress()
 
     def _stages(self, plan):
+        if not plan.get("stages"):
+            return
         box, inner = _section("What happens")
         for i, stage in enumerate(plan.get("stages") or [], 1):
             inner.pack_start(_label("%d. %s" % (i, stage["title"]), bold=True), False, False, 0)

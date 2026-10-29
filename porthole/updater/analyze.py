@@ -309,6 +309,13 @@ def normalize_choices(choices):
             for key in ("exclude", "reject_fixes", "decline", "accept")}
 
 
+def _atom_cp(atom):
+    try:
+        return Atom(atom.lstrip("!")).cp
+    except Exception:
+        return None
+
+
 def _badness(result):
     """Lower is better: a failed resolution, then each kind of trouble"""
     return (not result.get("success"),
@@ -417,6 +424,15 @@ class Analyzer:
                         % (p["parent"], _short_atom(p["atom"]), parent_cp)
                     )
                     fix["lockstep"] = parent_cp
+            # the installed version can't live with something else updating
+            for c in (pkg.get("old_conflicts") or [])[:1]:
+                wanted = self.wanted_by_world(c["with"], merges) - {c["with"]}
+                lines.append(
+                    "The installed %s requires %s, but this update brings %s%s. %s works "
+                    "with it, and it is only in testing (%s)."
+                    % (c["old"], c["atom"], c["with"],
+                       " (for %s)" % _limit(wanted) if wanted else "", fix["cpv"],
+                       fix["line"].split()[-1]))
             if not lines:
                 lines.append("Only a testing (%s) version satisfies the update."
                              % fix["line"].split()[-1])
@@ -429,7 +445,8 @@ class Analyzer:
             lines.append("The required version uses a license you don't accept yet.")
 
         fix["needed_for"] = sorted(world_pkgs)
-        if world_pkgs:
+        # "needed for itself" says nothing
+        if world_pkgs and world_pkgs != {fix["cpv"]}:
             lines.append("Needed for: " + _limit(world_pkgs))
         fix["explanation"] = lines
         return fix
@@ -943,9 +960,19 @@ class Analyzer:
     def held_back(self, result):
         """Updates portage leaves out, explained"""
         held = []
+        self.follow_on_holds = []
         held_cps = {m["cp"] for m in result.get("missed_updates") or []}
         dependents = result.get("dependents") or {}
         for missed in result.get("missed_updates") or []:
+            kept = [p for p in missed["parents"] if not p.get("installed")
+                    and _atom_cp(p["atom"]) in self.held]
+            if kept and len(kept) == len(missed["parents"]):
+                self.follow_on_holds.append({
+                    "cp": missed["cp"],
+                    "why": "%s needs %s, and you are keeping %s"
+                           % (missed["cpv"], kept[0]["atom"], _atom_cp(kept[0]["atom"])),
+                    "undo": None})
+                continue
             why, options = [], []
             for p in missed["parents"]:
                 atom = p["atom"]
@@ -1058,7 +1085,7 @@ class Analyzer:
                 cp = _cp(cpv)
                 if cp not in self.held:
                     line = fix["line"] if fix["line"] in rejected else fix["alt_line"]
-                    self.hold(cp, "it needs %s, which you rejected" % line,
+                    self.hold(cp, "updating it needs %s, which you rejected" % line,
                               {"list": "reject_fixes", "value": line})
                     changed = True
         return keep, changed
@@ -1173,6 +1200,8 @@ class Analyzer:
         plan["held_by_you"] = [{"cp": cp, "why": why, "undo": undo}
                                for cp, (why, undo) in sorted(self.held.items())]
         plan["held_back"] = self.held_back(result)
+        # held back only by what the user keeps: their decision, not a problem
+        plan["held_by_you"] += self.follow_on_holds
         plan["missing_world"] = [w for w in result.get("missing_world") or []
                                  if w not in {r["cp"] for r in self.removed}]
 
@@ -1401,7 +1430,7 @@ def summarize(plan):
     elif status == "needs-help" and plan.get("verified", True) and plan.get("held_back"):
         held = len(plan["held_back"])
         title = "%d update%s held back" % (held, "s" if held != 1 else "")
-        body = ["Something installed stops them; open the report to see what."]
+        body = ["Something installed is in the way; the update assistant shows the options."]
     elif status == "needs-help":
         title = "%d updates need attention" % count
         body = ["A working update plan couldn't be found automatically."]

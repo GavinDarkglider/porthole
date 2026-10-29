@@ -274,7 +274,35 @@ def merge_list(depgraph):
         # 32-bit builds need the kernel's IA32 emulation
         info["abi_x86_32"] = "abi_x86_32" in pkg.use.enabled
         out.append(info)
+    old_version_conflicts(depgraph, pkgs, out)
     return out
+
+
+def old_version_conflicts(depgraph, pkgs, infos):
+    """Note where the installed version a package replaces couldn't live
+    with something else in this update; that is often why it has to move
+    (e.g. to a testing version): info["old_conflicts"]"""
+    from portage.dep import Atom, match_from_list, use_reduce
+    by_cp = {}
+    for info in infos:
+        by_cp.setdefault(info["cp"], []).append(info["cpv"])
+    for pkg, info in zip(pkgs, infos):
+        if not info["replaces"]:
+            continue
+        vardb = depgraph._frozen_config.trees[pkg.root]["vartree"].dbapi
+        try:
+            old = vardb.match(pkg.slot_atom)[0]
+            rdepend, use = vardb.aux_get(old, ["RDEPEND", "USE"])
+            atoms = use_reduce(rdepend, uselist=use.split(), flat=True, token_class=Atom)
+        except Exception:
+            continue
+        for atom in atoms:
+            if not isinstance(atom, Atom) or atom.blocker or atom.cp == pkg.cp:
+                continue
+            for cpv in by_cp.get(atom.cp, []):
+                if not match_from_list(atom, [cpv]):
+                    info.setdefault("old_conflicts", []).append(
+                        {"old": str(old), "atom": str(atom), "with": cpv})
 
 
 def module_packages(vardb):
