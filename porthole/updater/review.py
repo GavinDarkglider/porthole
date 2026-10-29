@@ -371,7 +371,8 @@ class UpdateAssistant(Gtk.Window):
     def _packages(self, plan):
         merges = plan.get("merge_list") or []
         rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
-        if not merges and not rebuilds:
+        lives = (plan.get("live") or {}).get("changed") or []
+        if not merges and not rebuilds and not lives:
             return
         # update?, can untick, kind, package, replaces, cp
         store = Gtk.ListStore(bool, bool, str, str, str, str)
@@ -379,6 +380,9 @@ class UpdateAssistant(Gtk.Window):
             store.append([m["cp"] not in self.pending["exclude"], True,
                           KIND_NAMES.get(m["kind"], "?"), m["cpv"], ", ".join(m["replaces"]),
                           m["cp"]])
+        for c in lives:
+            store.append([c["cp"] not in self.pending["exclude"], True, "L", c["cpv"],
+                          "new upstream commits", c["cp"]])
         for m in rebuilds:
             store.append([True, False, KIND_NAMES.get(m["kind"], "?"), m["cpv"],
                           "uses old libraries", m["cp"]])
@@ -392,7 +396,8 @@ class UpdateAssistant(Gtk.Window):
         scroller = Gtk.ScrolledWindow(min_content_height=260)
         scroller.add(view)
         expander = Gtk.Expander(label="All %d packages (untick to keep one at its "
-                                      "current version)" % (len(merges) + len(rebuilds)),
+                                      "current version)"
+                                % (len(merges) + len(rebuilds) + len(lives)),
                                 expanded=True)
         expander.add(scroller)
         self.content.pack_start(expander, False, False, 0)

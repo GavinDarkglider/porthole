@@ -508,6 +508,17 @@ def set_config(changes, path=CONFIG_FILE):
             if not 1 <= days <= 90:
                 raise JobError("interval_days must be between 1 and 90")
             clean[key] = str(days)
+        elif key == "live_exclude":
+            from portage.dep import Atom
+            names = value.split()
+            for name in names:
+                try:
+                    ok = Atom(name).cp == name
+                except Exception:
+                    ok = False
+                if not ok:
+                    raise JobError("Not a package name: %s" % name)
+            clean[key] = " ".join(names)
         else:
             if value.lower() not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
                 raise JobError("%s must be yes or no" % key)

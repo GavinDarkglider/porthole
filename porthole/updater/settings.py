@@ -71,6 +71,26 @@ class UpdaterSettingsPage(Gtk.Grid):
         self.attach(self.battery, 0, row, 2, 1)
         row += 1
 
+        heading = Gtk.Label(xalign=0, margin_top=8)
+        heading.set_markup("<b>Live packages</b>")
+        self.attach(heading, 0, row, 2, 1)
+        row += 1
+        self.live = Gtk.CheckButton(
+            label="Rebuild live (-9999) packages that have new upstream commits")
+        self.live.set_active(config["live_rebuild"])
+        self.attach(self.live, 0, row, 2, 1)
+        row += 1
+        self.attach(Gtk.Label(label="Never rebuild these", xalign=0), 0, row, 1, 1)
+        self.live_exclude = Gtk.Entry(text=" ".join(config["live_exclude"]),
+                                      placeholder_text="cat/pkg cat/pkg ...", hexpand=True)
+        self.attach(self.live_exclude, 1, row, 1, 1)
+        row += 1
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        hint.set_markup("<small>Checked with smart-live-rebuild, which only asks the "
+                        "upstream repositories for their latest commit.</small>")
+        self.attach(hint, 0, row, 2, 1)
+        row += 1
+
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last check: %s.  Last sync: %s.\nChecks run from cron "
                           "every hour and only do anything when due. Changing these "
@@ -81,7 +101,9 @@ class UpdaterSettingsPage(Gtk.Grid):
     def values(self):
         return {"interval_days": self.interval.get_value_as_int(),
                 "sync": self.sync.get_active(),
-                "skip_on_battery": self.battery.get_active()}
+                "skip_on_battery": self.battery.get_active(),
+                "live_rebuild": self.live.get_active(),
+                "live_exclude": self.live_exclude.get_text().split()}
 
     def save(self, callback=None):
         """Save if anything changed; callback(ok, message) when done"""
@@ -92,7 +114,9 @@ class UpdaterSettingsPage(Gtk.Grid):
             return
         settings = ["interval_days=%d" % values["interval_days"],
                     "sync=%s" % ("yes" if values["sync"] else "no"),
-                    "skip_on_battery=%s" % ("yes" if values["skip_on_battery"] else "no")]
+                    "skip_on_battery=%s" % ("yes" if values["skip_on_battery"] else "no"),
+                    "live_rebuild=%s" % ("yes" if values["live_rebuild"] else "no"),
+                    "live_exclude=%s" % " ".join(values["live_exclude"])]
 
         def done(ok, output):
             if ok:

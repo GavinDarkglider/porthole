@@ -330,8 +330,12 @@ def _is_exact_pin(atom):
 
 
 class Analyzer:
-    def __init__(self, targets=None, config_root="/", log=None, choices=None):
+    def __init__(self, targets=None, config_root="/", log=None, choices=None,
+                 live=False, live_exclude=()):
         self.choices = normalize_choices(choices)
+        # check live (-9999) packages for new upstream commits
+        self.live = live
+        self.live_exclude = set(live_exclude)
         # packages held at their version: unticked, or needing a rejected fix
         self.held = {cp: ("you chose not to update it", {"list": "exclude", "value": cp})
                      for cp in self.choices["exclude"]}
@@ -693,6 +697,62 @@ class Analyzer:
             # the update changes which libraries are kept
             "verified": "after previous stage" if after_update
                         else bool(preserved and preserved["verified"]),
+        }
+
+    # -- live packages ------------------------------------------------------
+
+    def live_changes(self, fixes, temp_use):
+        """Live packages whose upstream has new commits, from
+        smart-live-rebuild. It only asks the remotes (--pretend
+        --remote-only), so it runs unprivileged. None when not checked."""
+        if not self.live or self.target_root() != "/":
+            return None
+        slr = shutil.which("smart-live-rebuild")
+        if not slr:
+            return {"changed": [], "error": "smart-live-rebuild isn't installed "
+                    "(app-portage/smart-live-rebuild)", "verified": True}
+        command = [slr, "--pretend", "--no-color", "--remote-only",
+                   "--unprivileged-user", "--quiet"]
+        if os.geteuid() == 0:
+            # it only reads: no need for root (and its git calls run as portage)
+            command = ["runuser", "-u", "portage", "--", "env",
+                       "HOME=/var/lib/portage/home"] + command
+        self.log("Checking live packages for new upstream commits...")
+        try:
+            proc = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                  text=True, timeout=600, cwd="/")
+        except (OSError, subprocess.SubprocessError) as e:
+            return {"changed": [], "error": str(e), "verified": True}
+        if proc.returncode != 0:
+            return {"changed": [], "verified": True,
+                    "error": (proc.stderr.strip().splitlines() or ["failed"])[-1]}
+        import portage
+        vardb = portage.db[portage.root]["vartree"].dbapi
+        changed = []
+        for line in proc.stdout.split():
+            try:
+                atom = Atom(line)
+            except Exception:
+                continue
+            installed = vardb.match(atom)
+            if not installed or atom.cp in self.live_exclude or atom.cp in self.held:
+                continue
+            changed.append({"atom": line, "cp": atom.cp, "cpv": str(installed[-1])})
+        live = {"changed": changed, "error": None, "verified": True}
+        if changed:
+            self.log("  changed upstream: " + ", ".join(c["cpv"] for c in changed))
+            check = self.verify(fixes, temp_use, ["--oneshot"] + self.root_options()
+                                + ["=" + c["cpv"] for c in changed])
+            live["verified"] = bool(check.get("success"))
+        return live
+
+    def live_stage(self, live, after_update):
+        names = ", ".join(c["cp"] for c in live["changed"])
+        return {
+            "title": "Rebuild live packages with new upstream commits: " + names,
+            "commands": [["emerge", "--oneshot", "--keep-going"] + self.root_options()
+                         + ["=" + c["cpv"] for c in live["changed"]]],
+            "verified": "after previous stage" if after_update else live["verified"],
         }
 
     # -- checks on the system itself ---------------------------------------
@@ -1205,6 +1265,14 @@ class Analyzer:
         plan["missing_world"] = [w for w in result.get("missing_world") or []
                                  if w not in {r["cp"] for r in self.removed}]
 
+        live = self.live_changes(fixes, temp_use)
+        plan["live"] = live
+        lives = (live or {}).get("changed") or []
+        if lives:
+            # after the world update: it may bring what they build against
+            stages.append(self.live_stage(live, bool(stages)))
+            if verified and not live["verified"] and not stages[:-1]:
+                verified = False
         preserved = self.preserved(fixes, temp_use, system)
         rebuilds = (preserved or {}).get("merge_list") or []
         if stages or rebuilds:
@@ -1229,9 +1297,9 @@ class Analyzer:
             plan["remaining"] = remaining
             plan["verify_error"] = check.get("error")
 
-        if not plan["merge_list"] and not rebuilds and plan["held_back"]:
+        if not plan["merge_list"] and not rebuilds and not lives and plan["held_back"]:
             plan["status"] = "needs-help"  # not up to date: updates are stuck
-        elif not plan["merge_list"] and not rebuilds:
+        elif not plan["merge_list"] and not rebuilds and not lives:
             plan["status"] = "up-to-date"
         elif not verified or blocked:
             plan["status"] = "needs-help"
@@ -1255,18 +1323,22 @@ def format_report(plan):
         return "Resolver failed: %s\n%s" % (plan["error"], plan.get("traceback") or "")
     merges = plan["merge_list"]
     rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
+    lives = (plan.get("live") or {}).get("changed") or []
     counts = {}
     for m in merges:
         counts[m["kind"]] = counts.get(m["kind"], 0) + 1
     if rebuilds:
         counts["old-library rebuild"] = len(rebuilds)
+    if lives:
+        counts["live rebuild"] = len(lives)
     out.append({
         "up-to-date": "System is up to date." + (
             " (%d package(s) kept by your choices)" % len(plan["held_by_you"])
             if plan.get("held_by_you") else ""),
         "ready": "%d updates ready to install, no changes needed." % len(merges)
                  if merges else
-                 "%d package(s) need rebuilding, no changes needed." % len(rebuilds),
+                 "%d package(s) need rebuilding, no changes needed."
+                 % (len(rebuilds) + len(lives)),
         "needs-approval": "%d updates; %d change(s) need your approval (verified to work)."
                           % (len(merges), len(plan["fixes"]) + len(plan.get("cycles_broken") or [])
                              + sum(1 for st in plan["stages"] if st.get("approval"))),
@@ -1392,6 +1464,12 @@ def format_report(plan):
     for m in merges:
         old = " [%s]" % ", ".join(m["replaces"]) if m["replaces"] else ""
         out.append("  [%-2s] %s%s" % (KIND_NAMES.get(m["kind"], "?"), m["cpv"], old))
+    if lives:
+        out.append("\nLive packages with new upstream commits:")
+    for c in lives:
+        out.append("  [L ] %s" % c["cpv"])
+    if (plan.get("live") or {}).get("error"):
+        out.append("\nCouldn't check live packages: " + plan["live"]["error"])
     if rebuilds:
         out.append("\nRebuilds for old libraries%s:"
                    % (" (current list; rerun after the update)" if merges else ""))
@@ -1405,17 +1483,23 @@ def summarize(plan):
     """(title, body) describing a plan for people"""
     merges = plan.get("merge_list") or []
     rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
+    lives = (plan.get("live") or {}).get("changed") or []
     status = plan.get("status")
-    count = len(merges) + len(rebuilds)
+    count = len(merges) + len(rebuilds) + len(lives)
     changes = (len(plan.get("fixes") or []) + len(plan.get("cycles_broken") or [])
                + sum(1 for s in plan.get("stages") or [] if s.get("approval")))
     problems = [c for c in plan.get("checks") or [] if c["severity"] == "error"]
     if status == "ready" and not merges:
         title = "%d package%s need%s rebuilding" % (
             count, "s" if count != 1 else "", "" if count != 1 else "s")
-        body = ["%s still use%s old library versions an earlier update left behind."
-                % (", ".join(sorted({m["cp"].split("/")[1] for m in rebuilds})),
-                   "s" if count == 1 else "")]
+        body = []
+        if rebuilds:
+            body.append("%s still use%s old library versions an earlier update left "
+                        "behind." % (", ".join(sorted({m["cp"].split("/")[1] for m in rebuilds})),
+                                     "s" if len(rebuilds) == 1 else ""))
+        if lives:
+            body.append("New upstream commits for %s."
+                        % ", ".join(c["cp"].split("/")[1] for c in lives))
     elif status == "ready":
         title = "%d updates ready to install" % count
         body = ["No configuration changes are needed."]
@@ -1442,6 +1526,9 @@ def summarize(plan):
             "%d package%s kept at %s version by your choices."
             % (mine, "s" if mine != 1 else "", "their" if mine != 1 else "its")
             if mine else "")
+    if lives and merges:
+        body.append("Includes rebuilding %d live package%s."
+                    % (len(lives), "s" if len(lives) != 1 else ""))
     held = len(plan.get("held_back") or [])
     if held and status in ("ready", "needs-approval"):
         body.append("%d more update%s held back." % (held, "s are" if held != 1 else " is"))
@@ -1459,6 +1546,8 @@ def main(argv=None):
         description="Work out a verified update plan (read-only).")
     parser.add_argument("--json", help="write the plan as JSON to this file")
     parser.add_argument("--choices", help="JSON file of standing choices (see choices.json)")
+    parser.add_argument("--live", action="store_true",
+                        help="also check live packages for new upstream commits")
     parser.add_argument("--config-root", default="/",
                         help="analyze against another PORTAGE_CONFIGROOT")
     parser.add_argument("targets", nargs="*",
@@ -1469,7 +1558,8 @@ def main(argv=None):
     if args.choices:
         with open(args.choices) as f:
             choices = json.load(f)
-    plan = Analyzer(args.targets or None, args.config_root, choices=choices).analyze()
+    plan = Analyzer(args.targets or None, args.config_root, choices=choices,
+                    live=args.live).analyze()
     if args.json:
         with open(args.json, "w") as f:
             json.dump(plan, f, indent=1)

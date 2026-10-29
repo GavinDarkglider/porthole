@@ -27,6 +27,11 @@
         sync = yes
         # don't start a check while running on battery
         skip_on_battery = yes
+        # check live (-9999) packages for new upstream commits
+        # (smart-live-rebuild) and plan rebuilding the changed ones
+        live_rebuild = yes
+        # live packages never to rebuild this way (cat/pkg, space separated)
+        live_exclude =
 
     Copyright (C) 2026 Porthole developers
 
@@ -65,6 +70,8 @@ DEFAULTS = {
     "interval_days": "7",
     "sync": "yes",
     "skip_on_battery": "yes",
+    "live_rebuild": "yes",
+    "live_exclude": "",
 }
 
 
@@ -82,6 +89,8 @@ def load_config(path=CONFIG_FILE):
         "interval_days": max(1, interval),
         "sync": section.getboolean("sync", True),
         "skip_on_battery": section.getboolean("skip_on_battery", True),
+        "live_rebuild": section.getboolean("live_rebuild", True),
+        "live_exclude": section.get("live_exclude", "").split(),
     }
 
 
@@ -248,7 +257,9 @@ class Service:
             sync_info = None
             if sync and self.config["sync"]:
                 sync_info = self.sync()
-            plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE)).analyze()
+            plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE),
+                            live=self.config["live_rebuild"],
+                            live_exclude=self.config["live_exclude"]).analyze()
             plan["sync"] = sync_info
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds"
@@ -293,7 +304,7 @@ def main(argv=None):
         return 0
     if args.command == "config" and not args.settings:
         for key, value in load_config().items():
-            print("%s = %s" % (key, value))
+            print("%s = %s" % (key, " ".join(value) if isinstance(value, list) else value))
         return 0
 
     if args.command == "status":
@@ -348,7 +359,7 @@ def job_command(args, parser):
                     parser.error("settings are KEY=VALUE")
                 changes[key.strip()] = value.strip()
             for key, value in runner.set_config(changes).items():
-                print("%s = %s" % (key, value))
+                print("%s = %s" % (key, " ".join(value) if isinstance(value, list) else value))
     except runner.JobError as e:
         print(e, file=sys.stderr)
         return 3
