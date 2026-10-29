@@ -197,7 +197,7 @@ class web_page(threading.Thread):
         debug.dprint("LOADERS: web_page.__init__()")
         threading.Thread.__init__(self)
         self.name = name
-        self.setDaemon(1)  # quit even if this thread is still running
+        self.daemon = True  # quit even if this thread is still running
 
     def run(self):
         debug.dprint("LOADERS: web_page.run()")

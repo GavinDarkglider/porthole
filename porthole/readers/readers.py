@@ -66,7 +66,7 @@ class CommonReader(threading.Thread):
         # cancelled will be set when the thread should stop
         self.cancelled = False
         # quit even if thread is still running
-        self.setDaemon(1)
+        self.daemon = True
 
     def please_die( self ):
         """ Tell the thread to die """
@@ -95,7 +95,7 @@ class UpgradableListReader(CommonReader):
             self.pkg_count[key] = 0
         self.count = 0
         # command lifted fom emwrap and emwrap.sh
-        self.system_cmd = "emerge -ep --nocolor --nospinner system | cut -s -f2 -d ']'| cut -f1 -d '[' | sed 's/^[ ]\+//' | sed 's/[ ].*$//'"
+        self.system_cmd = "emerge -ep --nocolor --nospinner system | cut -s -f2 -d ']'| cut -f1 -d '[' | sed 's/^[ ]\\+//' | sed 's/[ ].*$//'"
 
 
     def run( self ):

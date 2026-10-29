@@ -1,6 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
-from distutils.core import setup
+from glob import glob
+
+from setuptools import setup
 from porthole.version import version as p_version
 
 datadir = "share/porthole/"
@@ -16,9 +18,8 @@ setup( \
     url = "http://porthole.sourceforge.net",
     packages = ['porthole',  'porthole.advancedemerge', 'porthole.backends', 'porthole.config',
                         'porthole.db', 'porthole.dialogs', 'porthole.loaders', 'porthole.mwsupport',
-                        'porthole.plugins','porthole.loaders', 'porthole.readers', 'porthole.terminal',
-                        'porthole.utils', 'porthole.views', 'porthole._xml', 'porthole.plugins.etc-proposals',
-                        'porthole.plugins.gpytage',
+                        'porthole.plugins', 'porthole.readers', 'porthole.terminal',
+                        'porthole.utils', 'porthole.views', 'porthole._xml',
                         'porthole.views.packagebook'],
     package_dir = {'porthole':'porthole'},
     scripts = ["scripts/porthole"],
@@ -38,9 +39,7 @@ setup( \
             "porthole/help/unmerge.html", "porthole/help/update.html", "porthole/help/warningtab.png",
             "porthole/help/depview.png", "porthole/help/ebuildtable_explained2.png", 
             "porthole/help/upgradeables.png"]),
-        (datadir + "glade",
-            ["porthole/glade/config.glade", "porthole/glade/advemerge.glade",
-            "porthole/glade/porthole.glade", "porthole/glade/about.glade"]),
+        (datadir + "glade", sorted(glob("porthole/glade/*.ui"))),
         (datadir,
             ["scripts/dopot.sh", "scripts/pocompile.sh", "AUTHORS"]),
         (datadir + "config",

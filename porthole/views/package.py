@@ -25,7 +25,7 @@
 import gi; gi.require_version("Gtk", "3.0") # make sure we have the right version
 from gi.repository import Gdk
 from gi.repository import Gtk
-from gi.repository import GObject
+from gi.repository import GLib
 from gi.repository import Pango
 
 import os
@@ -489,7 +489,7 @@ class PackageView(CommonTreeView):
         self.model = self.get_model()
         self.iter = model.get_iter_first()
         self.deprecated_info = False
-        GObject.idle_add(self.populate_info)
+        GLib.idle_add(self.populate_info)
 
     def populate_cpv(self, packages, locate_name = None, ):
         """ Populate the current view with packages """
@@ -557,7 +557,7 @@ class PackageView(CommonTreeView):
         self.model = self.get_model()
         self.iter = model.get_iter_first()
         self.deprecated_info = True
-        GObject.idle_add(self.populate_info)
+        GLib.idle_add(self.populate_info)
 
     def populate_info(self):
         """ Populate the current view with package info"""

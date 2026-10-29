@@ -47,7 +47,7 @@ class DatabaseReader(threading.Thread):
 
     def __init__(self, callback):
         threading.Thread.__init__(self)
-        self.setDaemon(1)     # quit even if this thread is still running
+        self.daemon = True     # quit even if this thread is still running
         self.id = datetime.datetime.now().microsecond
         print("DBREADER: DatabaseReader.id initialized to ", self.id)
         self.db = DBBase()        # the database

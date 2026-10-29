@@ -23,6 +23,7 @@
 '''
 
 from gi.repository import GdkPixbuf
+from gi.repository import GLib
 from gi.repository import GObject
 from gi.repository import Gtk
 
@@ -168,7 +169,7 @@ class DependsTree(Gtk.TreeStore):
             pack = self._get_package(atom)
             self.set_value(_iter, self.column["package"], pack)
             # treeview's populate_info() callback
-            GObject.idle_add(self.populate_info,self, self.get_path(_iter), _iter)
+            GLib.idle_add(self.populate_info,self, self.get_path(_iter), _iter)
         return add_kids, add_satisfied
 
     def update_kids(self, atom, add_kids, add_satisfied, satisfied,

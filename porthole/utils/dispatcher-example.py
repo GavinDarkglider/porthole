@@ -26,7 +26,7 @@
 
 import gi; gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
-from gi.repository import GObject
+from gi.repository import GLib
 from time import sleep
 import threading, os
 from .dispatcher import Dispatcher
@@ -91,7 +91,7 @@ def on_window_map_event(event, param):
     thread2 = Thread(Dispatcher(message_fun, buffer), "thread2", 0.9)
     thread3 = Thread(Dispatcher(message_fun, buffer), "thread3", 0.9)
     thread4 = Thread(Dispatcher(message_fun, buffer), "thread4", 0.5)
-    GObject.timeout_add(100, timerfunc)
+    GLib.timeout_add(100, timerfunc)
     thread1.start()
     thread2.start()
     thread3.start()

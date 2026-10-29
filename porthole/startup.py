@@ -26,9 +26,6 @@ _id = datetime.datetime.now().microsecond
 #print "STARTUP: id initialized to ", _id
 
 import gi; gi.require_version("Gtk", "3.0") # make sure we have the right version
-# proper way to enable threading.  Do this first before any other code
-from gi.repository import GObject
-GObject.threads_init()
 
 from gi.repository import Gtk
 from gi.repository import GdkPixbuf

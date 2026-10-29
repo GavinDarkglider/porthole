@@ -28,7 +28,7 @@ print("DATABASE: id initialized to ", _id)
 
 import os
 import pickle
-from gi.repository import GObject
+from gi.repository import GLib
 
 from porthole import backends
 from porthole.db.dbreader import DatabaseReader
@@ -209,7 +209,7 @@ class Database(DBBase):
                 # create a new db
                 self.desc_thread = DescriptionReader(self.list)
                 self.desc_thread.start()
-                GObject.timeout_add(100, self.desc_thread_update)
+                GLib.timeout_add(100, self.desc_thread_update)
 
     def cancell_desc_update(self):
         if self.desc_thread:

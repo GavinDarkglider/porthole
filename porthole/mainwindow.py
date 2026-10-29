@@ -28,7 +28,7 @@ print("MAINWINDOW: id initialized to ", _id)
 
 import gi
 gi.require_version("Gtk", "3.0") # make sure we have the right version
-from gi.repository import GObject
+from gi.repository import GLib
 from gi.repository import Gdk
 from gi.repository import Gtk
 
@@ -237,7 +237,7 @@ class MainWindow(PluginHandler):
         #debug.dprint("MAINWINDOW: init_db(); starting db.db.db_thread")
         self.reload = False
         self.upgrade_view = False
-        #self.db_timeout = GObject.timeout_add(100, self.update_db_read)
+        #self.db_timeout = GLib.timeout_add(100, self.update_db_read)
         self.last_sync = _("Unknown")
         self.valid_sync = False
         self.get_sync_time()
@@ -582,7 +582,7 @@ class MainWindow(PluginHandler):
             "reader_running set to True")
         self.build_deps = False
         # add a timeout to check if thread is done
-        GObject.timeout_add(200, self.update_reader_thread)
+        GLib.timeout_add(200, self.update_reader_thread)
         self.set_cancel_btn(ON)
 
     def wait_dialog_response(self, widget, response):
@@ -758,7 +758,7 @@ class MainWindow(PluginHandler):
                     "db_thread is done, reload_view()")
                 # need to wait until all other events are done for it to
                 # show when the window first opens
-                GObject.idle_add(self.reload_view)
+                GLib.idle_add(self.reload_view)
         debug.dprint("StatusHandler: _update_db_done(); " +
             "Made it thru a reload, returning...")
         self.status.progress_done()

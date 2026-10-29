@@ -38,7 +38,7 @@ class CommonReader(threading.Thread):
         # cancelled will be set when the thread should stop
         self.cancelled = False
         # quit even if thread is still running
-        self.setDaemon(1)
+        self.daemon = True
         print("threading.enumerate() = ",threading.enumerate(), file=stderr)
         print("this thread is :", _thread.get_ident(), ' current thread ', threading.currentThread(), file=stderr)
 

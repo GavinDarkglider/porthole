@@ -62,7 +62,7 @@ class UpgradableListReader(CommonReader):
         self.count = 0
         self.pkg_dict_total = 0
         # command lifted fom emwrap and emwrap.sh
-        self.system_cmd = "emerge -ep --nocolor --nospinner system | cut -s -f2 -d ']'| cut -f1 -d '[' | sed 's/^[ ]\+//' | sed 's/[ ].*$//'"
+        self.system_cmd = "emerge -ep --nocolor --nospinner system | cut -s -f2 -d ']'| cut -f1 -d '[' | sed 's/^[ ]\\+//' | sed 's/[ ].*$//'"
         #self.start = self.run
 
     def run( self ):

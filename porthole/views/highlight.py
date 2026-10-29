@@ -13,15 +13,23 @@ Adapted to Porthole by, Brian Dolbec <dol-sen@users.sourceforge.net>
 """
 
 import gi
-gi.require_version('GtkSource', '4')
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
 
-from gi.repository import GtkSource
+try:
+    gi.require_version('GtkSource', '4')
+    from gi.repository import GtkSource
+except (ValueError, ImportError):
+    # gtksourceview:4 not installed, fall back to a plain text view
+    GtkSource = None
 
 from porthole.utils import debug
 from porthole.views.lazyview import LazyView
 
+_BaseView = GtkSource.View if GtkSource else Gtk.TextView
 
-class HighlightView (GtkSource.View, LazyView):
+
+class HighlightView (_BaseView, LazyView):
 
     def __init__ (self, get_file_fn, languages = []):
         """@param get_file_fn: function to return a filename from a pkg object
@@ -32,6 +40,17 @@ class HighlightView (GtkSource.View, LazyView):
             self.get_fn = get_file_fn
         else:  # assume it is passed a filename already
             self.get_fn = self._get_fn
+
+        _BaseView.__init__(self)
+        LazyView.__init__(self)
+
+        self.set_editable(False)
+        self.set_cursor_visible(False)
+        self.set_monospace(True)
+
+        if not GtkSource:
+            debug.dprint("HIGHLIGHT: GtkSource not available. Disable highlighting.")
+            return
 
         man = GtkSource.LanguageManager()
 
@@ -50,15 +69,10 @@ class HighlightView (GtkSource.View, LazyView):
         if not language and old_lang:
             debug.dprint("HIGHLIGHT: No %(old)s language file installed. Disable highlighting." %{"old" : old_lang})
 
-        # fixme or port me
-        #buf = GtkSource.Buffer()
-        #buf.set_language(language)
-
-        GtkSource.View.__init__(self)
-        LazyView.__init__(self)
-
-        self.set_editable(False)
-        self.set_cursor_visible(False)
+        if language:
+            buf = GtkSource.Buffer()
+            buf.set_language(language)
+            self.set_buffer(buf)
 
     def _get_fn(self, x):
         return x

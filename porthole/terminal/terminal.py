@@ -54,7 +54,7 @@ import gi; gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk
 #from gi.repository import GdkPixbuf
 from gi.repository import Gtk
-from gi.repository import GObject
+from gi.repository import GLib
 from gi.repository import Pango
 
 import os
@@ -216,7 +216,7 @@ class ProcessManager: #dbus.service.Object):
             # show window
             self.window.show()
             self.window_visible = True
-            #GObject.timeout_add(100, self.update)
+            #GLib.timeout_add(100, self.update)
             debug.dprint("TERMINAL: show_window(): returning")
             return True
         # load the glade file
@@ -293,7 +293,7 @@ class ProcessManager: #dbus.service.Object):
         self.timer_menuitem.set_sensitive(False)
         # start the reader
         self.reader.start()
-        GObject.timeout_add(100, self.update)
+        GLib.timeout_add(100, self.update)
 
         if config.Prefs:
             self.window.resize((config.Prefs.emerge.verbose and
@@ -782,7 +782,7 @@ class ProcessManager: #dbus.service.Object):
                             self.term.append(TAB_PROCESS, self.process_buffer)
                             self.process_buffer = ''
                         self.force_buffer_write = False
-                        GObject.timeout_add(200, self.force_buffer_write_timer)
+                        GLib.timeout_add(200, self.force_buffer_write_timer)
                 self.lastchar = char
         else: # if reader string is empty... maybe waiting for input
             if self.force_buffer_write and self.process_buffer:
@@ -795,7 +795,7 @@ class ProcessManager: #dbus.service.Object):
                     self.term.append(TAB_PROCESS, self.process_buffer)
                     self.process_buffer = ''
                 self.force_buffer_write = False
-                GObject.timeout_add(200, self.force_buffer_write_timer)
+                GLib.timeout_add(200, self.force_buffer_write_timer)
                 # perhaps sudo is waiting for a password
                 # note: the prompt is set to "Password:" in the command string
                 # to override any default.
@@ -861,9 +861,7 @@ class ProcessManager: #dbus.service.Object):
         hbox.pack_start(entry, expand=True, fill=True, padding=0)
         dialog.vbox.pack_start(hbox, expand=True, fill=True, padding=0)
         hbox.show_all()
-        Gdk.threads_enter()
         result = dialog.run()
-        Gdk.threads_leave()
         debug.dprint("TERMINAL: do_password_popup(): result %s" % result)
         dialog.destroy()
         if result == Gtk.ResponseType.CANCEL:

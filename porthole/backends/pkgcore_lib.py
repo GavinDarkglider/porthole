@@ -27,7 +27,7 @@ import os
 from gettext import gettext as _
 
 #from timeit import Timer
-import imp
+import importlib
 
 try:
     import pkgcore
@@ -120,7 +120,7 @@ def get_sets_list( filename ):
         return None
     # split the atoms from the pkg name and any trailing attributes if any
     for item in set_list:
-        parts = self.split_atom_pkg(item)
+        parts = split_atom_pkg(item)
         pkgs[parts[0]] = parts[1:]
     return pkgs
 
@@ -152,11 +152,11 @@ def reload_world():
 
 def reload_portage():
     dprint('PKGCORE_LIB: reloading portage')
-    imp.reload(pkgcore.config)
-    imp.reload(pkgcore.const)
-    imp.reload(pkgcore.util.file.read_bash)
-    imp.reload(portage)
-    imp.reload(portage_const)
+    importlib.reload(pkgcore.config)
+    importlib.reload(pkgcore.const)
+    importlib.reload(pkgcore.util.file.read_bash)
+    importlib.reload(portage)
+    importlib.reload(portage_const)
 
 def get_use_flag_dict():
     """ Get all the use flags and return them as a dictionary
@@ -691,11 +691,11 @@ class Package:
         """Update the package info"""
         if self.full_name == "None":
             return
-        self.latest_installed == None
+        self.latest_installed = None
         Installed_Semaphore.acquire()
-        self.is_installed = full_name in installed  # true if installed
+        self.is_installed = self.full_name in installed  # true if installed
         Installed_Semaphore.release()
-        self.in_world = full_name in World
+        self.in_world = self.full_name in World
 
     def get_installed(self):
         """Returns a list of all installed ebuilds."""
@@ -711,7 +711,7 @@ class Package:
             return self.full_name
         if self.name == None:
             if self.pkgcore_pkg:
-                self.name = pkgcore_pkg.package
+                self.name = self.pkgcore_pkg.package
             else:
                 self.name = get_name(self.full_name)
         return self.name
@@ -722,7 +722,7 @@ class Package:
             return ''
         if self.category == None:
             if self.pkgcore_pkg:
-                self.name = pkgcore_pkg.category
+                self.category = self.pkgcore_pkg.category
             else:
                 self.category = get_category(self.full_name)
         return self.category
@@ -917,8 +917,8 @@ class Database:
     def update_package(self, fullname):
         """Update the package info in the full list and the installed list"""
         #category, name = fullname.split("/")
-        category = get_category(full_name)
-        name = get_name(full_name)
+        category = get_category(fullname)
+        name = get_name(fullname)
         if (category in self.categories and name in self.categories[category]):
             self.categories[category][name].update_info()
         if (category in self.installed and name in self.installed[category]):
@@ -930,7 +930,7 @@ class DatabaseReader(threading.Thread):
 
     def __init__(self, callback):
         threading.Thread.__init__(self)
-        self.setDaemon(1)     # quit even if this thread is still running
+        self.daemon = True     # quit even if this thread is still running
         self.db = Database()        # the database
         self.callback = callback
         self.done = False     # false if the thread is still working

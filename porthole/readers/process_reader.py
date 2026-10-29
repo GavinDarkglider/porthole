@@ -26,8 +26,6 @@ import os
 import threading
 import time
 
-from gi.repository import Gdk
-
 from porthole.utils import debug
 #from porthole.utils.dispatcher import Dispatcher
 
@@ -38,7 +36,7 @@ class ProcessOutputReader(threading.Thread):
         threading.Thread.__init__(self)
         # set callback
         self.dispatcher = dispatcher
-        self.setDaemon(1)  # quit even if this thread is still running
+        self.daemon = True  # quit even if this thread is still running
         self.process_running = False
         # initialize only, self.fd set by ProcessManager._run()
         self.fd = None
@@ -117,9 +115,7 @@ class ProcessOutputReader(threading.Thread):
                     if self.file_input:
                         self.file_input = False
                     else:
-                        Gdk.threads_enter()
                         self.dispatcher()
-                        Gdk.threads_leave()
             else:
                 # sleep for .5 seconds before we check again
                 if time:
