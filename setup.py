@@ -48,8 +48,9 @@ setup( \
         (datadir + "i18n",
             ["porthole/i18n/messages.pot", "porthole/i18n/TRANSLATING"]),
         ("share/applications", ["porthole.desktop"]),
-        ("/etc/porthole", ["data/updater.conf"]),
-        ("/etc/xdg/autostart", ["data/porthole-update-notifier.desktop"]),
+        # data/updater.conf, data/porthole-update.cron and
+        # data/porthole-update-notifier.desktop go under /etc, which a
+        # wheel can't install to; the package installs them
         ("share/polkit-1/actions", ["data/org.porthole.policy"]),
         ("share/pixmaps", ["porthole/pixmaps/porthole-icon.png"])
     ]
