@@ -3,13 +3,14 @@
 from glob import glob
 
 from setuptools import setup
-from porthole.version import version as p_version
 
 datadir = "share/porthole/"
 
 setup( \
     name = "porthole",
-    version = p_version,
+    # the git description shown in the about box isn't a valid package
+    # version; packages set porthole/version.py themselves
+    version = "0.7.0.dev0",
     description = "GTK+ frontend to Portage",
     author = "Fredrik Arnerup, Daniel G. Taylor, Brian Dolbec, William F. Wheeler",
     author_email = "dol-sen@users.sourceforge.net, " \
