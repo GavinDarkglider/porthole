@@ -2,10 +2,12 @@
     Porthole update notifier
 
     Runs in the user's desktop session. Watches the plan written by the
-    root update service (/var/lib/porthole/plan.json), shows a tray icon
-    while updates are pending and a notification for each new plan.
-    Opening Porthole or starting a check asks for the admin password
-    through pkexec.
+    root update service (/var/lib/porthole/plan.json) and the job queue
+    (jobs.json). The tray icon shows while updates are pending, while a
+    job is queued or running, and after a job failed; its tooltip shows
+    progress. Notifications announce new plans and finished jobs.
+    Everything here runs as the user; only submitting a check asks for
+    root (sudo -A, or pkexec).
 
     Copyright (C) 2026 Porthole developers
 
@@ -27,8 +29,11 @@ gi.require_version("Notify", "0.7")
 from gi.repository import Gio, GLib, Gtk, Notify
 
 from porthole.updater.analyze import format_report, summarize
-from porthole.updater.commands import LOCAL, SRC as _SRC, script_command
+from porthole.updater.commands import SRC as _SRC, script_command
+from porthole.updater.elevate import run_as_root, service
+from porthole.updater.runner import ACTIVE
 from porthole.updater.service import PLAN_FILE, STATE_DIR, STATE_FILE, read_json
+from porthole.updater.viewer import JobWindow, current_job, describe, read_jobs
 
 APP_ID = "org.porthole.UpdateNotifier"
 NOTIFIER_STATE = os.path.join(
@@ -40,16 +45,6 @@ SPAWN_LOG = os.path.join(
 # a check that has claimed to be running this long has died
 STALE_RUN = 3 * 3600
 PENDING = ("ready", "needs-approval", "needs-help")
-
-def as_root(command, gui=False):
-    """Run through pkexec. Installed programs have a polkit policy that
-    keeps the display; from a checkout it must be passed along"""
-    if gui and LOCAL:
-        env = ["%s=%s" % (k, os.environ[k]) for k in ("DISPLAY", "XAUTHORITY")
-               if k in os.environ]
-        command = ["env"] + env + command
-    return ["pkexec"] + command
-
 
 def icon_path():
     for base in (os.path.join(_SRC, "porthole"), "/usr/share/porthole"):
@@ -170,6 +165,7 @@ class Notifier(Gtk.Application):
         self.reload_pending = False
         self.activated = False
         self.seen = read_json(NOTIFIER_STATE, {}) or {}
+        self.job_window = None
 
     def do_startup(self):
         Gtk.Application.do_startup(self)
@@ -177,22 +173,24 @@ class Notifier(Gtk.Application):
         self.hold()  # keep running without a window
 
         menu = Gtk.Menu()
+        self.items = {}
         for label, callback in (
             ("Review and update...", self.review),
+            ("Show progress", self.show_progress),
             ("Show report", self.show_report),
             ("Check now", self.check_now),
         ):
             item = Gtk.MenuItem(label=label)
             item.connect("activate", lambda w, cb=callback: cb())
             menu.append(item)
-            if label == "Check now":
-                self.check_item = item
+            self.items[label] = item
+        self.check_item = self.items["Check now"]
         menu.append(Gtk.SeparatorMenuItem())
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", lambda w: self.quit())
         menu.append(quit_item)
         menu.show_all()
-        self.tray = TrayIcon(self.show_report, menu)
+        self.tray = TrayIcon(self.on_tray_click, menu)
 
         # the service replaces plan.json with a rename, so watch the directory
         directory = Gio.File.new_for_path(STATE_DIR)
@@ -215,7 +213,8 @@ class Notifier(Gtk.Application):
     # -- plan handling ----------------------------------------------------
 
     def on_changed(self, monitor, file, other, event):
-        if file.get_basename() in ("plan.json", "state.json") and not self.reload_pending:
+        if (file.get_basename() in ("plan.json", "state.json", "jobs.json")
+                and not self.reload_pending):
             self.reload_pending = True
             GLib.timeout_add(500, self.reload)
 
@@ -225,13 +224,26 @@ class Notifier(Gtk.Application):
         self.state = read_json(STATE_FILE, {}) or {}
         running = (self.state.get("running")
                    and time.time() - self.state.get("started", 0) < STALE_RUN)
-        self.check_item.set_sensitive(not running)
+        jobs = read_jobs()
+        job = current_job(jobs)
+        active = bool(job) and job["status"] in ACTIVE
+        # a failed job keeps the icon up until its progress has been looked at
+        failed = (bool(job) and job["status"] == "failed"
+                  and self.seen.get("failed_seen") != job["id"])
+        self.check_item.set_sensitive(not running and not active)
+        self.items["Show progress"].set_visible(bool(jobs))
 
         pending = bool(self.plan) and self.plan.get("status") in PENDING
         title, body = summarize(self.plan) if self.plan else ("No update check yet", "")
-        self.tray.set_tooltip("Checking for updates..." if running else
-                              "%s\n%s" % (title, body) if body else title)
-        self.tray.set_visible(pending or bool(running))
+        if active or failed:
+            tooltip = describe(job)
+        elif running:
+            tooltip = "Checking for updates..."
+        else:
+            tooltip = "%s\n%s" % (title, body) if body else title
+        self.tray.set_tooltip(tooltip)
+        self.tray.set_visible(pending or bool(running) or active or failed)
+        self.announce_finished(jobs)
 
         generated = (self.plan or {}).get("generated")
         if pending and generated and generated != self.seen.get("notified"):
@@ -242,6 +254,32 @@ class Notifier(Gtk.Application):
             self.report.show_plan(self.plan, self.state)
         return True  # keep the poll timer going
 
+    def announce_finished(self, jobs):
+        """One notification per job that finished since we last looked"""
+        last = self.seen.get("job_announced")
+        finished = [j for j in jobs if j["status"] not in ACTIVE]
+        if last is None:
+            # first run: don't announce history
+            if finished:
+                self.seen["job_announced"] = finished[-1]["id"]
+                self.save_seen()
+            return
+        ids = [j["id"] for j in finished]
+        new = finished[ids.index(last) + 1:] if last in ids else finished[-1:]
+        for job in new:
+            if job["kind"] == "check" and job["status"] == "done":
+                continue  # the new plan has its own notification
+            words = {"done": "finished", "failed": "failed", "cancelled": "was cancelled"}
+            body = {"done": "Everything in the plan was installed.",
+                    "failed": "A step failed; the rest was skipped. Open the progress "
+                              "window to see why.",
+                    "cancelled": "Packages already built stay installed."}
+            self.notify("%s %s" % (job["title"], words.get(job["status"], job["status"])),
+                        body.get(job["status"], ""), progress=True)
+        if new:
+            self.seen["job_announced"] = new[-1]["id"]
+            self.save_seen()
+
     def save_seen(self):
         try:
             os.makedirs(os.path.dirname(NOTIFIER_STATE), exist_ok=True)
@@ -250,20 +288,42 @@ class Notifier(Gtk.Application):
         except OSError:
             pass
 
-    def notify(self, title, body):
+    def notify(self, title, body, progress=False):
         self.notification = Notify.Notification.new(
             title, body, icon_path() or "software-update-available")
         if "actions" in (Notify.get_server_caps() or []):
-            self.notification.add_action("review", "Review and update",
-                                         lambda *a: self.review())
-            self.notification.add_action("report", "Show report",
-                                         lambda *a: self.show_report())
+            if progress:
+                self.notification.add_action("progress", "Show progress",
+                                             lambda *a: self.show_progress())
+            else:
+                self.notification.add_action("review", "Review and update",
+                                             lambda *a: self.review())
+                self.notification.add_action("report", "Show report",
+                                             lambda *a: self.show_report())
         try:
             self.notification.show()
         except GLib.Error:
             pass
 
     # -- actions -----------------------------------------------------------
+
+    def on_tray_click(self):
+        job = current_job()
+        if job and (job["status"] in ACTIVE or (
+                job["status"] == "failed" and self.seen.get("failed_seen") != job["id"])):
+            self.show_progress()
+        else:
+            self.show_report()
+
+    def show_progress(self):
+        if self.job_window is None:
+            self.job_window = JobWindow(application=self)
+        self.job_window.present_job()
+        job = current_job()
+        if job and job["status"] == "failed":
+            self.seen["failed_seen"] = job["id"]
+            self.save_seen()
+            self.reload()
 
     def show_report(self):
         if self.report is None:
@@ -281,13 +341,20 @@ class Notifier(Gtk.Application):
         # Porthole takes over from here
         if self.report:
             self.report.hide()
-        self.spawn(as_root(script_command("porthole") + ["--review"], gui=True))
+        # as the user: Porthole only asks for root to change something
+        self.spawn(script_command("porthole") + ["--review"])
 
     def check_now(self):
         self.check_item.set_sensitive(False)
         self.tray.set_tooltip("Checking for updates...")
-        self.spawn(as_root(script_command("porthole-update-service")
-                           + ["run", "--force", "--quiet"]))
+        run_as_root(service("submit", "check"), self.check_submitted)
+
+    def check_submitted(self, ok, output):
+        if not ok:
+            self.check_item.set_sensitive(True)
+            Notify.Notification.new("Couldn't check for updates",
+                                    output or "Cancelled.", None).show()
+        self.reload()
 
     def spawn(self, command):
         # keep the output: pkexec and the programs it runs report failures there

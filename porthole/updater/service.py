@@ -9,7 +9,14 @@
         /var/lib/porthole/plan.json    the latest plan (world readable)
         /var/lib/porthole/state.json   last check/sync times, running flag
 
-    It never builds packages or writes to /etc/portage.
+    The check itself never builds packages or writes to /etc/portage.
+    Updates the user approved run through the job runner (runner.py):
+
+        submit update --plan TIME   queue the reviewed plan
+        submit check                queue a sync and check
+        cancel [JOB]                cancel queued jobs, stop the running one
+        jobs                        show the queue
+        config [KEY=VALUE...]       show or change updater.conf
 
     Settings live in /etc/porthole/updater.conf:
 
@@ -159,6 +166,19 @@ def last_repo_sync():
     return max(times) if times else None
 
 
+def check_lock(wait=True):
+    """Hold this while checking, so two checks never overlap. Returns
+    the open lock file, or None if not waiting and it is taken."""
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    lock = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+    except BlockingIOError:
+        lock.close()
+        return None
+    return lock
+
+
 class Service:
     def __init__(self, config, log):
         self.config = config
@@ -204,7 +224,12 @@ class Service:
         return {"ran": True, "ok": ok, "last": now if ok else recent,
                 "error": None if ok else output[-2000:]}
 
-    def run(self, force=False, sync=True):
+    def run(self, force=False, sync=True, from_runner=False):
+        if not from_runner:
+            from porthole.updater.runner import runner_active
+            if runner_active():
+                self.log("Update jobs are running; checking later")
+                return 0
         if not force:
             if not self.due():
                 self.log("Not due yet")
@@ -243,7 +268,30 @@ def main(argv=None):
     run.add_argument("--no-sync", action="store_true", help="don't sync first")
     run.add_argument("--quiet", action="store_true", help="only write the log file")
     sub.add_parser("status", help="show the last plan")
+    submit = sub.add_parser("submit", help="queue a job for the runner")
+    submit.add_argument("kind", choices=("update", "check"))
+    submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed")
+    submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
+    cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
+    cancel.add_argument("job", nargs="?", help="only this job")
+    sub.add_parser("jobs", help="show the job queue")
+    conf = sub.add_parser("config", help="show or change updater.conf")
+    conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
+    sub.add_parser("runner", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+
+    if args.command == "jobs":
+        from porthole.updater.runner import JOBS_FILE
+        for job in (read_json(JOBS_FILE, {}) or {}).get("jobs", []):
+            progress = job.get("progress") or {}
+            print("%s  %-9s %s%s" % (job["id"], job["status"], job["title"],
+                                     "  (%d of %d)" % (progress["done"], progress["total"])
+                                     if progress and job["status"] == "running" else ""))
+        return 0
+    if args.command == "config" and not args.settings:
+        for key, value in load_config().items():
+            print("%s = %s" % (key, value))
+        return 0
 
     if args.command == "status":
         plan = read_json(PLAN_FILE)
@@ -258,16 +306,48 @@ def main(argv=None):
         return 0
 
     if os.geteuid() != 0:
-        parser.error("run needs root")
-    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
-    lock = open(LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        parser.error("%s needs root" % args.command)
+    if args.command != "run":
+        return job_command(args, parser)
+    lock = check_lock(wait=False)
+    if lock is None:
         print("Another check is already running.", file=sys.stderr)
         return 0
     log = Log(echo=not args.quiet)
     return Service(load_config(), log).run(force=args.force, sync=not args.no_sync)
+
+
+def job_command(args, parser):
+    """submit, cancel, config and the runner itself"""
+    from porthole.updater import runner
+    if args.command == "runner":
+        return runner.Runner().run()
+    try:
+        if args.command == "submit":
+            if args.kind == "update":
+                if not args.plan:
+                    parser.error("submit update needs --plan")
+                job = runner.submit_update(args.plan)
+            else:
+                job = runner.submit_check(sync=not args.no_sync)
+            runner.start_runner()
+            print(job["id"])
+        elif args.command == "cancel":
+            stopped = runner.cancel(args.job)
+            print("\n".join(stopped) if stopped else "Nothing to cancel.")
+        elif args.command == "config":
+            changes = {}
+            for setting in args.settings:
+                key, sep, value = setting.partition("=")
+                if not sep:
+                    parser.error("settings are KEY=VALUE")
+                changes[key.strip()] = value.strip()
+            for key, value in runner.set_config(changes).items():
+                print("%s = %s" % (key, value))
+    except runner.JobError as e:
+        print(e, file=sys.stderr)
+        return 3
+    return 0
 
 
 if __name__ == "__main__":

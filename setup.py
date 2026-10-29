@@ -24,7 +24,8 @@ setup( \
                         'porthole.views.packagebook'],
     package_dir = {'porthole':'porthole'},
     scripts = ["scripts/porthole", "scripts/porthole-update-check",
-               "scripts/porthole-update-service", "scripts/porthole-update-notifier"],
+               "scripts/porthole-update-service", "scripts/porthole-update-notifier",
+               "scripts/porthole-askpass"],
     data_files = [
         (datadir + "pixmaps",
             ["porthole/pixmaps/porthole-about.png", "porthole/pixmaps/porthole-icon.png", 

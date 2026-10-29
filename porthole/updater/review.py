@@ -3,10 +3,9 @@
 
     Shows the plan made by the update service inside Porthole: what will
     be updated, which config changes need approval and why, and the
-    stages it runs in. "Apply and start update" writes the approved
-    lines to /etc/portage/package.*/zz-porthole and queues the stages in
-    Porthole's terminal, pausing the queue if a stage fails. The plan is
-    re-checked whenever the queue stops, failed or not.
+    stages it runs in. "Apply and start update" hands the reviewed plan to
+    the root job runner, so this window (and Porthole) can be closed while
+    it runs; progress shows in the job window and the tray.
 
     Copyright (C) 2026 Porthole developers
 
@@ -16,102 +15,18 @@
     (at your option) any later version.
 """
 
-import datetime
-import os
 import shlex
-import time
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+from gi.repository import Gio, GLib, Gtk
 
-from porthole.updater.analyze import (
-    CONFIG_DIRS, KIND_NAMES, OWNED_NAME, TEMP_NAME, format_report, summarize)
-from porthole.updater.commands import script_command
-from porthole.updater.service import PLAN_FILE, last_repo_sync, read_json
-
-PORTAGE_DIR = "/etc/portage"
-SENDER = "Update Assistant"
-# changes this close to the check were made by the check itself
-GRACE = 60
-
-
-class ConfigError(Exception):
-    pass
-
-
-def plan_time(plan):
-    try:
-        return datetime.datetime.fromisoformat(plan["generated"]).timestamp()
-    except (KeyError, ValueError):
-        return 0
-
-
-def newest_config_change(top=PORTAGE_DIR):
-    newest = 0
-    for dirpath, dirnames, filenames in os.walk(top):
-        for name in dirnames + filenames:
-            try:
-                newest = max(newest, os.lstat(os.path.join(dirpath, name)).st_mtime)
-            except OSError:
-                pass
-    return newest
-
-
-def stale_reason(plan):
-    """Why the plan may no longer match the system, or None"""
-    checked = plan_time(plan)
-    if (last_repo_sync() or 0) > checked + GRACE:
-        return "The repositories were synced after this check."
-    if newest_config_change() > checked + GRACE:
-        return "/etc/portage was changed after this check."
-    return None
-
-
-def write_fixes(fixes):
-    """Append approved lines to /etc/portage/package.*/zz-porthole"""
-    for fix in fixes:
-        path = os.path.join(PORTAGE_DIR, CONFIG_DIRS[fix["kind"]])
-        if os.path.isfile(path):
-            raise ConfigError(
-                "%s is a single file. Porthole keeps its changes in its own file, "
-                "so it needs %s to be a directory. Move the file into a new "
-                "directory of that name and re-check." % (path, path))
-    stamp = time.strftime("%Y-%m-%d")
-    written = []
-    for fix in fixes:
-        directory = os.path.join(PORTAGE_DIR, CONFIG_DIRS[fix["kind"]])
-        os.makedirs(directory, exist_ok=True)
-        path = os.path.join(directory, OWNED_NAME)
-        try:
-            with open(path) as f:
-                existing = f.read().splitlines()
-        except FileNotFoundError:
-            existing = None
-        if existing and fix["line"] in existing:
-            continue
-        with open(path, "a") as f:
-            if existing is None:
-                f.write("# Added by Porthole's update assistant. "
-                        "Safe to edit or remove.\n")
-            reason = (fix.get("explanation") or [""])[0]
-            f.write("\n# %s: %s\n%s\n" % (stamp, reason, fix["line"]))
-        written.append((path, fix["line"]))
-    return written
-
-
-def stage_shell(stage):
-    """One shell command line for a stage; stops at the first failure"""
-    temp = os.path.join(PORTAGE_DIR, CONFIG_DIRS["use"], TEMP_NAME)
-    steps = []
-    if stage.get("remove_config"):
-        steps.append("rm -f " + shlex.quote(temp))
-    if stage.get("config"):
-        steps.append("printf '%s\\n' " + " ".join(shlex.quote(line) for line in
-                     stage["config"]["use"]) + " > " + shlex.quote(temp))
-    steps.extend(shlex.join(command) for command in stage["commands"])
-    # pick up a compiler switched by an earlier stage
-    return ". /etc/profile >/dev/null 2>&1; " + " && ".join(steps)
+from porthole.updater.analyze import CONFIG_DIRS, KIND_NAMES, OWNED_NAME, format_report, summarize
+from porthole.updater.elevate import run_as_root, service
+from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
+from porthole.updater.service import PLAN_FILE, STATE_DIR, read_json
+from porthole.updater.settings import UpdaterSettings
+from porthole.updater.viewer import JobWindow, read_jobs
 
 
 def _label(text, mono=False, bold=False, markup=None, selectable=False):
@@ -161,8 +76,12 @@ class UpdateAssistant(Gtk.Window):
         buttons = Gtk.Box(spacing=6)
         self.news_button = Gtk.Button(label="Read news")
         self.news_button.connect("clicked", self.on_news)
-        self.recheck_button = Gtk.Button(label="Re-check")
+        self.recheck_button = Gtk.Button(label="Check now")
         self.recheck_button.connect("clicked", self.on_recheck)
+        self.progress_button = Gtk.Button(label="Show progress")
+        self.progress_button.connect("clicked", lambda b: self.show_progress())
+        settings = Gtk.Button(label="Settings")
+        settings.connect("clicked", lambda b: UpdaterSettings(self))
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.hide())
         self.start_button = Gtk.Button(label="Apply and start update")
@@ -170,10 +89,24 @@ class UpdateAssistant(Gtk.Window):
         self.start_button.connect("clicked", self.on_start)
         buttons.pack_start(self.news_button, False, False, 0)
         buttons.pack_start(self.recheck_button, False, False, 0)
+        buttons.pack_start(self.progress_button, False, False, 0)
+        buttons.pack_start(settings, False, False, 0)
         buttons.pack_end(self.start_button, False, False, 0)
         buttons.pack_end(close, False, False, 0)
         outer.pack_start(buttons, False, False, 0)
         self.add(outer)
+
+        self.job_window = None
+        self.finished_jobs = self.finished_job_ids()
+        # the service replaces its files with a rename, so watch the directory
+        self.monitor = None
+        try:
+            self.monitor = Gio.File.new_for_path(STATE_DIR).monitor_directory(
+                Gio.FileMonitorFlags.NONE, None)
+            self.monitor.connect("changed", self.on_state_changed)
+        except GLib.Error:
+            pass
+        self.reload_pending = False
 
     # -- display -----------------------------------------------------------
 
@@ -211,6 +144,7 @@ class UpdateAssistant(Gtk.Window):
         self._packages(plan)
 
         stale = stale_reason(plan)
+        self._jobs()
         self.show_buttons(status in ("ready", "needs-approval"), stale)
         self.show_all()
         if stale:
@@ -274,8 +208,9 @@ class UpdateAssistant(Gtk.Window):
             for command in stage["commands"]:
                 inner.pack_start(_label("$ " + shlex.join(command), mono=True,
                                         selectable=True), False, False, 0)
-        inner.pack_start(_label("If a step fails, the remaining steps wait until you "
-                                "resume them in the terminal window's queue."), False, False, 0)
+        inner.pack_start(_label("The update runs on its own, so you can close Porthole. "
+                                "If a step fails the rest are skipped, and the plan is "
+                                "checked again to show what is left."), False, False, 0)
         self.content.pack_start(box, False, False, 0)
 
     def _notes(self, plan):
@@ -316,17 +251,35 @@ class UpdateAssistant(Gtk.Window):
         view.get_buffer().set_text(format_report(plan))
         return view
 
+    def _jobs(self):
+        """A line about the running or last update job"""
+        jobs = read_jobs()
+        active = [j for j in jobs if j["status"] in ACTIVE]
+        last = active[0] if active else (jobs[-1] if jobs else None)
+        if not last or (not active and last["status"] == "done"):
+            return
+        from porthole.updater.viewer import describe
+        text = describe(last)
+        if last["status"] == "failed":
+            text += ". The plan below is what is left."
+        box, inner = _section("Update in progress" if active else "Last update")
+        inner.pack_start(_label(text), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+        self.content.reorder_child(box, 2)
+
     def show_buttons(self, can_start, stale):
         news = (self.plan or {}).get("news_unread")
         self.news_button.set_label("Read news (%d)" % news if news else "Read news")
         self.news_button.set_sensitive(bool(news))
-        is_root = os.geteuid() == 0
-        self.start_button.set_sensitive(is_root and can_start and not stale)
-        self.recheck_button.set_sensitive(is_root)
-        if not is_root:
-            self.start_button.set_tooltip_text("Porthole must run as root to update")
+        jobs = read_jobs()
+        busy = any(j["status"] in ACTIVE for j in jobs)
+        self.start_button.set_sensitive(can_start and not stale and not busy)
+        self.recheck_button.set_sensitive(not busy)
+        self.progress_button.set_visible(bool(jobs))
+        if busy:
+            self.start_button.set_tooltip_text("An update or check is running")
         elif stale:
-            self.start_button.set_tooltip_text("Re-check first: the plan may be out of date")
+            self.start_button.set_tooltip_text("Check again first: the plan may be out of date")
         else:
             self.start_button.set_tooltip_text(None)
 
@@ -336,27 +289,20 @@ class UpdateAssistant(Gtk.Window):
     def process_manager(self):
         return self.mainwindow.process_manager
 
-    def queue(self, name, command, callback=None):
-        self.process_manager.add(name, command, callback or (lambda: None), SENDER)
-
     def on_news(self, button):
-        self.queue("Read Gentoo news", "eselect news read new")
+        self.process_manager.add("Read Gentoo news", "eselect news read new",
+                                 lambda: None, "Update Assistant")
 
     def on_recheck(self, button):
         self.recheck_button.set_sensitive(False)
-        self.start_button.set_sensitive(False)
-        self.queue("Check for updates",
-                   shlex.join(script_command("porthole-update-service")
-                              + ["run", "--force"]),
-                   lambda: GLib.idle_add(self.load))
+        run_as_root(service("submit", "check"), self.submitted)
 
     def on_start(self, button):
         plan = self.plan
         fixes = plan.get("fixes") or []
         stages = plan.get("stages") or []
-        text = "Start the update?"
-        details = ["%d packages will be built. Progress shows in Porthole's terminal window."
-                   % len(plan.get("merge_list") or [])]
+        details = ["The update runs in the background as root. You can close Porthole; "
+                   "progress shows in the update window and the tray."]
         if fixes:
             details.insert(0, "These lines will be added to /etc/portage:\n"
                            + "\n".join("  " + f["line"] for f in fixes))
@@ -365,7 +311,7 @@ class UpdateAssistant(Gtk.Window):
                 s["title"] for s in stages if s.get("approval")) + ".")
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
-                                   buttons=Gtk.ButtonsType.NONE, text=text)
+                                   buttons=Gtk.ButtonsType.NONE, text="Start the update?")
         dialog.set_title("Porthole")
         dialog.format_secondary_text("\n\n".join(details))
         dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
@@ -374,57 +320,44 @@ class UpdateAssistant(Gtk.Window):
         dialog.destroy()
         if response != Gtk.ResponseType.OK:
             return
-
-        try:
-            write_fixes(fixes)
-        except (ConfigError, OSError) as e:
-            self.error("Could not update /etc/portage", str(e))
-            return
-
-        for i, stage in enumerate(stages, 1):
-            self.queue("Update step %d of %d: %s" % (i, len(stages), stage["title"]),
-                       stage_shell(stage),
-                       lambda i=i, stage=stage: self.stage_done(i, stage))
-        self.queue("Refresh update status",
-                   shlex.join(script_command("porthole-update-service")
-                              + ["run", "--force", "--no-sync"]),
-                   self.all_done)
         self.start_button.set_sensitive(False)
-        self.hide()
+        run_as_root(service("submit", "update", "--plan", plan["generated"]),
+                    lambda ok, out: self.submitted(ok, out, show=True))
 
-    def stage_done(self, number, stage):
-        status = getattr(self.process_manager, "exit_status", None)
-        if status in (0, None):
+    def submitted(self, ok, output, show=False):
+        if not ok:
+            self.error("Couldn't start", output or "Cancelled.")
+            self.load()
             return
-        # runs before the queue moves on, so pausing here holds the rest
-        self.process_manager.process_queue.pause()
-        # the queued refresh won't run while paused; the plan, the tray and
-        # this window must still show what is left
-        self.refresh()
-        self.error(
-            "Update step %d failed" % number,
-            "\"%s\" stopped with exit code %d. The remaining steps are paused.\n\n"
-            "Check the terminal output, fix the problem, then press play in the "
-            "queue to continue. Or close the queue and use Re-check to work out a "
-            "new plan. Porthole is re-checking in the background now, so the update "
-            "assistant will show what is left." % (stage["title"], status))
+        if show:
+            self.show_progress()
+        self.load()
 
-    def refresh(self):
-        """Re-check outside the queue, then reload"""
-        argv = script_command("porthole-update-service") + ["run", "--force", "--no-sync",
-                                                             "--quiet"]
-        try:
-            pid, *_ = GLib.spawn_async(
-                argv, flags=GLib.SpawnFlags.DO_NOT_REAP_CHILD
-                | GLib.SpawnFlags.STDOUT_TO_DEV_NULL | GLib.SpawnFlags.STDERR_TO_DEV_NULL)
-        except GLib.Error:
-            return
-        GLib.child_watch_add(GLib.PRIORITY_DEFAULT, pid, lambda *a: self.all_done())
+    def show_progress(self):
+        if self.job_window is None:
+            self.job_window = JobWindow()
+            self.job_window.set_transient_for(None)
+        self.job_window.present_job()
 
-    def all_done(self):
-        if hasattr(self.mainwindow, "reload_db"):
-            self.mainwindow.reload_db()
-        GLib.idle_add(self.load)
+    def finished_job_ids(self):
+        return {j["id"] for j in read_jobs() if j["status"] not in ACTIVE}
+
+    def on_state_changed(self, monitor, file, other, event):
+        if file.get_basename() in ("plan.json", "jobs.json") and not self.reload_pending:
+            self.reload_pending = True
+            GLib.timeout_add(500, self.state_changed)
+
+    def state_changed(self):
+        self.reload_pending = False
+        finished = self.finished_job_ids()
+        if finished - self.finished_jobs:
+            # packages changed: Porthole's package lists are out of date
+            if hasattr(self.mainwindow, "reload_db"):
+                self.mainwindow.reload_db()
+        self.finished_jobs = finished
+        if self.get_visible():
+            self.load()
+        return False
 
     def error(self, title, text):
         dialog = Gtk.MessageDialog(transient_for=self.get_transient_for(), modal=True,
