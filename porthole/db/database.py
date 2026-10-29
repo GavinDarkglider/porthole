@@ -62,7 +62,14 @@ class Database(DBBase):
         self.desc_thread = None
         ## get home directory
         ##home = pwd.getpwuid(os.getuid())[5]
-        self._DBFile = EPREFIX + "/var/db/porthole/descriptions.db"
+        # root keeps the shared cache; a user can only read that one, so
+        # they write their own (and start from the shared one if it's newer)
+        self._system_DBFile = EPREFIX + "/var/db/porthole/descriptions.db"
+        if os.geteuid() == 0:
+            self._DBFile = self._system_DBFile
+        else:
+            cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+            self._DBFile = os.path.join(cache, "porthole", "descriptions.db")
         self.valid_sync = False #used for auto-reload disabling
         ##del home
         #if action == NEW:
@@ -113,34 +120,43 @@ class Database(DBBase):
             _db = {'sync_date': sync_time, 'descriptions': self.descriptions}
             debug.dprint("DATABASE: save(); Pickling 'db' to file: " + self._DBFile)
             # pickle it baby, yeah!
-            with open(self._DBFile, "wb") as f:
-                pickle.dump(_db, f)
+            try:
+                os.makedirs(os.path.dirname(self._DBFile), exist_ok=True)
+                with open(self._DBFile, "wb") as f:
+                    pickle.dump(_db, f)
+            except OSError as e:
+                debug.dprint("DATABASE: save(); can't write %s: %s" % (self._DBFile, e))
             del _db
 
     def load(self, filename = None):
         """restores the db from a file"""
-        debug.dprint("DATABASE: load() loading 'db' from file: " + self._DBFile)
+        path = self._DBFile
+        if path != self._system_DBFile and os.access(self._system_DBFile, os.R_OK) and (
+                not os.path.exists(path)
+                or os.stat(self._system_DBFile).st_mtime > os.stat(path).st_mtime):
+            path = self._system_DBFile
+        debug.dprint("DATABASE: load() loading 'db' from file: " + path)
         _db = None
         current, self.valid_sync = get_sync_info()
-        if self.valid_sync and os.access(self._DBFile, os.F_OK):
+        if self.valid_sync and os.access(path, os.F_OK):
             try:
-                with open(self._DBFile, "rb") as f:
+                with open(path, "rb") as f:
                     _db = pickle.load(f)
             except (OSError, EOFError, pickle.UnpicklingError) as e:
-                debug.dprint("DATABASE: load(); unreadable cache %s: %s" % (self._DBFile, e))
+                debug.dprint("DATABASE: load(); unreadable cache %s: %s" % (path, e))
                 return -1
         elif not self.valid_sync:
             debug.dprint("DATABASE: load(); Current portage tree did Not return a valid sync timestamp, not loading descriptions from the saved file" )
             return -1
         else:
-            debug.dprint("DATABASE: load(); file does not exist :" + self._DBFile)
+            debug.dprint("DATABASE: load(); file does not exist :" + path)
             return -1
         if self.valid_sync and _db['sync_date'] != current:
             debug.dprint("DATABASE: load(); 'db' is out of date")
             return -2
         self.descriptions = _db['descriptions']
         self.desc_loaded = True
-        self.desc_mtime = os.stat(self._DBFile).st_mtime
+        self.desc_mtime = os.stat(path).st_mtime
         debug.dprint("DATABASE: load(); file is loaded, mtime = " + str(self.desc_mtime))
         del _db
         return 1
