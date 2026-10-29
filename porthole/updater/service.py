@@ -52,6 +52,8 @@ CONFIG_FILE = "/etc/porthole/updater.conf"
 STATE_DIR = "/var/lib/porthole"
 PLAN_FILE = os.path.join(STATE_DIR, "plan.json")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
+# the user's standing choices: updates to hold, changes to refuse (runner.py)
+CHOICES_FILE = os.path.join(STATE_DIR, "choices.json")
 LOG_FILE = "/var/log/porthole/updater.log"
 LOCK_FILE = "/run/lock/porthole-updater.lock"
 
@@ -246,7 +248,7 @@ class Service:
             sync_info = None
             if sync and self.config["sync"]:
                 sync_info = self.sync()
-            plan = Analyzer(log=self.log).analyze()
+            plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE)).analyze()
             plan["sync"] = sync_info
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds"
@@ -272,6 +274,7 @@ def main(argv=None):
     submit.add_argument("kind", choices=("update", "check"))
     submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
+    submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
     cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
     cancel.add_argument("job", nargs="?", help="only this job")
     sub.add_parser("jobs", help="show the job queue")
@@ -329,6 +332,8 @@ def job_command(args, parser):
                     parser.error("submit update needs --plan")
                 job = runner.submit_update(args.plan)
             else:
+                if args.choices is not None:
+                    runner.set_choices(args.choices)
                 job = runner.submit_check(sync=not args.no_sync)
             runner.start_runner()
             print(job["id"])

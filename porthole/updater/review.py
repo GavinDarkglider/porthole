@@ -15,13 +15,15 @@
     (at your option) any later version.
 """
 
+import json
 import shlex
 
 import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gio, GLib, Gtk
 
-from porthole.updater.analyze import CONFIG_DIRS, KIND_NAMES, OWNED_NAME, format_report, summarize
+from porthole.updater.analyze import (
+    CONFIG_DIRS, KIND_NAMES, OWNED_NAME, format_report, normalize_choices, summarize)
 from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
@@ -30,8 +32,8 @@ from porthole.updater.settings import UpdaterSettings
 from porthole.updater.viewer import JobWindow, read_jobs
 
 
-def _label(text, mono=False, bold=False, markup=None, selectable=False):
-    label = Gtk.Label(xalign=0, wrap=True, selectable=selectable)
+def _label(text, mono=False, bold=False, markup=None, selectable=False, **props):
+    label = Gtk.Label(xalign=0, wrap=True, selectable=selectable, **props)
     if markup is not None:
         label.set_markup(markup)
     else:
@@ -70,6 +72,18 @@ class UpdateAssistant(Gtk.Window):
         self.infobar_label = _label("")
         self.infobar.get_content_area().add(self.infobar_label)
         outer.pack_start(self.infobar, False, False, 0)
+
+        # shown once the user changes the plan: it has to be worked out
+        # (and verified) again before it can run
+        self.choices_bar = Gtk.InfoBar(message_type=Gtk.MessageType.INFO)
+        self.choices_label = _label("You changed the plan. Work it out again to check "
+                                    "your choices before updating.")
+        self.choices_bar.get_content_area().add(self.choices_label)
+        self.choices_bar.add_button("Undo changes", 1)
+        self.choices_bar.add_button("Re-plan with my choices", 2)
+        self.choices_bar.connect("response", self.on_choices_response)
+        outer.pack_start(self.choices_bar, False, False, 0)
+        self.pending = None
 
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         self.content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
@@ -115,10 +129,14 @@ class UpdateAssistant(Gtk.Window):
     # -- display -----------------------------------------------------------
 
     def load(self, *args):
+        previous = (self.plan or {}).get("generated")
         self.plan = read_json(PLAN_FILE)
         for child in self.content.get_children():
             child.destroy()
         plan = self.plan
+        if self.pending is None or (plan or {}).get("generated") != previous:
+            # a new plan starts from the choices it was made with
+            self.pending = normalize_choices((plan or {}).get("choices"))
         if not plan:
             self.content.pack_start(_label(
                 "", markup="<big><b>No update check has run yet</b></big>"), False, False, 0)
@@ -137,21 +155,24 @@ class UpdateAssistant(Gtk.Window):
 
         status = plan.get("status")
         self._checks(plan)
-        if status == "needs-help" or status == "error":
+        if status == "error" or (status == "needs-help" and not plan.get("verified", True)):
             box, inner = _section("Why it can't be updated automatically")
             inner.pack_start(self._report_view(plan), False, False, 0)
             self.content.pack_start(box, False, False, 0)
+            self._held_back(plan)
         else:
             self._approvals(plan)
             self._held_back(plan)
             self._stages(plan)
             self._notes(plan)
+        self._held_by_you(plan)
         self._packages(plan)
 
         stale = stale_reason(plan)
         self._jobs()
         self.show_buttons(status in ("ready", "needs-approval"), stale)
         self.show_all()
+        self.update_choices_bar()
         if stale:
             self.infobar_label.set_text(stale + " Re-check before updating.")
             self.infobar.show()
@@ -187,16 +208,24 @@ class UpdateAssistant(Gtk.Window):
                                                          OWNED_NAME)), False, False, 0)
             for fix in kind_fixes:
                 item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=12)
-                item.pack_start(_label(fix["line"], mono=True, bold=True, selectable=True),
-                                False, False, 0)
+                item.pack_start(self._choice(
+                    _label(fix["line"], mono=True, bold=True),
+                    "reject_fixes", fix["line"], inverted=True), False, False, 0)
                 for line in fix.get("explanation") or []:
-                    item.pack_start(_label(line, selectable=True), False, False, 0)
+                    item.pack_start(_label(line, selectable=True, margin_start=28),
+                                    False, False, 0)
                 inner.pack_start(item, False, False, 0)
         for stage in approvals:
             item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            item.pack_start(_label(stage["title"], bold=True), False, False, 0)
-            item.pack_start(_label(stage.get("why", "")), False, False, 0)
+            title = _label(stage["title"], bold=True)
+            item.pack_start(self._choice(title, "decline", stage["key"], inverted=True)
+                            if stage.get("key") else title, False, False, 0)
+            item.pack_start(_label(stage.get("why", ""), margin_start=28), False, False, 0)
             inner.pack_start(item, False, False, 0)
+        if fixes or any(s.get("key") for s in approvals):
+            inner.pack_start(_label("Untick anything you don't want; the packages that "
+                                    "need it are then kept at their current version."),
+                             False, False, 0)
         for cycle in plan.get("cycles_broken") or []:
             inner.pack_start(_label(
                 "Temporarily %s to break the circular dependency %s"
@@ -218,12 +247,92 @@ class UpdateAssistant(Gtk.Window):
                                    bold=True, selectable=True), False, False, 0)
             for line in h["why"]:
                 item.pack_start(_label(line, selectable=True), False, False, 0)
+            for option in h.get("options") or []:
+                kind, _sep, value = option["key"].partition(":")
+                if kind == "exclude":
+                    item.pack_start(self._choice(_label(option["label"] + " (stop offering "
+                                                        "this update)"), "exclude", value),
+                                    False, False, 0)
+                else:
+                    item.pack_start(self._choice(_label(option["label"] + " so the update "
+                                                        "can go ahead"),
+                                                 "accept", option["key"]), False, False, 0)
             inner.pack_start(item, False, False, 0)
         if plan.get("missing_world"):
             inner.pack_start(_label("In your world file but no repository has them any "
                                     "more: " + ", ".join(plan["missing_world"]),
                                     selectable=True), False, False, 0)
         self.content.pack_start(box, False, False, 0)
+
+    def _held_by_you(self, plan):
+        """What the user's choices keep back, each with a way to undo it"""
+        held = plan.get("held_by_you") or []
+        declined = [k for k in (plan.get("choices") or {}).get("decline") or []
+                    if not any(h["undo"] == {"list": "decline", "value": k} for h in held)]
+        if not held and not declined:
+            return
+        box, inner = _section("Kept back by your choices")
+        for h in held:
+            inner.pack_start(self._choice(_label("%s: %s" % (h["cp"], h["why"])),
+                                          h["undo"]["list"], h["undo"]["value"]),
+                             False, False, 0)
+        for key in declined:
+            kind, _sep, cp = key.partition(":")
+            text = {"remove": "Keep %s installed" % cp,
+                    "replace": "Keep %s rather than let an update replace it" % cp,
+                    "gcc-switch": "Stay on the current GCC"}.get(kind, key)
+            inner.pack_start(self._choice(_label(text), "decline", key), False, False, 0)
+        inner.pack_start(_label("Untick to offer the update again."), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+
+    # -- choices -------------------------------------------------------------
+
+    def _choice(self, label, key, value, inverted=False):
+        """A check box bound to one entry of the pending choices. Plain:
+        ticked means the entry is in the list; inverted: ticked means it
+        isn't (e.g. a fix is ticked unless rejected)."""
+        button = Gtk.CheckButton()
+        button.add(label)
+        button.set_active((value in self.pending[key]) != inverted)
+
+        def toggled(b):
+            wanted = b.get_active() != inverted
+            entries = set(self.pending[key])
+            entries.add(value) if wanted else entries.discard(value)
+            self.pending[key] = sorted(entries)
+            self.update_choices_bar()
+        button.connect("toggled", toggled)
+        return button
+
+    def choices_changed(self):
+        return bool(self.plan) and self.pending != normalize_choices(self.plan.get("choices"))
+
+    def update_choices_bar(self):
+        changed = self.choices_changed()
+        self.choices_bar.set_visible(changed)
+        if self.plan:
+            self.show_buttons(self.plan.get("status") in ("ready", "needs-approval"),
+                              stale_reason(self.plan))
+
+    def on_choices_response(self, bar, response):
+        if response == 1:
+            self.pending = None
+            self.plan = None  # forces the pending choices to be reset
+            self.load()
+        elif response == 2:
+            self.choices_bar.set_sensitive(False)
+            self.choices_label.set_text("Working out a new plan with your choices...")
+            run_as_root(service("submit", "check", "--no-sync",
+                                "--choices", json.dumps(self.pending)), self.replanned)
+
+    def replanned(self, ok, output):
+        self.choices_bar.set_sensitive(True)
+        self.choices_label.set_text("You changed the plan. Work it out again to check "
+                                    "your choices before updating.")
+        if not ok:
+            self.error("Couldn't re-plan", output or "Cancelled.")
+        else:
+            self.show_progress()
 
     def _stages(self, plan):
         box, inner = _section("What happens")
@@ -258,19 +367,37 @@ class UpdateAssistant(Gtk.Window):
         rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
         if not merges and not rebuilds:
             return
-        store = Gtk.ListStore(str, str, str)
+        # update?, can untick, kind, package, replaces, cp
+        store = Gtk.ListStore(bool, bool, str, str, str, str)
         for m in merges:
-            store.append([KIND_NAMES.get(m["kind"], "?"), m["cpv"], ", ".join(m["replaces"])])
+            store.append([m["cp"] not in self.pending["exclude"], True,
+                          KIND_NAMES.get(m["kind"], "?"), m["cpv"], ", ".join(m["replaces"]),
+                          m["cp"]])
         for m in rebuilds:
-            store.append([KIND_NAMES.get(m["kind"], "?"), m["cpv"], "uses old libraries"])
+            store.append([True, False, KIND_NAMES.get(m["kind"], "?"), m["cpv"],
+                          "uses old libraries", m["cp"]])
         view = Gtk.TreeView(model=store)
-        for i, title in enumerate(("", "Package", "Replaces")):
+        toggle = Gtk.CellRendererToggle()
+        toggle.connect("toggled", self.on_package_toggled, store)
+        view.append_column(Gtk.TreeViewColumn("Update", toggle, active=0, activatable=1,
+                                              sensitive=1))
+        for i, title in ((2, ""), (3, "Package"), (4, "Replaces")):
             view.append_column(Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i))
         scroller = Gtk.ScrolledWindow(min_content_height=260)
         scroller.add(view)
-        expander = Gtk.Expander(label="All %d packages" % (len(merges) + len(rebuilds)))
+        expander = Gtk.Expander(label="All %d packages (untick to keep one at its "
+                                      "current version)" % (len(merges) + len(rebuilds)),
+                                expanded=True)
         expander.add(scroller)
         self.content.pack_start(expander, False, False, 0)
+
+    def on_package_toggled(self, renderer, path, store):
+        row = store[path]
+        row[0] = not row[0]
+        entries = set(self.pending["exclude"])
+        entries.discard(row[5]) if row[0] else entries.add(row[5])
+        self.pending["exclude"] = sorted(entries)
+        self.update_choices_bar()
 
     def _report_view(self, plan):
         view = Gtk.TextView(editable=False, cursor_visible=False, monospace=True,
@@ -300,11 +427,14 @@ class UpdateAssistant(Gtk.Window):
         self.news_button.set_sensitive(bool(news))
         jobs = read_jobs()
         busy = any(j["status"] in ACTIVE for j in jobs)
-        self.start_button.set_sensitive(can_start and not stale and not busy)
+        changed = self.choices_changed()
+        self.start_button.set_sensitive(can_start and not stale and not busy and not changed)
         self.recheck_button.set_sensitive(not busy)
         self.progress_button.set_visible(bool(jobs))
         if busy:
             self.start_button.set_tooltip_text("An update or check is running")
+        elif changed:
+            self.start_button.set_tooltip_text("Re-plan with your choices first")
         elif stale:
             self.start_button.set_tooltip_text("Check again first: the plan may be out of date")
         else:

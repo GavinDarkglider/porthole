@@ -298,6 +298,17 @@ def _solution_cost(solution):
     return (expand, enables, len(changes))
 
 
+def normalize_choices(choices):
+    """The user's standing choices about updates (choices.json):
+        exclude       packages not to update ("cat/pkg")
+        reject_fixes  config lines not to add
+        decline       approval stages not to run (their "key")
+        accept        optional stages to run (their "key")"""
+    choices = choices or {}
+    return {key: sorted({str(v) for v in choices.get(key) or []})
+            for key in ("exclude", "reject_fixes", "decline", "accept")}
+
+
 def _badness(result):
     """Lower is better: a failed resolution, then each kind of trouble"""
     return (not result.get("success"),
@@ -312,14 +323,29 @@ def _is_exact_pin(atom):
 
 
 class Analyzer:
-    def __init__(self, targets=None, config_root="/", log=None):
-        self.targets = targets or WORLD_ARGS
+    def __init__(self, targets=None, config_root="/", log=None, choices=None):
+        self.choices = normalize_choices(choices)
+        # packages held at their version: unticked, or needing a rejected fix
+        self.held = {cp: ("you chose not to update it", {"list": "exclude", "value": cp})
+                     for cp in self.choices["exclude"]}
+        self.base_targets = list(targets or WORLD_ARGS)
+        self.targets = self.base_targets + self.exclude_args()
         self.config_root = config_root
         # installed packages the plan removes (from world, or entirely);
         # dry runs then resolve against a scratch ROOT without them
         self.removed = []
         self.scratch_root = None
         self.log = log or (lambda msg: print(msg, file=sys.stderr, flush=True))
+
+    def exclude_args(self):
+        return ["--exclude=" + cp for cp in sorted(self.held)]
+
+    def hold(self, cp, why, undo):
+        """Keep a package at its installed version; undo names the choice
+        that caused it ({"list": choices key, "value": entry})"""
+        if cp not in self.held:
+            self.held[cp] = (why, undo)
+            self.targets = self.base_targets + self.exclude_args()
 
     # -- fixes -----------------------------------------------------------
 
@@ -402,6 +428,7 @@ class Analyzer:
         elif fix["kind"] == "licenses":
             lines.append("The required version uses a license you don't accept yet.")
 
+        fix["needed_for"] = sorted(world_pkgs)
         if world_pkgs:
             lines.append("Needed for: " + _limit(world_pkgs))
         fix["explanation"] = lines
@@ -567,8 +594,9 @@ class Analyzer:
             "verified": tc.get("verified", False),
         }]
         gcc = tc.get("gcc") or {}
-        if gcc.get("switch_to"):
+        if gcc.get("switch_to") and "gcc-switch" not in self.choices["decline"]:
             stages.append({
+                "key": "gcc-switch",
                 "title": "Switch from GCC %s to GCC %s" % (gcc["current_major"], gcc["major"]),
                 "approval": True,
                 "why": "Portage never switches to a new major GCC version by itself. "
@@ -823,13 +851,21 @@ class Analyzer:
             except Exception:
                 pass
         removals = {}
+        declined, accepted = set(self.choices["decline"]), set(self.choices["accept"])
         for missed in result.get("missed_updates") or []:
             for p in missed["parents"]:
-                if not p.get("installed") or p.get("in_repos") or dependents.get(p["parent"]):
+                if not p.get("installed") or dependents.get(p["parent"]):
+                    continue
+                cp = _cp(p["parent"])
+                # orphans are proposed; a package that still has an ebuild only
+                # when the user asked for it to go
+                if ("remove:" + cp) in declined or (
+                        p.get("in_repos") and ("remove:" + cp) not in accepted):
                     continue
                 r = removals.setdefault(p["parent"], {
-                    "kind": "orphan", "cpv": p["parent"], "cp": _cp(p["parent"]),
-                    "holds": [], "atoms": [], "in_world": _cp(p["parent"]) in world})
+                    "kind": "chosen" if p.get("in_repos") else "orphan",
+                    "cpv": p["parent"], "cp": cp,
+                    "holds": [], "atoms": [], "in_world": cp in world})
                 r["holds"].append(missed["cpv"])
                 r["atoms"].append(p["atom"])
         # an installed package that can't be rebuilt, pinning one side of a
@@ -838,7 +874,8 @@ class Analyzer:
         for conflict in result.get("slot_conflicts") or []:
             for pkg in conflict["packages"]:
                 for p in pkg["parents"]:
-                    if p["parent"] not in unrebuildable or dependents.get(p["parent"]):
+                    if (p["parent"] not in unrebuildable or dependents.get(p["parent"])
+                            or ("remove:" + _cp(p["parent"])) in declined):
                         continue
                     r = removals.setdefault(p["parent"], {
                         "kind": "orphan", "cpv": p["parent"], "cp": _cp(p["parent"]),
@@ -855,7 +892,8 @@ class Analyzer:
         for blocker in result.get("blockers") or []:
             for blocked in blocker["blocked"]:
                 if (not blocked["installed"] or blocked["cp"] not in world
-                        or dependents.get(blocked["cpv"])):
+                        or dependents.get(blocked["cpv"])
+                        or ("replace:" + blocked["cp"]) in declined):
                     continue
                 removals.setdefault(blocked["cpv"], {
                     "kind": "replaced", "cpv": blocked["cpv"], "cp": blocked["cp"],
@@ -867,17 +905,21 @@ class Analyzer:
         stages = []
         root = self.root_options()
         for r in self.removed:
-            if r["kind"] == "orphan":
+            if r["kind"] in ("orphan", "chosen"):
                 commands = ([["emerge", "--deselect"] + root + [r["cp"]]] if r["in_world"]
                             else [])
                 commands.append(["emerge", "--depclean"] + root + [r["cp"]])
+                orphan = r["kind"] == "orphan"
                 stages.append({
-                    "title": "Remove %s (no longer in any repository)" % r["cpv"],
+                    "key": "remove:" + r["cp"],
+                    "title": ("Remove %s (no longer in any repository)" if orphan
+                              else "Remove %s (you chose to)") % r["cpv"],
                     "approval": True,
-                    "why": "It holds back %s: it requires %s, and it can't be updated "
-                           "or rebuilt because its ebuild is gone. Nothing else "
-                           "installed needs it."
-                           % (", ".join(r["holds"]), ", ".join(sorted(set(r["atoms"])))),
+                    "why": "It holds back %s: it requires %s%s. Nothing else installed "
+                           "needs it."
+                           % (", ".join(r["holds"]), ", ".join(sorted(set(r["atoms"]))),
+                              ", and it can't be updated or rebuilt because its ebuild "
+                              "is gone" if orphan else ""),
                     "commands": commands,
                     "verified": verified,
                 })
@@ -886,6 +928,7 @@ class Analyzer:
                 if r["hard"]:
                     commands.append(["emerge", "--unmerge"] + root + [r["cp"]])
                 stages.append({
+                    "key": "replace:" + r["cp"],
                     "title": "Let %s replace %s" % (", ".join(r["by"]), r["cpv"]),
                     "approval": True,
                     "why": "%s blocks %s, which is in your world file, so portage won't "
@@ -903,7 +946,7 @@ class Analyzer:
         held_cps = {m["cp"] for m in result.get("missed_updates") or []}
         dependents = result.get("dependents") or {}
         for missed in result.get("missed_updates") or []:
-            why = []
+            why, options = [], []
             for p in missed["parents"]:
                 atom = p["atom"]
                 try:
@@ -911,7 +954,10 @@ class Analyzer:
                 except Exception:
                     atom_cp = None
                 if not p.get("installed"):
-                    if atom_cp in held_cps and atom_cp != missed["cp"]:
+                    if atom_cp in self.held:
+                        why.append("%s needs %s, and you are keeping %s at its "
+                                   "current version." % (p["parent"], atom, atom_cp))
+                    elif atom_cp in held_cps and atom_cp != missed["cp"]:
                         why.append("%s needs %s, which is held back too."
                                    % (p["parent"], atom))
                     else:
@@ -924,15 +970,98 @@ class Analyzer:
                 if not p.get("in_repos"):
                     text += ", and no repository has its ebuild any more, so it can't " \
                             "be updated or rebuilt"
-                elif not p.get("newer"):
-                    text += "; no version of it supports %s yet" % missed["cpv"]
+                else:
+                    text += "; no available version of it works with %s yet" % missed["cpv"]
                 needed_by = dependents.get(p["parent"])
                 if needed_by:
                     text += ". It is needed by " + _limit(needed_by)
+                elif ("remove:" + _cp(p["parent"])) not in self.choices["decline"]:
+                    options.append({"key": "remove:" + _cp(p["parent"]),
+                                    "label": "Remove %s" % p["parent"]})
                 why.append(text + ".")
-            held.append({"cpv": missed["cpv"], "selected": missed["selected"],
-                         "reason": missed["reason"], "why": why})
+            # holding it on purpose quiets it until the user changes their mind
+            options.insert(0, {"key": "exclude:" + missed["cp"],
+                               "label": "Keep %s" % (missed["selected"] or missed["cp"])})
+            held.append({"cpv": missed["cpv"], "cp": missed["cp"],
+                         "selected": missed["selected"],
+                         "reason": missed["reason"], "why": why, "options": options})
         return held
+
+    def hold_blocked_by_choice(self, check):
+        """A package the user keeps can't be replaced: hold the update
+        that blocks it"""
+        for blocker in check.get("blockers") or []:
+            for blocked in blocker["blocked"]:
+                if ("replace:" + blocked["cp"]) not in self.choices["decline"]:
+                    continue
+                for pkg in blocker["blocking"]:
+                    if not pkg["installed"]:
+                        self.hold(pkg["cp"], "it would replace %s, which you chose to keep"
+                                  % blocked["cp"],
+                                  {"list": "decline", "value": "replace:" + blocked["cp"]})
+
+    def plan_fixes(self, result, user_keywords):
+        """Config changes the resolution needs, minus those the user
+        rejected (holding what needed them, and resolving again)"""
+        for _ in range(3):
+            fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
+            for fix in fixes:
+                self.explain(fix, result, user_keywords)
+            fixes, changed = self.reject_fixes(fixes)
+            if not changed:
+                break
+            self.log("Holding what needs rejected changes: "
+                     + ", ".join(sorted(self.held)))
+            result = run_worker(SOLVE_ARGS + self.world_args(self.targets), self.config_root)
+        return fixes, result
+
+    def find_unlocks(self, result, fixes):
+        """Config changes that let a held-back update through: ask for the
+        held-back version itself, so autounmask says what it would take
+        (typically a newer, keyworded version of what holds it back)"""
+        unlocks = []
+        have = {f["line"] for f in fixes}
+        rejected = set(self.choices["reject_fixes"])
+        for missed in (result.get("missed_updates") or [])[:5]:
+            holders = [p for p in missed["parents"] if p.get("installed") and p.get("in_repos")]
+            if not holders or missed["cp"] in self.held:
+                continue
+            self.log("Looking for what would let %s through..." % missed["cpv"])
+            ask = run_worker(SOLVE_ARGS + self.world_args(self.targets)
+                             + ["=" + missed["cpv"]], self.config_root)
+            needed = ask.get("needed_changes") or {}
+            if not ask.get("success") or not any(needed.values()):
+                self.log("  nothing would")
+                continue
+            for fix in self.build_fixes(needed, {}):
+                if fix["line"] in have or fix["line"] in rejected:
+                    continue
+                self.explain(fix, ask, {})
+                fix["unlocks"] = missed["cpv"]
+                fix["explanation"].insert(0, "Lets %s update, which %s is waiting for."
+                                          % (_cp(fix["cpv"]), missed["cpv"]))
+                unlocks.append(fix)
+                have.add(fix["line"])
+            self.log("  " + ", ".join(f["line"] for f in unlocks if f["unlocks"] == missed["cpv"]))
+        return unlocks
+
+    def reject_fixes(self, fixes):
+        """Drop fixes the user rejected, holding what needed them.
+        Returns the remaining fixes, and whether anything new is held."""
+        rejected = set(self.choices["reject_fixes"])
+        keep, changed = [], False
+        for fix in fixes:
+            if fix["line"] not in rejected and fix.get("alt_line") not in rejected:
+                keep.append(fix)
+                continue
+            for cpv in fix.get("needed_for") or [fix["cpv"]]:
+                cp = _cp(cpv)
+                if cp not in self.held:
+                    line = fix["line"] if fix["line"] in rejected else fix["alt_line"]
+                    self.hold(cp, "it needs %s, which you rejected" % line,
+                              {"list": "reject_fixes", "value": line})
+                    changed = True
+        return keep, changed
 
     # -- main entry -----------------------------------------------------
 
@@ -956,9 +1085,9 @@ class Analyzer:
 
         result = self.try_removals(result, result)
         system = result.get("system") or {}
-        fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
-        for fix in fixes:
-            self.explain(fix, result, user_keywords)
+        fixes, result = self.plan_fixes(result, user_keywords)
+        unlocks = self.find_unlocks(result, fixes)
+        fixes += unlocks
 
         plan = {
             "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -985,15 +1114,32 @@ class Analyzer:
                     or round_ == MAX_REMOVAL_ROUNDS):
                 break
             # what is still in the way may only show once the rest is solved
-            removed_before = len(self.removed)
+            removed_before, held_before = len(self.removed), len(self.held)
             result = self.try_removals(result, check, fixes, temp_use)
-            if len(self.removed) == removed_before:
+            self.hold_blocked_by_choice(check)
+            if len(self.held) > held_before:
+                self.log("Holding updates that would replace what you keep: "
+                         + ", ".join(sorted(self.held)))
+                result = run_worker(SOLVE_ARGS + self.world_args(self.targets),
+                                    self.config_root)
+            elif len(self.removed) == removed_before:
                 break
-            fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
-            for fix in fixes:
-                self.explain(fix, result, user_keywords)
+            fixes, result = self.plan_fixes(result, user_keywords)
+            fixes += [u for u in unlocks if u["line"] not in {f["line"] for f in fixes}]
             plan.update(merge_list=result.get("merge_list") or [], fixes=fixes)
+        if unlocks and not check.get("success"):
+            # an unlock is only worth proposing if it works
+            self.log("The changes for held-back updates don't verify; leaving them out")
+            fixes = [f for f in fixes if not f.get("unlocks")]
+            temp_use, broken = [], []
+            check = self.verify(fixes)
+            if not check.get("success") and check.get("circular"):
+                temp_use, broken, check = self.break_cycles(fixes, check)
+            plan["fixes"] = fixes
         verified = bool(check.get("success"))
+        if verified and check.get("merge_list") is not None:
+            # exactly what the verified resolution will merge
+            plan["merge_list"] = check["merge_list"]
         # report what the final check says is held back
         if verified:
             result = dict(result, missed_updates=check.get("missed_updates"),
@@ -1023,6 +1169,9 @@ class Analyzer:
         # removals first: the rest was worked out without those packages
         stages = self.removal_stages(verified) + stages
         plan["removed"] = self.removed
+        plan["choices"] = self.choices
+        plan["held_by_you"] = [{"cp": cp, "why": why, "undo": undo}
+                               for cp, (why, undo) in sorted(self.held.items())]
         plan["held_back"] = self.held_back(result)
         plan["missing_world"] = [w for w in result.get("missing_world") or []
                                  if w not in {r["cp"] for r in self.removed}]
@@ -1083,7 +1232,9 @@ def format_report(plan):
     if rebuilds:
         counts["old-library rebuild"] = len(rebuilds)
     out.append({
-        "up-to-date": "System is up to date.",
+        "up-to-date": "System is up to date." + (
+            " (%d package(s) kept by your choices)" % len(plan["held_by_you"])
+            if plan.get("held_by_you") else ""),
         "ready": "%d updates ready to install, no changes needed." % len(merges)
                  if merges else
                  "%d package(s) need rebuilding, no changes needed." % len(rebuilds),
@@ -1116,6 +1267,12 @@ def format_report(plan):
             out.append("  %s (staying at %s)" % (h["cpv"], h["selected"] or "nothing"))
             for line in h["why"]:
                 out.append("    - " + line)
+            if h.get("options"):
+                out.append("    choices: " + "; ".join(o["label"] for o in h["options"]))
+    if plan.get("held_by_you"):
+        out.append("\nHeld at their current version by your choices:")
+        for h in plan["held_by_you"]:
+            out.append("  %s: %s" % (h["cp"], h["why"]))
     if plan.get("missing_world"):
         out.append("\nIn your world file but no repository has them any more: "
                    + ", ".join(plan["missing_world"]))
@@ -1251,7 +1408,11 @@ def summarize(plan):
     elif status == "error":
         return "Update check failed", "Open the report for details."
     else:
-        return "System is up to date", ""
+        mine = len(plan.get("held_by_you") or [])
+        return "System is up to date", (
+            "%d package%s kept at %s version by your choices."
+            % (mine, "s" if mine != 1 else "", "their" if mine != 1 else "its")
+            if mine else "")
     held = len(plan.get("held_back") or [])
     if held and status in ("ready", "needs-approval"):
         body.append("%d more update%s held back." % (held, "s are" if held != 1 else " is"))
@@ -1268,13 +1429,18 @@ def main(argv=None):
     parser = argparse.ArgumentParser(
         description="Work out a verified update plan (read-only).")
     parser.add_argument("--json", help="write the plan as JSON to this file")
+    parser.add_argument("--choices", help="JSON file of standing choices (see choices.json)")
     parser.add_argument("--config-root", default="/",
                         help="analyze against another PORTAGE_CONFIGROOT")
     parser.add_argument("targets", nargs="*",
                         help="emerge targets/options (default: -uDN --with-bdeps=y @world)")
     args = parser.parse_args(argv)
 
-    plan = Analyzer(args.targets or None, args.config_root).analyze()
+    choices = None
+    if args.choices:
+        with open(args.choices) as f:
+            choices = json.load(f)
+    plan = Analyzer(args.targets or None, args.config_root, choices=choices).analyze()
     if args.json:
         with open(args.json, "w") as f:
             json.dump(plan, f, indent=1)

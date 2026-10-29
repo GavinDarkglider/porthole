@@ -105,6 +105,37 @@ BLOCKER = {
 }
 
 
+HELD_NEWER = {
+    "doc": "app/user-1 (still in the tree) requires <lib/w-2; only app/user-2, "
+           "~amd64, works with lib/w-2, which app/wnew-2 needs",
+    "repo": [
+        pkg("lib/w-1"), pkg("lib/w-2"),
+        pkg("app/user-1", rdepend="<lib/w-2"), pkg("app/user-2", keywords="~amd64"),
+        pkg("app/wnew-1"), pkg("app/wnew-2", rdepend=">=lib/w-2"),
+    ],
+    "installed": [inst("lib/w-1"), inst("app/user-1", rdepend="<lib/w-2"),
+                  inst("app/wnew-1")],
+    "world": ["app/user", "app/wnew"],
+}
+
+HELD_STUCK = {
+    "doc": "app/stuck-1 (still in the tree, no newer version) requires <lib/v-2, "
+           "which app/vnew-2 needs",
+    "repo": [
+        pkg("lib/v-1"), pkg("lib/v-2"),
+        pkg("app/stuck-1", rdepend="<lib/v-2"),
+        pkg("app/vnew-1"), pkg("app/vnew-2", rdepend=">=lib/v-2"),
+    ],
+    "installed": [inst("lib/v-1"), inst("app/stuck-1", rdepend="<lib/v-2"),
+                  inst("app/vnew-1")],
+    "world": ["app/stuck", "app/vnew"],
+}
+
+
+def with_choices(scenario, doc, **choices):
+    return dict(scenario, doc=doc, choices=choices)
+
+
 def combine(*scenarios):
     return {
         "doc": "All of the above at once",
@@ -121,6 +152,22 @@ SCENARIOS = {
     "fixes": FIXES,
     "blocker": BLOCKER,
     "everything": combine(CYCLES, OLD_DEP, SUBSLOT, FIXES, BLOCKER),
+    "held-newer": HELD_NEWER,
+    "held-stuck": HELD_STUCK,
+    "held-stuck-keep": with_choices(
+        HELD_STUCK, "held-stuck, and the user chose to keep lib/v and app/vnew",
+        exclude=["lib/v", "app/vnew"]),
+    "held-stuck-remove": with_choices(
+        HELD_STUCK, "held-stuck, and the user chose to remove app/stuck",
+        accept=["remove:app/stuck"]),
+    "fixes-rejected": with_choices(
+        FIXES, "fixes, but the user rejected the ~amd64 keyword",
+        reject_fixes=["=lib/k-3 ~amd64"]),
+    "blocker-declined": with_choices(
+        BLOCKER, "blocker, but the user wants to keep app/oldtool",
+        decline=["replace:app/oldtool"]),
+    "deselected": with_choices(
+        CYCLES, "cycles, with media/q unticked", exclude=["media/q"]),
 }
 
 
@@ -203,11 +250,15 @@ def run(name, keep=False):
         config, root = build(work, scenario)
         out = os.path.join(work, "plan.json")
         env = dict(os.environ, PYTHONPATH=SRC)
+        choices = []
+        if scenario.get("choices"):
+            write(os.path.join(work, "choices.json"), json.dumps(scenario["choices"]))
+            choices = ["--choices", os.path.join(work, "choices.json")]
         proc = subprocess.run(
-            [sys.executable, "-m", "porthole.updater.analyze", "--json", out,
-             "--config-root", config, "--",
+            [sys.executable, "-m", "porthole.updater.analyze", "--json", out] + choices
+            + ["--config-root", config, "--",
              "--update", "--deep", "--newuse", "@world",
-             "--root=" + root, "--sysroot=" + root],
+               "--root=" + root, "--sysroot=" + root],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             timeout=1800)
         print("=" * 72)

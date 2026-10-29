@@ -36,7 +36,7 @@ import time
 from porthole.updater.analyze import CONFIG_DIRS, OWNED_NAME, TEMP_NAME
 from porthole.updater.commands import script_command
 from porthole.updater.service import (
-    CONFIG_FILE, DEFAULTS, PLAN_FILE, STATE_DIR, Log, Service, check_lock,
+    CHOICES_FILE, CONFIG_FILE, DEFAULTS, PLAN_FILE, STATE_DIR, Log, Service, check_lock,
     last_repo_sync, load_config, read_json, write_json)
 
 PORTAGE_DIR = "/etc/portage"
@@ -452,6 +452,44 @@ class Runner:
         code = proc.wait()
         log("(exit status %d)" % code)
         return code == 0
+
+
+# -- choices -------------------------------------------------------------------
+
+_STAGE_KEY = re.compile(r"^(remove|replace):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
+
+
+def set_choices(text):
+    """Replace choices.json, after checking every entry: excluded packages
+    end up on emerge's command line, so only plain cat/pkg names pass"""
+    import json
+    from portage.dep import Atom
+    try:
+        choices = json.loads(text)
+    except ValueError as e:
+        raise JobError("Choices aren't valid JSON: %s" % e)
+    if not isinstance(choices, dict):
+        raise JobError("Choices must be a JSON object")
+    clean = {}
+    for key in ("exclude", "reject_fixes", "decline", "accept"):
+        values = choices.get(key) or []
+        if not isinstance(values, list) or not all(isinstance(v, str) for v in values):
+            raise JobError("%s must be a list of strings" % key)
+        for value in values:
+            if key == "exclude":
+                try:
+                    ok = Atom(value).cp == value
+                except Exception:
+                    ok = False
+                if not ok:
+                    raise JobError("Not a package name: %s" % value)
+            elif key in ("decline", "accept") and not _STAGE_KEY.match(value):
+                raise JobError("Unknown choice: %s" % value)
+            elif key == "reject_fixes" and ("\n" in value or len(value) > 500):
+                raise JobError("Not a config line: %s" % value[:60])
+        clean[key] = sorted(set(values))
+    write_json(CHOICES_FILE, clean)
+    return clean
 
 
 # -- updater.conf ------------------------------------------------------------
