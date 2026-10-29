@@ -246,6 +246,8 @@ class PackageView(CommonTreeView):
 
         # set the last selected to nothing
         self._last_selected = None
+        # rows are single installed versions (deprecated "Ebuilds")
+        self.cpv_rows = False
 
     def cell_data_func(self, column, renderer, model, _iter, data):
             """function to render the package name according
@@ -336,10 +338,23 @@ class PackageView(CommonTreeView):
         self.mainwindow_callback(emergestring, {'full_name': self._last_selected, 'caller': 'VIEWS: Package view emerge()'})
 
     def unmerge(self, widget, sudo=None):
-        if sudo:
-            self.mainwindow_callback(["unmerge", "sudo"], {'full_name': self._last_selected, 'caller': 'VIEWS: Package view unmerge()'})
-        else:
-            self.mainwindow_callback(["unmerge"], {'full_name': self._last_selected, 'caller': 'VIEWS: Package view unmerge()'})
+        action = ["unmerge", "sudo"] if sudo else ["unmerge"]
+        arg = {'full_name': self._last_selected, 'caller': 'VIEWS: Package view unmerge()'}
+        ebuild = self.selected_ebuild()
+        if ebuild:
+            # only that version, not every slot of the package (bug #142)
+            arg['ebuild'] = ebuild
+        self.mainwindow_callback(action, arg)
+
+    def selected_ebuild(self):
+        """The selected version when rows are versions, else None"""
+        if not self.cpv_rows:
+            return None
+        model, _iter = self.get_selection().get_selected()
+        if not _iter:
+            return None
+        name = model.get_value(_iter, MODEL_ITEM["name"])
+        return name if name != _("None") else None
 
     def _clicked(self, treeview, *args):
         """ Handles treeview clicks """
@@ -425,6 +440,7 @@ class PackageView(CommonTreeView):
 
     def populate(self, packages, locate_name = None):
         """ Populate the current view with packages """
+        self.cpv_rows = False
         debug.dprint("VIEWS: Populating package view")
         debug.dprint("VIEWS: PackageView.populate(); process_id = %s" %str(os.getpid()))
         self._installed_column.set_visible(config.Prefs.views.show_installed)
@@ -493,6 +509,7 @@ class PackageView(CommonTreeView):
 
     def populate_cpv(self, packages, locate_name = None, ):
         """ Populate the current view with packages """
+        self.cpv_rows = True
         debug.dprint("VIEWS: Populating package view")
         debug.dprint("VIEWS: PackageView.populate_cpv(); process_id = %s" %str(os.getpid()))
         self._installed_column.set_visible(False)

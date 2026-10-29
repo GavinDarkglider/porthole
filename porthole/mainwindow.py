@@ -333,7 +333,7 @@ class MainWindow(PluginHandler):
         unmerge the currently selected package."""
         if not self.process_selection("emerge --unmerge"):
             package = utils.get_treeview_selection(self.package_view, 2)
-            self.unmerge_package(package, sudo)
+            self.unmerge_package(package, sudo, self.package_view.selected_ebuild())
 
     def on_cancel_btn(self, *widget):
         """cancel button callback function"""

@@ -235,23 +235,25 @@ class ActionHandler(CategoryHandler):
                 self.re_init_portage)
 
 
-    def unmerge_package(self, package, sudo=False):
-        """Unmerge the package."""
+    def unmerge_package(self, package, sudo=False, ebuild=None):
+        """Unmerge the package, or just one installed version of it."""
+        target = "=" + ebuild if ebuild else package.full_name
         if (sudo or (not self.is_root and utils.can_sudo())) \
                 and not config.Prefs.emerge.pretend:
             self.setup_command(package.get_name(),
                     'sudo -p "Password: " emerge --unmerge' +
-                    config.Prefs.emerge.get_string() + package.full_name)
+                    config.Prefs.emerge.get_string() + target)
         else:
             self.setup_command(package.get_name(), "emerge --unmerge" +
-                    config.Prefs.emerge.get_string() + package.full_name)
+                    config.Prefs.emerge.get_string() + target)
 
     def sync_tree(self, *widget):
         """Sync the portage tree and reload it when done."""
         sync = config.Prefs.globals.Sync
         if config.Prefs.emerge.verbose:
             sync += " --verbose"
-        if config.Prefs.emerge.nospinner:
+        # emerge-webrsync and other sync commands don't know --nospinner
+        if config.Prefs.emerge.nospinner and sync.startswith("emerge "):
             sync += " --nospinner "
         if utils.is_root():
             self.setup_command("Sync Portage Tree", sync)
