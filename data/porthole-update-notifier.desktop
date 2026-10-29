@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Porthole Update Notifier
+Comment=Shows when Gentoo updates are ready and what they need
+Exec=porthole-update-notifier
+Icon=porthole
+Terminal=false
+Categories=System;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

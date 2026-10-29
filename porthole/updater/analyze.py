@@ -22,6 +22,8 @@
 """
 
 import argparse
+import glob
+import gzip
 import json
 import os
 import shutil
@@ -52,6 +54,8 @@ VERIFY_ARGS = ["--autounmask=n", "--backtrack=50"]
 # updated as their own stage before anything else
 TOOLCHAIN = ("sys-devel/binutils", "sys-kernel/linux-headers", "sys-libs/glibc",
              "sys-libs/musl", "sys-devel/gcc")
+# programs still linked to libraries an update replaced
+PRESERVED_ARGS = ["--oneshot", "@preserved-rebuild"]
 # give up after breaking this many cycles in a row
 MAX_CYCLES = 8
 # suggestions to try on one cycle before giving up on it
@@ -178,6 +182,74 @@ def news_unread():
         return int(out)
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
+
+
+def kernel_config():
+    """The running kernel's options as {name: value}, or None"""
+    release = os.uname().release
+    for path in ("/proc/config.gz", "/boot/config-" + release):
+        try:
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        config = {}
+        for line in lines:
+            if line.startswith("CONFIG_") and "=" in line:
+                name, value = line.split("=", 1)
+                config[name] = value
+            elif line.startswith("# CONFIG_") and line.endswith(" is not set"):
+                config[line[2:-len(" is not set")]] = "n"
+        return config
+    return None
+
+
+def ia32_enabled():
+    """True if the running kernel runs 32-bit x86 programs, None if unknown"""
+    config = kernel_config()
+    if config is None:
+        return None
+    if config.get("CONFIG_IA32_EMULATION") != "y":
+        return False
+    try:
+        with open("/proc/cmdline") as f:
+            cmdline = f.read().split()
+    except OSError:
+        cmdline = []
+    if "ia32_emulation=0" in cmdline:
+        return False
+    if config.get("CONFIG_IA32_EMULATION_DEFAULT_DISABLED") == "y":
+        return "ia32_emulation=1" in cmdline
+    return True
+
+
+def fstab_entry(mountpoint, fstab="/etc/fstab"):
+    """(device, type, options) of a mount point in fstab, or None"""
+    try:
+        with open(fstab) as f:
+            for line in f:
+                fields = line.split("#", 1)[0].split()
+                if len(fields) >= 3 and fields[1].rstrip("/") == mountpoint:
+                    options = fields[3].split(",") if len(fields) > 3 else []
+                    return fields[0], fields[2], options
+    except OSError:
+        pass
+    return None
+
+
+def known_fstype(fstype):
+    """True if the kernel has, or can load, this filesystem type"""
+    if fstype in ("auto", "none", "swap"):
+        return True
+    try:
+        with open("/proc/filesystems") as f:
+            if fstype in (line.split()[-1] for line in f if line.strip()):
+                return True
+    except OSError:
+        return True  # can't tell
+    pattern = "/lib/modules/%s/**/%s.ko*" % (os.uname().release, fstype)
+    return bool(glob.glob(pattern, recursive=True))
 
 
 def _cp(cpv):
@@ -429,6 +501,11 @@ class Analyzer:
         """emerge options from the targets, for follow-up commands"""
         return [a for a in self.targets if a.startswith("-") and a != "--oneshot"]
 
+    def root_options(self):
+        """Just the options choosing which system to work on"""
+        return [a for a in self.targets if a.startswith(("--root=", "--sysroot=",
+                                                         "--config-root="))]
+
     # -- toolchain --------------------------------------------------------
 
     def current_gcc(self):
@@ -519,6 +596,96 @@ class Analyzer:
             }
         return notes, full_rebuild
 
+    # -- old libraries ----------------------------------------------------
+
+    def preserved(self, fixes, temp_use, system):
+        """What @preserved-rebuild would rebuild right now, or None"""
+        libs = system.get("preserved_libs")
+        if not libs:
+            return None
+        self.log("%d package(s) have old libraries kept for programs still "
+                 "using them; resolving @preserved-rebuild..." % len(libs))
+        check = self.verify(fixes, temp_use, self.root_options() + PRESERVED_ARGS)
+        return {
+            "libs": libs,
+            "merge_list": check.get("merge_list") or [],
+            "verified": bool(check.get("success")),
+            "check": check,
+        }
+
+    def preserved_stage(self, preserved, after_update):
+        """Rebuild what still links to replaced libraries. Updates often
+        leave some (a library bumps its soname), so this follows every
+        world update; emerge does nothing if the set is empty."""
+        names = sorted({m["cp"] for m in (preserved or {}).get("merge_list") or []})
+        if names:
+            title = "Rebuild programs that still use old libraries: " + ", ".join(names)
+        else:
+            title = "Rebuild anything the update leaves using old libraries"
+        return {
+            "title": title,
+            "commands": [["emerge", "--keep-going"] + self.root_options() + PRESERVED_ARGS],
+            # the update changes which libraries are kept
+            "verified": "after previous stage" if after_update
+                        else bool(preserved and preserved["verified"]),
+        }
+
+    # -- checks on the system itself ---------------------------------------
+
+    def system_checks(self, merges, system):
+        """Problems outside portage that would make the update fail.
+        Each is {"severity": "error"|"warning", "title", "detail", "fix"}."""
+        checks = []
+
+        # 32-bit builds run their own test programs; without IA32
+        # emulation they fail with "Exec format error"
+        # multilib profiles turn abi_x86_32 on per package, as dependencies need it
+        if "x86" in (system.get("multilib_abis") or []) and ia32_enabled() is False:
+            needs32 = sorted({m["cp"] for m in merges if m.get("abi_x86_32")})
+            checks.append({
+                "severity": "error" if needs32 else "warning",
+                "title": "The running kernel can't run 32-bit programs",
+                "detail": (
+                    "Your profile builds 32-bit (abi_x86_32) libraries, but the kernel "
+                    "has IA32 emulation turned off. %s"
+                    % ("These packages in the update build 32-bit code and will fail "
+                       "with \"Exec format error\": %s." % _limit(needs32)
+                       if needs32 else
+                       "Nothing in this update needs it, but future 32-bit builds "
+                       "will fail with \"Exec format error\".")),
+                "fix": "Enable CONFIG_IA32_EMULATION (and leave "
+                       "CONFIG_IA32_EMULATION_DEFAULT_DISABLED off, or boot with "
+                       "ia32_emulation=1), rebuild the kernel and reboot.",
+            })
+
+        # kernels and boot loaders install into /boot
+        entry = fstab_entry("/boot")
+        if entry and "noauto" not in entry[2] and not os.path.ismount("/boot"):
+            device, fstype, _options = entry
+            boot_pkgs = sorted({m["cp"] for m in merges
+                                if m["cp"].startswith("sys-boot/")
+                                or m["cp"] in ("sys-kernel/installkernel",)
+                                or m["cp"].startswith("sys-kernel/")
+                                and m["cp"].split("/")[1].endswith(("-kernel", "-kernel-bin"))})
+            detail = ("/etc/fstab lists %s on /boot, but nothing is mounted there, so "
+                      "kernels and boot loader files are written to the root filesystem "
+                      "where the boot loader won't find them." % device)
+            fix = "Mount it (mount /boot) and fix whatever stopped it mounting at boot."
+            if not known_fstype(fstype):
+                detail += " Its filesystem type \"%s\" isn't one the kernel knows." % fstype
+                if fstype.lower() in ("fat32", "fat16", "fat"):
+                    fix = ("Change the type of /boot in /etc/fstab from \"%s\" to "
+                           "\"vfat\", then mount /boot." % fstype)
+            if boot_pkgs:
+                detail += " This update installs: %s." % ", ".join(boot_pkgs)
+            checks.append({
+                "severity": "error" if boot_pkgs else "warning",
+                "title": "/boot is not mounted",
+                "detail": detail,
+                "fix": fix,
+            })
+        return checks
+
     # -- main entry -----------------------------------------------------
 
     def analyze(self):
@@ -533,6 +700,7 @@ class Analyzer:
         self.log("  %d packages, %.0fs" % (len(result.get("merge_list") or []),
                                            result.get("seconds", 0)))
 
+        system = result.get("system") or {}
         fixes = self.build_fixes(result.get("needed_changes") or {}, user_keywords)
         for fix in fixes:
             self.explain(fix, result, user_keywords)
@@ -546,20 +714,23 @@ class Analyzer:
             "resolver_errors": result.get("errors") or {},
         }
 
-        # prove it: same targets, our changes only, no autounmask
-        self.log("Verifying %d proposed change(s)..." % len(fixes))
-        check = self.verify(fixes)
         temp_use, broken = [], []
-        if not check.get("success") and check.get("circular"):
-            temp_use, broken, check = self.break_cycles(fixes, check)
+        if plan["merge_list"]:
+            # prove it: same targets, our changes only, no autounmask
+            self.log("Verifying %d proposed change(s)..." % len(fixes))
+            check = self.verify(fixes)
+            if not check.get("success") and check.get("circular"):
+                temp_use, broken, check = self.break_cycles(fixes, check)
+        else:
+            check = result  # nothing to update, nothing to prove
         verified = bool(check.get("success"))
 
         for fix in fixes:
             fix["verified"] = verified
         plan["verified"] = verified
         plan["cycles_broken"] = broken
-        stages = self.stages(temp_use, broken, verified)
-        tc = self.toolchain(plan["merge_list"], result.get("system") or {})
+        stages = self.stages(temp_use, broken, verified) if plan["merge_list"] else []
+        tc = self.toolchain(plan["merge_list"], system)
         plan["toolchain"] = tc
         plan["notes"], plan["full_rebuild"] = [], None
         if tc:
@@ -571,12 +742,24 @@ class Analyzer:
             if len(tc["packages"]) == len(plan["merge_list"]):
                 stages = []  # nothing left after the toolchain stage
             stages = self.toolchain_stages(tc) + stages
-            plan["notes"], plan["full_rebuild"] = self.toolchain_notes(
-                tc, result.get("system") or {})
+            plan["notes"], plan["full_rebuild"] = self.toolchain_notes(tc, system)
         if temp_use:
             # the temporary USE changes are in place from the first stage on
             stages[0]["config"] = {"use": temp_use, "file": TEMP_NAME}
+
+        preserved = self.preserved(fixes, temp_use, system)
+        rebuilds = (preserved or {}).get("merge_list") or []
+        if stages or rebuilds:
+            stages.append(self.preserved_stage(preserved, bool(stages)))
+        if preserved:
+            if verified and not preserved["verified"]:
+                verified, check = False, preserved["check"]
+            del preserved["check"]
+        plan["verified"] = verified
+        plan["preserved"] = preserved
         plan["stages"] = stages
+        plan["checks"] = self.system_checks(plan["merge_list"] + rebuilds, system)
+        blocked = any(c["severity"] == "error" for c in plan["checks"])
         if not verified:
             # report what is still wrong with the changes applied
             remaining = {}
@@ -588,9 +771,9 @@ class Analyzer:
             plan["remaining"] = remaining
             plan["verify_error"] = check.get("error")
 
-        if not plan["merge_list"]:
+        if not plan["merge_list"] and not rebuilds:
             plan["status"] = "up-to-date"
-        elif not verified:
+        elif not verified or blocked:
             plan["status"] = "needs-help"
         elif fixes or temp_use or any(st.get("approval") for st in stages):
             plan["status"] = "needs-approval"
@@ -611,21 +794,45 @@ def format_report(plan):
     if status == "error":
         return "Resolver failed: %s\n%s" % (plan["error"], plan.get("traceback") or "")
     merges = plan["merge_list"]
+    rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
     counts = {}
     for m in merges:
         counts[m["kind"]] = counts.get(m["kind"], 0) + 1
+    if rebuilds:
+        counts["old-library rebuild"] = len(rebuilds)
     out.append({
         "up-to-date": "System is up to date.",
-        "ready": "%d updates ready to install, no changes needed." % len(merges),
+        "ready": "%d updates ready to install, no changes needed." % len(merges)
+                 if merges else
+                 "%d package(s) need rebuilding, no changes needed." % len(rebuilds),
         "needs-approval": "%d updates; %d change(s) need your approval (verified to work)."
                           % (len(merges), len(plan["fixes"]) + len(plan.get("cycles_broken") or [])
                              + sum(1 for st in plan["stages"] if st.get("approval"))),
-        "needs-help": "%d updates; could not find a verified solution automatically." % len(merges),
+        "needs-help": "%d updates; could not find a verified solution automatically."
+                      % (len(merges) + len(rebuilds)) if not plan.get("verified", True) else
+                      "%d updates; fix the problem(s) below before building."
+                      % (len(merges) + len(rebuilds)),
     }[status])
     if counts:
         out.append("  " + ", ".join("%d %s" % (n, k) for k, n in sorted(counts.items())))
     if plan.get("news_unread"):
         out.append("  %d unread news item(s): run 'eselect news read'" % plan["news_unread"])
+
+    for c in plan.get("checks") or []:
+        out.append("\n%s: %s" % ("PROBLEM" if c["severity"] == "error" else "Warning",
+                                  c["title"]))
+        out.append("  " + c["detail"])
+        out.append("  Fix: " + c["fix"])
+
+    preserved = plan.get("preserved")
+    if preserved:
+        out.append("\nOld libraries kept because installed programs still use them:")
+        for owner, files in sorted(preserved["libs"].items()):
+            out.append("  replaced by %s: %s" % (owner, _limit(
+                {os.path.basename(f) for f in files})))
+        if rebuilds:
+            out.append("  rebuilding these lets portage remove them: "
+                       + ", ".join(m["cpv"] for m in rebuilds))
 
     if plan["fixes"]:
         out.append("\nProposed changes:")
@@ -669,7 +876,7 @@ def format_report(plan):
         for command in full["commands"]:
             out.append("  $ " + " ".join(command))
 
-    if status == "needs-help":
+    if status == "needs-help" and not plan.get("verified", True):
         out.append("\nStill unresolved with the changes above applied:")
         rem = plan.get("remaining", {})
         for c in rem.get("slot_conflicts") or []:
@@ -691,12 +898,60 @@ def format_report(plan):
         if plan.get("verify_error"):
             out.append("  resolver error: " + plan["verify_error"])
 
-    out.append("\nUpdates:")
+    if merges:
+        out.append("\nUpdates:")
     for m in merges:
         old = " [%s]" % ", ".join(m["replaces"]) if m["replaces"] else ""
         out.append("  [%-2s] %s%s" % (KIND_NAMES.get(m["kind"], "?"), m["cpv"], old))
+    if rebuilds:
+        out.append("\nRebuilds for old libraries%s:"
+                   % (" (current list; rerun after the update)" if merges else ""))
+    for m in rebuilds:
+        out.append("  [%-2s] %s" % (KIND_NAMES.get(m["kind"], "?"), m["cpv"]))
     out.append("\n(analysis took %.0fs)" % plan["seconds"])
     return "\n".join(out)
+
+
+def summarize(plan):
+    """(title, body) describing a plan for people"""
+    merges = plan.get("merge_list") or []
+    rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
+    status = plan.get("status")
+    count = len(merges) + len(rebuilds)
+    changes = (len(plan.get("fixes") or []) + len(plan.get("cycles_broken") or [])
+               + sum(1 for s in plan.get("stages") or [] if s.get("approval")))
+    problems = [c for c in plan.get("checks") or [] if c["severity"] == "error"]
+    if status == "ready" and not merges:
+        title = "%d package%s need%s rebuilding" % (
+            count, "s" if count != 1 else "", "" if count != 1 else "s")
+        body = ["%s still use%s old library versions an earlier update left behind."
+                % (", ".join(sorted({m["cp"].split("/")[1] for m in rebuilds})),
+                   "s" if count == 1 else "")]
+    elif status == "ready":
+        title = "%d updates ready to install" % count
+        body = ["No configuration changes are needed."]
+    elif status == "needs-approval":
+        title = "%d updates available" % count
+        body = ["%d change%s need%s your approval first (already tested to work)."
+                % (changes, "s" if changes != 1 else "", "" if changes != 1 else "s")]
+    elif status == "needs-help" and problems:
+        title = "%d updates need attention" % count
+        body = ["Fix this first or the build will fail: %s."
+                % "; ".join(c["title"] for c in problems)]
+    elif status == "needs-help":
+        title = "%d updates need attention" % count
+        body = ["A working update plan couldn't be found automatically."]
+    elif status == "error":
+        return "Update check failed", "Open the report for details."
+    else:
+        return "System is up to date", ""
+    gcc = (plan.get("toolchain") or {}).get("gcc") or {}
+    if gcc.get("switch_to"):
+        body.append("Includes a new compiler: GCC %s." % gcc["major"])
+    if plan.get("news_unread"):
+        body.append("%d unread news item%s." % (plan["news_unread"],
+                                                "s" if plan["news_unread"] != 1 else ""))
+    return title, " ".join(body)
 
 
 def main(argv=None):

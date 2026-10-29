@@ -186,6 +186,25 @@ class MainWindow(PluginHandler):
             # hide warning toolbar widget
             debug.dprint("MAINWINDOW: __init__(); hiding btn_root_warning")
             self.wtree.get_object("btn_root_warning").hide()
+        self.update_assistant = None
+        self.add_update_assistant_menu()
+
+    def add_update_assistant_menu(self):
+        """Put the update assistant at the top of the Actions menu"""
+        menu = self.wtree.get_object("menuitem1_menu")
+        item = Gtk.MenuItem.new_with_mnemonic(_("_Update Assistant..."))
+        item.connect("activate", self.open_update_assistant)
+        menu.insert(Gtk.SeparatorMenuItem(), 0)
+        menu.insert(item, 0)
+        menu.show_all()
+
+    def open_update_assistant(self, *widget):
+        """Show the plan made by the update service"""
+        from porthole.updater.review import UpdateAssistant
+        if self.update_assistant is None:
+            self.update_assistant = UpdateAssistant(self.mainwindow, self)
+        self.update_assistant.present_plan()
+        return False
 
     def init_data(self):
         """initialize the db and anything else related to package selection"""

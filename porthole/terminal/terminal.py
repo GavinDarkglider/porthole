@@ -957,9 +957,13 @@ class ProcessManager: #dbus.service.Object):
         # reset to None, so next one starts properly
         self.reader.fd = None
         # clean up finished emerge process
+        self.exit_status = None
         try:
             m = os.waitpid(self.pid, 0) # wait for any child processes to finish
             debug.dprint("TERMINAL: process %s finished, status %s" % m)
+            self.exit_status = os.waitstatus_to_exitcode(m[1])
+            if self.exit_status != 0:
+                self.Failed = True
         except OSError as e:
             if not e.args[0] == 10: # 10 = no process to kill
                 debug.dprint("TERMINAL: OSError %s" % e)

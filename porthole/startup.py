@@ -27,6 +27,7 @@ _id = datetime.datetime.now().microsecond
 
 import gi; gi.require_version("Gtk", "3.0") # make sure we have the right version
 
+from gi.repository import GLib
 from gi.repository import Gtk
 from gi.repository import GdkPixbuf
 
@@ -61,6 +62,7 @@ Choices = {"portage": 'portagelib', "pkgcore": 'pkgcore_lib', "dbus": "dbus_main
 BACKEND = Choices["portage"]
 DATA_PATH = EPREFIX + "/usr/share/porthole/"
 i18n_DIR = DATA_PATH + 'i18n'
+REVIEW = False
 RUN_LOCAL = False
 DIR_LIST = [LOG_FILE_DIR, DB_FILE_DIR]
 
@@ -143,6 +145,12 @@ def local():
 location = os.path.abspath(__file__)
 if "site-packages" not in location:
     local()
+
+
+def set_review():
+    """Open the update assistant once the main window is up"""
+    global REVIEW
+    REVIEW = True
 
 
 def set_debug(arg):
@@ -229,7 +237,9 @@ def main():
     config.Config.load()
     config.Prefs.use_gladefile = "not assigned"
     # create the main window
-    MainWindow() #config.Prefs, config.Config)
+    window = MainWindow() #config.Prefs, config.Config)
+    if REVIEW:
+        GLib.idle_add(window.open_update_assistant)
     # start the program loop
     Gtk.main()
     # save the prefs to disk for next time

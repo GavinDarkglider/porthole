@@ -202,6 +202,8 @@ def merge_list(depgraph):
         else:
             info["kind"] = "new"
         info["parents"] = parents_of(depgraph, pkg)
+        # 32-bit builds need the kernel's IA32 emulation
+        info["abi_x86_32"] = "abi_x86_32" in pkg.use.enabled
         out.append(info)
     return out
 
@@ -223,6 +225,20 @@ def module_packages(vardb):
     return sorted(found)
 
 
+def preserved_libs(vardb):
+    """Old libraries portage kept because installed programs still use
+    them, as {owner cpv: [files]}; None if the registry can't be read"""
+    registry = getattr(vardb, "_plib_registry", None)
+    if registry is None:
+        return None
+    try:
+        registry.load()
+    except portage.exception.PortageException:
+        return None  # unreadable when not run as root
+    return {str(cpv): sorted(files)
+            for cpv, files in registry.getPreservedLibs().items()}
+
+
 def system_info(depgraph, settings):
     """Facts the planner needs about the target system"""
     root = settings["EROOT"]
@@ -232,6 +248,10 @@ def system_info(depgraph, settings):
         "build_flags": {k: settings.get(k, "") for k in ("CFLAGS", "CXXFLAGS", "LDFLAGS")},
         "installed_count": len(vardb.cpv_all()),
         "module_packages": module_packages(vardb),
+        "multilib_abis": settings.get("MULTILIB_ABIS", "").split(),
+        # the depgraph's vartree is a FakeVartree without the registry
+        "preserved_libs": preserved_libs(
+            depgraph._frozen_config._trees_orig[root]["vartree"].dbapi),
     }
 
 

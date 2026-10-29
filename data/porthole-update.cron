@@ -1,0 +1,4 @@
+#!/bin/sh
+# Porthole update service: checks for updates when due (see
+# /etc/porthole/updater.conf). Runs hourly so missed checks catch up.
+exec /usr/bin/porthole-update-service run --quiet

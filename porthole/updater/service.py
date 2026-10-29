@@ -1,0 +1,274 @@
+"""
+    Porthole update service
+
+    The background half of the update assistant, run as root from cron
+    (hourly is fine: it decides itself whether a check is due). When due
+    it syncs the repositories (at most once a day), works out an update
+    plan with the analyzer and publishes it for the notifier:
+
+        /var/lib/porthole/plan.json    the latest plan (world readable)
+        /var/lib/porthole/state.json   last check/sync times, running flag
+
+    It never builds packages or writes to /etc/portage.
+
+    Settings live in /etc/porthole/updater.conf:
+
+        [updater]
+        # days between checks, 1 or more
+        interval_days = 1
+        # sync the repositories before checking
+        sync = yes
+        # don't start a check while running on battery
+        skip_on_battery = yes
+
+    Copyright (C) 2026 Porthole developers
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+"""
+
+import argparse
+import configparser
+import fcntl
+import glob
+import json
+import os
+import subprocess
+import sys
+import time
+
+from porthole.updater.analyze import Analyzer, format_report
+
+CONFIG_FILE = "/etc/porthole/updater.conf"
+STATE_DIR = "/var/lib/porthole"
+PLAN_FILE = os.path.join(STATE_DIR, "plan.json")
+STATE_FILE = os.path.join(STATE_DIR, "state.json")
+LOG_FILE = "/var/log/porthole/updater.log"
+LOCK_FILE = "/run/lock/porthole-updater.lock"
+
+DAY = 24 * 3600
+# cron fires on the hour; don't skip a day because the last run ended late
+SLACK = 3600
+
+DEFAULTS = {
+    "interval_days": "1",
+    "sync": "yes",
+    "skip_on_battery": "yes",
+}
+
+
+def load_config(path=CONFIG_FILE):
+    parser = configparser.ConfigParser()
+    parser.read_dict({"updater": DEFAULTS})
+    parser.read(path)
+    section = parser["updater"]
+    try:
+        interval = int(section.get("interval_days"))
+    except ValueError:
+        interval = 1
+    return {
+        # syncing more than once a day is unfair to the mirrors
+        "interval_days": max(1, interval),
+        "sync": section.getboolean("sync", True),
+        "skip_on_battery": section.getboolean("skip_on_battery", True),
+    }
+
+
+def read_json(path, default=None):
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return default
+
+
+def write_json(path, data):
+    """Write atomically so readers never see half a file"""
+    os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f, indent=1)
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, path)
+
+
+class Log:
+    def __init__(self, path=LOG_FILE, echo=True):
+        self.echo = echo
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            self.file = open(path, "a")
+        except OSError:
+            self.file = None
+
+    def __call__(self, msg):
+        line = "%s %s" % (time.strftime("%Y-%m-%d %H:%M:%S"), msg)
+        if self.file:
+            self.file.write(line + "\n")
+            self.file.flush()
+        if self.echo:
+            print(msg, file=sys.stderr, flush=True)
+
+
+def emerge_running():
+    """True if an emerge process is running (we'd race its changes)"""
+    me = os.getpid()
+    for cmdline in glob.glob("/proc/[0-9]*/cmdline"):
+        try:
+            if int(cmdline.split("/")[2]) == me:
+                continue
+            with open(cmdline, "rb") as f:
+                args = f.read().split(b"\0")
+        except (OSError, ValueError):
+            continue
+        # python3 /usr/lib/python-exec/python3.x/emerge ... or emerge ...
+        if any(os.path.basename(a) == b"emerge" for a in args[:2]):
+            return True
+    return False
+
+
+def on_battery():
+    """True when running on battery with no AC adapter online"""
+    supplies = glob.glob("/sys/class/power_supply/*")
+    mains = [s for s in supplies if _read(os.path.join(s, "type")) == "Mains"]
+    if not mains:
+        return False  # desktop, or unknown
+    return not any(_read(os.path.join(s, "online")) == "1" for s in mains)
+
+
+def _read(path):
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def last_repo_sync():
+    """Newest repository sync time, including syncs run by hand"""
+    import portage
+    times = []
+    for repo in portage.db[portage.root]["vartree"].settings.repositories:
+        for name in ("metadata/timestamp.chk", "metadata/timestamp.x", ".git/FETCH_HEAD"):
+            path = os.path.join(repo.location, name)
+            if os.path.exists(path):
+                times.append(os.path.getmtime(path))
+                break
+    return max(times) if times else None
+
+
+class Service:
+    def __init__(self, config, log):
+        self.config = config
+        self.log = log
+        self.state = read_json(STATE_FILE, {}) or {}
+
+    def save_state(self, **changes):
+        self.state.update(changes)
+        write_json(STATE_FILE, self.state)
+
+    def due(self):
+        last = self.state.get("last_check")
+        if not last:
+            return True
+        return time.time() - last >= self.config["interval_days"] * DAY - SLACK
+
+    def sync(self):
+        """Sync unless any repository was synced within the last day"""
+        recent = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
+                     default=None)
+        if recent and time.time() - recent < DAY - SLACK:
+            self.log("Repositories synced %.1f hours ago; not syncing again yet"
+                     % ((time.time() - recent) / 3600))
+            return {"ran": False, "ok": True, "last": recent}
+        self.log("Syncing repositories (emaint sync --auto)...")
+        try:
+            proc = subprocess.run(
+                ["emaint", "sync", "--auto"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, timeout=3600,
+            )
+            output, ok = proc.stdout, proc.returncode == 0
+        except (OSError, subprocess.SubprocessError) as e:
+            output, ok = str(e), False
+        if self.log.file:
+            self.log.file.write(output)
+        now = time.time()
+        if ok:
+            self.save_state(last_sync=now)
+            self.log("Sync finished")
+        else:
+            self.log("Sync failed; checking against the current tree")
+        return {"ran": True, "ok": ok, "last": now if ok else recent,
+                "error": None if ok else output[-2000:]}
+
+    def run(self, force=False, sync=True):
+        if not force:
+            if not self.due():
+                self.log("Not due yet")
+                return 0
+            if self.config["skip_on_battery"] and on_battery():
+                self.log("On battery; trying again later")
+                return 0
+        if emerge_running():
+            self.log("emerge is running; trying again later")
+            return 0
+
+        self.save_state(running=True, started=time.time())
+        try:
+            sync_info = None
+            if sync and self.config["sync"]:
+                sync_info = self.sync()
+            plan = Analyzer(log=self.log).analyze()
+            plan["sync"] = sync_info
+            write_json(PLAN_FILE, plan)
+            self.log("Plan written: %s, %d updates, %d old-library rebuilds"
+                     % (plan.get("status"), len(plan.get("merge_list") or []),
+                        len((plan.get("preserved") or {}).get("merge_list") or [])))
+            self.save_state(last_check=time.time(), last_status=plan.get("status"))
+            return 0 if plan.get("status") != "error" else 1
+        finally:
+            self.save_state(running=False)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Porthole update service (run as root).")
+    sub = parser.add_subparsers(dest="command", required=True)
+    run = sub.add_parser("run", help="check for updates if due")
+    run.add_argument("--force", action="store_true",
+                     help="check now, even if not due or on battery "
+                          "(the once-a-day sync limit still applies)")
+    run.add_argument("--no-sync", action="store_true", help="don't sync first")
+    run.add_argument("--quiet", action="store_true", help="only write the log file")
+    sub.add_parser("status", help="show the last plan")
+    args = parser.parse_args(argv)
+
+    if args.command == "status":
+        plan = read_json(PLAN_FILE)
+        state = read_json(STATE_FILE, {})
+        if state.get("running"):
+            print("A check is running now.")
+        if not plan:
+            print("No plan yet.")
+            return 1
+        print("Checked %s\n" % plan.get("generated"))
+        print(format_report(plan))
+        return 0
+
+    if os.geteuid() != 0:
+        parser.error("run needs root")
+    os.makedirs(os.path.dirname(LOCK_FILE), exist_ok=True)
+    lock = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("Another check is already running.", file=sys.stderr)
+        return 0
+    log = Log(echo=not args.quiet)
+    return Service(load_config(), log).run(force=args.force, sync=not args.no_sync)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

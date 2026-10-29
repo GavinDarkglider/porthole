@@ -61,6 +61,7 @@ def usage():
     print("  --debug string\tOutput debugging information to stderr (terminal)")
     print("             " + tabs + "string, ALL = all debug text printed.  Any other string will")
     print("             " + tabs + "print only those texts containing 'string'")
+    print("  -r, --review" + tabs + "Open the update assistant on startup")
     print("  -b, --backend [portage, pkgcore]  select one of the backends")
     print("           NOTE: the pkgcore backend is not complete and out of date.")
     print("                 It is still enabled as an option for development")
@@ -74,8 +75,8 @@ if __name__ == "__main__":
     try:
         #opts, args = getopt(sys.argv[1:], 'lvd:b:hnu:', ["local", "version", "debug=",
         #                                      "backend=", "help", "no-priveledges", "user=", "path="])
-        opts, args = getopt(sys.argv[1:], 'lvd:b:h', ["local", "version", "debug=",
-                                              "backend=", "help", "path="])
+        opts, args = getopt(sys.argv[1:], 'lvd:b:hr', ["local", "version", "debug=",
+                                              "backend=", "help", "path=", "review"])
         #print(opts
         #print(args
     except GetoptError as e:
@@ -123,6 +124,7 @@ if __name__ == "__main__":
                 print_version,
                 set_backend,
                 set_debug,
+                set_review,
             )
             RUN_LOCAL = True
             local()
@@ -137,6 +139,7 @@ if __name__ == "__main__":
             print_version,
             set_backend,
             set_debug,
+            set_review,
         )
         #print("inserting path to modules")
         insert_path()
@@ -153,6 +156,8 @@ if __name__ == "__main__":
             print_version()
         elif opt in ("-d", "--debug"):
             set_debug(arg)
+        elif opt in ("-r", "--review"):
+            set_review()
         # elif opt in ("-u", "--user"):
             # print("Porthole: --user = " + str(arg))
             # set_user(arg)
