@@ -289,7 +289,8 @@ def main(argv=None):
     submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
-    submit.add_argument("cmdline", nargs=argparse.REMAINDER, metavar="CMD",
+    # after "--", so its options aren't taken for submit's own
+    submit.add_argument("cmdline", nargs="*", metavar="CMD",
                         help="emerge: the command line, after --")
     cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
     cancel.add_argument("job", nargs="?", help="only this job")
