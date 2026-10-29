@@ -116,8 +116,6 @@ class UpdateAssistant(Gtk.Window):
         outer.pack_start(buttons, False, False, 0)
         self.add(outer)
 
-        self.job_terminal = None
-        self.finished_jobs = self.finished_job_ids()
         # the service replaces its files with a rename, so watch the directory
         self.monitor = None
         try:
@@ -507,12 +505,10 @@ class UpdateAssistant(Gtk.Window):
         self.load()
 
     def show_progress(self):
-        """Follow the job in a Porthole terminal (tabs, colours, summary)"""
-        if self.job_terminal is not None and self.job_terminal.window_visible:
-            self.job_terminal.window.present()
-            return
+        """Follow the job in Porthole's job terminal (tabs, colours,
+        summary); there is only ever one such window"""
         from porthole.updater.follow import show_in_terminal
-        self.job_terminal = show_in_terminal()
+        show_in_terminal()
 
     def on_cancel(self, button):
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
@@ -530,22 +526,14 @@ class UpdateAssistant(Gtk.Window):
                 button.set_sensitive(True), None if ok else self.error(
                     "Couldn't cancel", out or "Cancelled."), self.load()))
 
-    def finished_job_ids(self):
-        return {j["id"] for j in read_jobs() if j["status"] not in ACTIVE}
-
     def on_state_changed(self, monitor, file, other, event):
         if file.get_basename() in ("plan.json", "jobs.json") and not self.reload_pending:
             self.reload_pending = True
             GLib.timeout_add(500, self.state_changed)
 
     def state_changed(self):
+        # (the main window reloads its package lists when a job finishes)
         self.reload_pending = False
-        finished = self.finished_job_ids()
-        if finished - self.finished_jobs:
-            # packages changed: Porthole's package lists are out of date
-            if hasattr(self.mainwindow, "reload_db"):
-                self.mainwindow.reload_db()
-        self.finished_jobs = finished
         if self.get_visible():
             self.load()
         return False

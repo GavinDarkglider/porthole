@@ -18,6 +18,9 @@
 """
 
 import os
+import re
+import shlex
+import signal
 import sys
 import time
 
@@ -26,6 +29,10 @@ from porthole.updater.service import read_json
 
 # start this far from the end of a long log (emerge build output is big)
 REPLAY_BYTES = 8 * 1024 * 1024
+# the one process showing jobs in a terminal window, for this user
+PIDFILE = os.path.join(os.environ.get("XDG_RUNTIME_DIR")
+                       or os.path.expanduser("~/.cache/porthole"), "porthole-follow.pid")
+_FOLLOW = re.compile(r"porthole\.updater\.follow(?: (\S+))?\s*$")
 
 
 def find(job_id=None):
@@ -88,18 +95,107 @@ def command(job_id=None):
     return prefix + shlex.join(argv)
 
 
+def display_command(command_string):
+    """What the terminal should show for a command: for a follower, the
+    job's own command line (or its title), not the python running it"""
+    match = _FOLLOW.search(command_string or "")
+    if not match:
+        return command_string
+    job = find(match.group(1))
+    if not job:
+        return command_string
+    steps = job.get("steps") or []
+    if len(steps) == 1 and steps[0].get("argv"):
+        env = " ".join("%s=%s" % (k, shlex.quote(v)) for k, v in
+                       sorted((steps[0].get("env") or {}).items()))
+        return (env + " " if env else "") + shlex.join(steps[0]["argv"])
+    return job["title"]
+
+
+def running_follower():
+    """pid of the process showing jobs in a terminal window, if any"""
+    try:
+        with open(PIDFILE) as f:
+            pid = int(f.read().strip())
+        os.kill(pid, 0)
+        with open("/proc/%d/cmdline" % pid, "rb") as f:
+            if b"porthole" not in f.read():
+                return None
+    except (OSError, ValueError):
+        return None
+    return pid
+
+
+def raise_existing():
+    """Ask the process already showing jobs to bring its window up (and
+    follow the current job). True if there was one."""
+    pid = running_follower()
+    if pid is None or pid == os.getpid():
+        return False
+    try:
+        os.kill(pid, signal.SIGUSR1)
+    except OSError:
+        return False
+    return True
+
+
+class Follower:
+    """The one terminal window following jobs, in this process"""
+
+    def __init__(self, on_close=None):
+        self.manager = None
+        self.followed = set()
+        self.on_close = on_close
+        from gi.repository import GLib
+        # another launch asks us to show the window instead of opening one
+        GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
+                             lambda: (self.show(), True)[1])
+
+    def show(self, job_id=None):
+        """Bring the window up, following job_id (default: the current job)"""
+        from porthole.terminal.terminal import ProcessManager
+        from porthole.utils import utils
+        if self.manager is None or not self.manager.window_visible:
+            self.manager = ProcessManager(utils.environment())
+            self.followed = set()
+        job = find(job_id)
+        new_window = not self.followed
+        if job and job["id"] not in self.followed:
+            self.followed.add(job["id"])
+            self.manager.add(job["title"], command(job["id"]), lambda: None,
+                             "Job runner")
+            if new_window:
+                self.manager.window.connect("destroy", self.closed)
+        self.manager.window.present()
+        os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
+        with open(PIDFILE, "w") as f:
+            f.write(str(os.getpid()))
+
+    def closed(self, window):
+        if running_follower() == os.getpid():
+            try:
+                os.unlink(PIDFILE)
+            except OSError:
+                pass
+        if self.on_close:
+            self.on_close()
+
+
 def show_in_terminal(job_id=None, on_close=None):
-    """Follow a job in a Porthole terminal window of its own (Porthole's
-    preferences must be loaded). Returns the ProcessManager."""
-    from porthole.terminal.terminal import ProcessManager
-    from porthole.utils import utils
-    job = find(job_id)
-    manager = ProcessManager(utils.environment())
-    manager.add(job["title"] if job else "Update progress", command(job_id),
-                lambda: None, "Update Assistant")
-    if on_close:
-        manager.window.connect("destroy", lambda w: on_close())
-    return manager
+    """Follow a job in Porthole's job terminal window, opening it unless
+    one is already open in this or another process (Porthole's
+    preferences must be loaded). Returns this process's Follower, or None
+    if another process shows it."""
+    global _follower
+    if raise_existing():
+        return None
+    if _follower is None:
+        _follower = Follower(on_close)
+    _follower.show(job_id)
+    return _follower
+
+
+_follower = None
 
 
 if __name__ == "__main__":

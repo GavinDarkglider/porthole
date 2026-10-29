@@ -90,10 +90,10 @@ class ActionHandler(CategoryHandler):
             SingleButtonDialog(_("Couldn't start"), self.mainwindow,
                                output or _("Cancelled."), None, _("OK"))
             return
-        from porthole.updater import follow
-        job_id = output.strip().splitlines()[-1]
-        self.process_manager.add(package_name, follow.command(job_id), self.reload_db,
-                                 _("Job runner"))
+        # the job window (one for all jobs); package lists are reloaded
+        # when the job ends, see MainWindow.watch_jobs
+        from porthole.updater.follow import show_in_terminal
+        show_in_terminal(output.strip().splitlines()[-1])
 
     def get_sync_time(self):
         """gets and returns the timestamp info saved during

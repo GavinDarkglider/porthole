@@ -185,6 +185,32 @@ class MainWindow(PluginHandler):
             self.wtree.get_object("btn_root_warning").hide()
         self.update_assistant = None
         self.add_update_assistant_menu()
+        self.watch_jobs()
+
+    def watch_jobs(self):
+        """Reload the package lists whenever a runner job finishes, however
+        it was started (the tray, the assistant or this window)"""
+        from gi.repository import Gio
+        from porthole.updater.service import STATE_DIR
+        from porthole.updater.viewer import read_jobs
+        self.finished_jobs = {j["id"] for j in read_jobs()
+                              if j["status"] not in ("queued", "running")}
+        self.jobs_monitor = None
+        try:
+            self.jobs_monitor = Gio.File.new_for_path(STATE_DIR).monitor_directory(
+                Gio.FileMonitorFlags.NONE, None)
+        except GLib.Error:
+            return
+
+        def changed(monitor, file, other, event):
+            if file.get_basename() != "jobs.json":
+                return
+            finished = {j["id"] for j in read_jobs()
+                        if j["status"] not in ("queued", "running")}
+            if finished - self.finished_jobs:
+                GLib.idle_add(self.reload_db)
+            self.finished_jobs = finished
+        self.jobs_monitor.connect("changed", changed)
 
     def add_update_assistant_menu(self):
         """Put the update assistant at the top of the Actions menu"""

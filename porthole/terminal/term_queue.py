@@ -209,7 +209,10 @@ class TerminalQueue:
         column = Gtk.TreeViewColumn(_("Command"))
         text = Gtk.CellRendererText()
         column.pack_start(text, expand = True)
-        column.add_attribute(text, "text", self.queue_model.column['command'])
+        # followed runner jobs show the job's own command
+        from porthole.updater.follow import display_command
+        column.set_cell_data_func(text, lambda col, cell, model, it, data: cell.set_property(
+            "text", display_command(model.get_value(it, self.queue_model.column['command']))))
         self.queue_tree.append_column(column)
         column = Gtk.TreeViewColumn(_("Sender"))
         text = Gtk.CellRendererText()

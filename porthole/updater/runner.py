@@ -244,8 +244,14 @@ def submit_update(generated):
                       "shell": stage_shell(stage)})
     count = len(plan.get("merge_list") or []) + len(
         (plan.get("preserved") or {}).get("merge_list") or [])
-    job = new_job("update", "Update %d package%s" % (count, "s" if count != 1 else ""),
-                  steps, recheck=True, plan=generated)
+    lives = len((plan.get("live") or {}).get("changed") or [])
+    if count:
+        title = "Update %d package%s" % (count, "s" if count != 1 else "")
+        if lives:
+            title += " and rebuild %d live" % lives
+    else:
+        title = "Rebuild %d live package%s" % (lives, "s" if lives != 1 else "")
+    job = new_job("update", title, steps, recheck=True, plan=generated)
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
             raise JobError("An update is already queued or running.")

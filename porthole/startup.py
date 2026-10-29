@@ -244,6 +244,9 @@ def main():
     config.Config.load()
     config.Prefs.use_gladefile = "not assigned"
     if FOLLOW_JOB:
+        from porthole.updater.follow import raise_existing
+        if raise_existing():
+            sys.exit(0)  # the open job window comes up instead
         from porthole.updater.follow import show_in_terminal
         show_in_terminal(on_close=Gtk.main_quit)
         Gtk.main()

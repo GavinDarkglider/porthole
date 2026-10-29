@@ -371,8 +371,11 @@ class ProcessManager: #dbus.service.Object):
         self.save_as_menu.set_sensitive(False)
         self.open_menu.set_sensitive(False)
         # show a message that the process is starting
-        self.term.append_all("*** " + command_string + " ***\n", True, 'command')
-        self.set_statusbar("*** " + command_string + " ***")
+        # a job followed from the runner shows the job's command, not ours
+        from porthole.updater.follow import display_command
+        shown = display_command(command_string)
+        self.term.append_all("*** " + shown + " ***\n", True, 'command')
+        self.set_statusbar("*** " + shown + " ***")
         # pty.fork() creates a new process group
         if self.reader.fd:
             if os.isatty(self.reader.fd):
