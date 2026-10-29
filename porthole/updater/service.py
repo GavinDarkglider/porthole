@@ -263,9 +263,11 @@ class Service:
                             live_exclude=self.config["live_exclude"]).analyze()
             plan["sync"] = sync_info
             write_json(PLAN_FILE, plan)
-            self.log("Plan written: %s, %d updates, %d old-library rebuilds"
+            self.log("Plan written: %s, %d updates, %d old-library rebuilds, "
+                     "%d live rebuilds"
                      % (plan.get("status"), len(plan.get("merge_list") or []),
-                        len((plan.get("preserved") or {}).get("merge_list") or [])))
+                        len((plan.get("preserved") or {}).get("merge_list") or []),
+                        len((plan.get("live") or {}).get("changed") or [])))
             self.save_state(last_check=time.time(), last_status=plan.get("status"))
             return 0 if plan.get("status") != "error" else 1
         finally:
