@@ -194,11 +194,10 @@ class PackageHandler(MainBase):
             else:
                 self.send_pkg_list("emerge --update ")
         else:
-            debug.dprint("MAIN: Upgrades not loaded; upgrade world?")
-            self.upgrades_loaded_dialog = YesNoDialog(_("Upgrade requested"),
-                self.mainwindow,
-                _("Do you want to upgrade all packages in your world file?"),
-                 self.upgrades_loaded_dialog_response)
+            # world updates go through the update assistant, which
+            # works out and verifies the config changes they need
+            debug.dprint("MAIN: nothing selected; opening the update assistant")
+            self.open_update_assistant()
 
     def process_selection(self, action):
         if self.is_group_selectable():

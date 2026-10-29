@@ -111,12 +111,9 @@ class MainWindow(PluginHandler):
         self.loaded = {}
         self.last_view_setting = None
 
-        # get an empty tooltip
-        ##self.synctooltip = Gtk.Tooltips()
-        self.sync_tip = _(
-            " Synchronise Package Database \n The last sync was done:\n")
-        # set the sync label to the saved one set in the options
-        self.widget["btn_sync"].set_label(config.Prefs.globals.Sync_label)
+        # syncing is part of the update service's checks now; the button
+        # opens the update assistant and its tooltip shows the plan
+        self.sync_tip = _("Last sync:")
         self.widget["view_refresh"].set_sensitive(False)
         # restore last window width/height
         if config.Prefs.main.xpos and config.Prefs.main.ypos:
@@ -194,9 +191,16 @@ class MainWindow(PluginHandler):
         menu = self.wtree.get_object("menuitem1_menu")
         item = Gtk.MenuItem.new_with_mnemonic(_("_Update Assistant..."))
         item.connect("activate", self.open_update_assistant)
+        settings = Gtk.MenuItem.new_with_mnemonic(_("Update _Settings..."))
+        settings.connect("activate", self.open_update_settings)
         menu.insert(Gtk.SeparatorMenuItem(), 0)
+        menu.insert(settings, 0)
         menu.insert(item, 0)
         menu.show_all()
+
+    def open_update_settings(self, *widget):
+        from porthole.updater.settings import UpdaterSettings
+        UpdaterSettings(self.mainwindow)
 
     def open_update_assistant(self, *widget):
         """Show the plan made by the update service"""

@@ -697,10 +697,10 @@
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="has-tooltip">True</property>
-                <property name="label" translatable="yes">S_ync</property>
+                <property name="label" translatable="yes">Up_dates</property>
                 <property name="use-underline">True</property>
-                <property name="icon-name">view-refresh</property>
-                <signal name="clicked" handler="on_sync_tree" swapped="no"/>
+                <property name="icon-name">system-software-update</property>
+                <signal name="clicked" handler="on_update_assistant" swapped="no"/>
               </object>
               <packing>
                 <property name="expand">False</property>

@@ -71,6 +71,7 @@ class MainBase(object):
             "on_adv_emerge_package" : self.adv_emerge_btn,
             "on_unmerge_package" : self.unmerge_btn,
             "on_sync_tree" : self.sync_tree,
+            "on_update_assistant" : self.open_update_assistant,
             "on_upgrade_packages" : self.upgrade_packages,
             "on_package_search" : self.package_search,
             "on_search_entry_activate": self.package_search,

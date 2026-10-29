@@ -77,10 +77,15 @@ class ActionHandler(CategoryHandler):
         self.last_sync, self.valid_sync = get_sync_info()
 
     def set_sync_tip(self):
-        """Sets the sync tip for the new or old toolbar API"""
+        """Tooltip for the Updates button: the plan, then the last sync"""
+        from porthole.updater.analyze import summarize
+        from porthole.updater.service import PLAN_FILE, read_json
+        plan = read_json(PLAN_FILE)
+        title, body = summarize(plan) if plan else (_("No update check has run yet"), "")
+        lines = [title] + ([body] if body else [])
+        lines.append("%s %s" % (self.sync_tip, self.last_sync.strip()))
         self.widget["btn_sync"].set_has_tooltip(True)
-        self.widget["btn_sync"].set_tooltip_text(' '.join([self.sync_tip,
-                self.last_sync[:], '']))
+        self.widget["btn_sync"].set_tooltip_text("\n".join(lines))
 
     def action_callback(self, action = None, arg = None):
         """dispatcher interface callback to handle various actions."""
