@@ -48,6 +48,7 @@ import gi
 gi.require_version('Gtk', '3.0')
 
 from gi.repository import GdkPixbuf
+from gi.repository import GLib
 from gi.repository import Gtk
 from gi.repository import GObject
 
@@ -151,6 +152,8 @@ class TerminalQueue:
         self.wtree = wtree
         self.term = term
         self.set_resume = set_resume
+        # packages added again while already queued, reported together
+        self.duplicates = []
         self.window = wtree.get_object("process_window")
         self.queue_tree = wtree.get_object("queue_treeview")
         self.queue_menu = wtree.get_object("queue1")
@@ -259,12 +262,12 @@ class TerminalQueue:
                     name = self.queue_model.get_value(search_iter, self.queue_model.column['name'])
                     if package_name == name and command_string == command:
                         debug.dprint("TERM_QUEUE: add(): repeat command match")
-                        # Let the user know it's already in the list
-                        message = _("The package you selected is already in the emerge queue!")
-                        debug.dprint("TERM_QUEUE: add(); gettext result = " + _("Error Adding Package To Queue!"))
-                        SingleButtonDialog(_("Error Adding Package To Queue!"), None,
-                                            message, None, _("OK"))
-                        debug.dprint("TERM_QUEUE: add(): returning from match dialog & returning")
+                        # Let the user know it's already in the list, once
+                        # for everything added in one go (bug #125)
+                        if not self.duplicates:
+                            GLib.idle_add(self.show_duplicates)
+                        if package_name not in self.duplicates:
+                            self.duplicates.append(package_name)
                         return  False
                     search_iter = self.queue_model.iter_next(search_iter)
                 del search_iter
@@ -735,7 +738,18 @@ class TerminalQueue:
         if self.term.tab_showing[TAB_QUEUE]:
             # update the queue tree
             self.clicked()
-            del wait_for
+
+    def show_duplicates(self):
+        """One dialog for every package that was already queued"""
+        names, self.duplicates = self.duplicates, []
+        if len(names) == 1:
+            message = _("The package you selected is already in the emerge queue!")
+        else:
+            message = (_("These packages are already in the emerge queue:") + "\n\n"
+                       + "\n".join(names))
+        SingleButtonDialog(_("Error Adding Package To Queue!"), None,
+                           message, None, _("OK"))
+        return False
 
     def get_callback( self ):
         if self.process_iter:

@@ -28,6 +28,8 @@
 
         from notebook import TerminalNotebook
 """
+import time
+
 import gi; gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk
 from gi.repository import Gtk
@@ -79,6 +81,10 @@ class TerminalNotebook:
         self.auto_scroll = [True, True, True, True, False]
         # set while we move a view ourselves, so it isn't taken as the user
         self.pinning = [False, False, False, False, False]
+        # when the user last scrolled each view, and whether they hold its
+        # scrollbar; only the user stops a view following its output
+        self.user_scrolled = [0.0, 0.0, 0.0, 0.0, 0.0]
+        self.user_holding = [False, False, False, False, False]
         self.end_mark = [] # hold the end of buffer text marks for autoscrolling
         self.last_text = [] # keep a record of the last text entered
         self.get_tab_list() # initialize to default state
@@ -146,6 +152,10 @@ class TerminalNotebook:
             self.vhandler_id += [_id]
             # new text, or GTK finishing measuring it, changes the range
             self.vadjustment[x].connect("changed", self.keep_at_bottom, x)
+            for widget in (self.view[x], self.scrolled_window[x].get_vscrollbar()):
+                for signal in ("scroll-event", "key-press-event", "button-press-event",
+                               "button-release-event", "touch-event"):
+                    widget.connect(signal, self.user_input, x)
             #self.auto_scroll[x] = False  # already initialized to True
             # create autoscroll end marks to seek to &
             end_mark = self.view_buffer[x].create_mark(("end_mark"+str(x)), self.view_buffer[x].get_end_iter(), False)
@@ -304,6 +314,16 @@ class TerminalNotebook:
             except: pass
         return False  # Always return false for proper handling
 
+    def user_input(self, widget, event, tab):
+        """Note scrolling, keys, clicks and touches from the user"""
+        if event.type in (Gdk.EventType.BUTTON_PRESS, Gdk.EventType.TOUCH_BEGIN):
+            self.user_holding[tab] = True
+        elif event.type in (Gdk.EventType.BUTTON_RELEASE, Gdk.EventType.TOUCH_END,
+                            Gdk.EventType.TOUCH_CANCEL):
+            self.user_holding[tab] = False
+        self.user_scrolled[tab] = time.monotonic()
+        return False  # let the widget handle it as usual
+
     def set_scroll(self, vadjustment, tab):
         """Follow new output while the user keeps the view at the bottom;
         stop when they scroll up"""
@@ -311,7 +331,13 @@ class TerminalNotebook:
             return  # our own scrolling, not the user's
         gap = (vadjustment.get_upper() - vadjustment.get_page_size()
                - vadjustment.get_value())
-        self.auto_scroll[tab] = gap <= SLIDER_CLOSE_ENOUGH * vadjustment.get_page_size()
+        if gap <= SLIDER_CLOSE_ENOUGH * vadjustment.get_page_size():
+            self.auto_scroll[tab] = True
+        elif self.user_holding[tab] or time.monotonic() - self.user_scrolled[tab] < 1.5:
+            # GTK moves the view too while laying it out; that isn't the
+            # user asking to stop following (kinetic scrolling runs on
+            # for a moment after a swipe, hence the grace period)
+            self.auto_scroll[tab] = False
         return
 
     def keep_at_bottom(self, vadjustment, tab):
