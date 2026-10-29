@@ -33,10 +33,9 @@ TAB_CAUTION = 2
 TAB_INFO = 3
 TAB_QUEUE = 4
 
-# A constant that represents the maximum distance from the
-# bottom of the slider for the slider to stick.  Too small and
-# you won't be able to make it stick when text is added rapidly
-SLIDER_CLOSE_ENOUGH = 2.5 # of the page size
+# How close to the bottom (as a fraction of the page size) the user
+# has to scroll for the view to follow new output again
+SLIDER_CLOSE_ENOUGH = 0.1 # of the page size
 
 TABS = [TAB_PROCESS, TAB_WARNING, TAB_CAUTION, TAB_INFO, TAB_QUEUE]
 

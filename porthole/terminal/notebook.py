@@ -76,7 +76,9 @@ class TerminalNotebook:
         self.current_tab = 0
         self.vadjustment = [] #[None, None, None, None, None]
         self.vhandler_id = [] #[None, None, None, None, None]
-        self.auto_scroll = [True, False, False, False, False]
+        self.auto_scroll = [True, True, True, True, False]
+        # set while we move a view ourselves, so it isn't taken as the user
+        self.pinning = [False, False, False, False, False]
         self.end_mark = [] # hold the end of buffer text marks for autoscrolling
         self.last_text = [] # keep a record of the last text entered
         self.get_tab_list() # initialize to default state
@@ -140,8 +142,10 @@ class TerminalNotebook:
             #debug.dprint(x)
             adj = self.scrolled_window[x].get_vadjustment()
             self.vadjustment +=  [adj]
-            _id = self.vadjustment[x].connect("value_changed", self.set_scroll)
+            _id = self.vadjustment[x].connect("value_changed", self.set_scroll, x)
             self.vhandler_id += [_id]
+            # new text, or GTK finishing measuring it, changes the range
+            self.vadjustment[x].connect("changed", self.keep_at_bottom, x)
             #self.auto_scroll[x] = False  # already initialized to True
             # create autoscroll end marks to seek to &
             end_mark = self.view_buffer[x].create_mark(("end_mark"+str(x)), self.view_buffer[x].get_end_iter(), False)
@@ -300,14 +304,23 @@ class TerminalNotebook:
             except: pass
         return False  # Always return false for proper handling
 
-    def set_scroll(self,  vadjustment):
-        """Sets autoscrolling on when moved to bottom of scrollbar"""
-        #debug.dprint("NOTEBOOK: set_scroll() -- vadjustment")
-        self.auto_scroll[self.current_tab] = ((vadjustment.get_upper() - \
-                                                        vadjustment.get_value()) - \
-                                                        vadjustment.get_page_size() < \
-                                                         (SLIDER_CLOSE_ENOUGH * vadjustment.get_page_size()))
+    def set_scroll(self, vadjustment, tab):
+        """Follow new output while the user keeps the view at the bottom;
+        stop when they scroll up"""
+        if self.pinning[tab]:
+            return  # our own scrolling, not the user's
+        gap = (vadjustment.get_upper() - vadjustment.get_page_size()
+               - vadjustment.get_value())
+        self.auto_scroll[tab] = gap <= SLIDER_CLOSE_ENOUGH * vadjustment.get_page_size()
         return
+
+    def keep_at_bottom(self, vadjustment, tab):
+        """Stay at the bottom as text is added; the text view measures new
+        lines lazily, so the range keeps growing after the insert"""
+        if self.auto_scroll[tab]:
+            self.pinning[tab] = True
+            vadjustment.set_value(vadjustment.get_upper() - vadjustment.get_page_size())
+            self.pinning[tab] = False
 
     def switch_page(self, notebook, page, page_num):
         """callback function changes the current_page setting in the term structure"""
@@ -320,7 +333,7 @@ class TerminalNotebook:
     def scroll_current_view(self):
         """scrolls the current_tab"""
         if self.current_tab != TAB_QUEUE:
-            self.view[self.current_tab].scroll_mark_onscreen(self.end_mark[self.current_tab])
+            self.keep_at_bottom(self.vadjustment[self.current_tab], self.current_tab)
 
     def set_tags(self):
         """ set the text formatting tags from prefs object """

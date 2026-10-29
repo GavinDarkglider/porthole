@@ -36,6 +36,100 @@ from porthole._xml.xmlmgr import (
 )
 from porthole.utils import debug
 print("PREFERENCES: imported debug.id = " + str(debug._id))
+
+# Formatting tags for the terminal window tabs: name: [forecolor,
+# backcolor, fontweight]. Normal weight = 400 (Pango.Weight.NORMAL),
+# bold = 700. Colors are in hex for the color editor; '' means use the
+# theme's color.
+LIGHT_TAGS = {
+    'default': ['', '', 400],
+    'caution': ['', '#c040b0', 400],
+    'command': ['#ffffff', '#000080', 700],
+    'emerge': ['', '#90ee90', 700],
+    'error': ['#faf0e6', '#ff0000', 700],
+    'info': ['', '#b0ffff', 400],
+    'linenumber': ['#0000ff', '', 700],
+    'note': ['#8b008b', '', 400],
+    'warning': ['', '#eeee80', 400],
+    # the following tags are for emerge's output formatting
+    'bold': ['', '', 700],
+    'light': ['', '', 300],
+    'fg_black': ['black', '', None],
+    'fg_red': ['darkred', '', None],
+    'fg_green': ['darkgreen', '', None],
+    'fg_yellow': ['brown', '', None],
+    'fg_blue': ['darkblue', '', None],
+    'fg_magenta': ['magenta', '', None],
+    'fg_cyan': ['blue', '', None],
+    'fg_white': ['yellow', '', None],
+    'bg_black': ['', 'black', None],
+    'bg_red': ['', 'darkred', None],
+    'bg_green': ['', 'darkgreen', None],
+    'bg_yellow': ['', 'brown', None],
+    'bg_blue': ['', 'darkblue', None],
+    'bg_magenta': ['', 'magenta', None],
+    'bg_cyan': ['', 'blue', None],
+    'bg_white': ['', 'white', None],
+}
+
+# for dark themes: muted backgrounds under the theme's light text, and
+# text colors bright enough to read on a dark background
+DARK_CHANGES = {
+    'caution': ['', '#5c2457', 400],
+    'command': ['#ffffff', '#24407a', 700],
+    'emerge': ['', '#22532a', 700],
+    'error': ['#ffffff', '#a01818', 700],
+    'info': ['', '#1c4a52', 400],
+    'linenumber': ['#7fa7ff', '', 700],
+    'note': ['#e08ae0', '', 400],
+    'warning': ['', '#56501a', 400],
+    'fg_black': ['#8a8a8a', '', None],
+    'fg_red': ['#ff6e6e', '', None],
+    'fg_green': ['#6ad46a', '', None],
+    'fg_yellow': ['#e8c35a', '', None],
+    'fg_blue': ['#7fa7ff', '', None],
+    'fg_magenta': ['#e08ae0', '', None],
+    'fg_cyan': ['#5fd0d0', '', None],
+    'fg_white': ['#ffffff', '', None],
+    'bg_black': ['', '#101010', None],
+    'bg_red': ['', '#7a1c1c', None],
+    'bg_green': ['', '#1f5a1f', None],
+    'bg_yellow': ['', '#6a5414', None],
+    'bg_blue': ['', '#1f3a7a', None],
+    'bg_magenta': ['', '#6a246a', None],
+    'bg_cyan': ['', '#1c5a6a', None],
+    'bg_white': ['#202020', '#d0d0d0', None],
+}
+
+
+def dark_tags():
+    tags = {name: list(value) for name, value in LIGHT_TAGS.items()}
+    tags.update({name: list(value) for name, value in DARK_CHANGES.items()})
+    return tags
+
+
+def same_value(a, b):
+    """Compare tag values; colors may be spelled differently ('darkred',
+    '#8b0000', or '#8b8b00000000' as the color editor writes them)"""
+    if a == b:
+        return True
+    if not (isinstance(a, str) and isinstance(b, str) and a and b):
+        return False
+    from gi.repository import Gdk
+    first, second = Gdk.RGBA(), Gdk.RGBA()
+    return first.parse(a) and second.parse(b) and first.equal(second)
+
+
+def theme_is_dark():
+    """True when the GTK theme draws light text, i.e. a dark background"""
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk
+        color = Gtk.TextView().get_style_context().get_color(Gtk.StateFlags.NORMAL)
+    except (ImportError, ValueError, RuntimeError):
+        return False
+    return 0.299 * color.red + 0.587 * color.green + 0.114 * color.blue > 0.5
 from porthole.utils.utils import get_user_home_dir, can_gksu
 
 
@@ -161,59 +255,20 @@ class PortholePreferences:
                     value = default_value
                 setattr(getattr(self, window_name), pref_name, value) # set self.main.width etc
 
-        # Formatting tags for the terminal window tabs.
-        # Note: normal font weight = 400 (Pango.Weight.NORMAL),
-        #       bold = 700 (Pango.Weight.BOLD)
-        # Note: all colors are in hex for future color editor;
-        #       '' means use default color.
-
+        # Tags left at their default follow the theme: values saved by
+        # older versions are the light defaults, so treat those as unset.
+        self.TAG_DEFAULTS = dark_tags() if theme_is_dark() else LIGHT_TAGS
         self.TAG_DICT = {}
-
-        taglist = [ \
-            ['default','','',400],
-            ['caution','','#c040b0',400],  # [name, default forecolor, backcolor, fontweight]
-            ['command','#ffffff','#000080',700],
-            ['emerge','','#90ee90',700],
-            ['error','#faf0e6','#ff0000',700],
-            ['info','','#b0ffff',400],
-            ['linenumber','#0000ff','',700],
-            ['note','#8b008b','',400],
-            ['warning','','#eeee80',400],
-            # the following tags are for emerge's output formatting
-            ['bold','','',700],
-            ['light','','',300],
-            ['fg_black','black','',None],
-            ['fg_red','darkred','',None],
-            ['fg_green','darkgreen','',None],
-            ['fg_yellow','brown','',None],
-            ['fg_blue','darkblue','',None],
-            ['fg_magenta','magenta','',None],
-            ['fg_cyan','blue','',None],
-            ['fg_white','yellow','',None],
-            ['bg_black','','black',None],
-            ['bg_red','','darkred',None],
-            ['bg_green','','darkgreen',None],
-            ['bg_yellow','','brown',None],
-            ['bg_blue','','darkblue',None],
-            ['bg_magenta','','magenta',None],
-            ['bg_cyan','','blue',None],
-            ['bg_white','','white',None],
-        ]
-
-        for tag_name, forecolor, backcolor, fontweight in taglist:
-            try:
-                fc = dom.getitem(''.join(['/window/terminal/tag/',tag_name,'/forecolor']))
-            except XMLManagerError:
-                fc = forecolor
-            try:
-                bc = dom.getitem(''.join(['/window/terminal/tag/',tag_name,'/backcolor']))
-            except XMLManagerError:
-                bc = backcolor
-            try:
-                fw = dom.getitem(''.join(['/window/terminal/tag/',tag_name,'/fontweight']))
-            except XMLManagerError:
-                fw = fontweight
-            self.TAG_DICT[tag_name] = [fc, bc, fw]
+        for tag_name, light in LIGHT_TAGS.items():
+            current = list(self.TAG_DEFAULTS[tag_name])
+            for i, item in enumerate(('forecolor', 'backcolor', 'fontweight')):
+                try:
+                    value = dom.getitem(''.join(['/window/terminal/tag/', tag_name, '/', item]))
+                except XMLManagerError:
+                    continue
+                if not same_value(value, light[i]):
+                    current[i] = value
+            self.TAG_DICT[tag_name] = current
 
         emergeoptions = ['pretend', 'fetch', 'verbose', 'update', 'nospinner', 'noreplace', 'oneshot'] # 'search_descriptions']
         self.emerge = EmergeOptions()
@@ -405,11 +460,12 @@ class PortholePreferences:
         dom.additem('/window/terminal/all_tabs_use_custom_colors', \
             self.terminal.all_tabs_use_custom_colors)
         # generate tag keys from dictionary
+        # only colours the user changed, so the rest keep following the theme
         for key in self.TAG_DICT:
             format_list = self.TAG_DICT[key]
-            dom.additem('/window/terminal/tag/' + key + '/forecolor', format_list[0])
-            dom.additem('/window/terminal/tag/' + key + '/backcolor', format_list[1])
-            dom.additem('/window/terminal/tag/' + key + '/fontweight', format_list[2])
+            for i, item in enumerate(('forecolor', 'backcolor', 'fontweight')):
+                if not same_value(format_list[i], self.TAG_DEFAULTS[key][i]):
+                    dom.additem('/window/terminal/tag/' + key + '/' + item, format_list[i])
         dom.additem('/window/run_dialog/width', self.run_dialog.width)
         dom.additem('/window/run_dialog/height', self.run_dialog.height)
         dom.additem('/window/run_dialog/history', self.run_dialog.history)
