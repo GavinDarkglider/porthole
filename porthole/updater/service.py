@@ -14,6 +14,7 @@
 
         submit update --plan TIME   queue the reviewed plan
         submit check                queue a sync and check
+        submit emerge -- CMD...     queue an emerge from Porthole (checked)
         cancel [JOB]                cancel queued jobs, stop the running one
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
@@ -282,10 +283,12 @@ def main(argv=None):
     run.add_argument("--quiet", action="store_true", help="only write the log file")
     sub.add_parser("status", help="show the last plan")
     submit = sub.add_parser("submit", help="queue a job for the runner")
-    submit.add_argument("kind", choices=("update", "check"))
+    submit.add_argument("kind", choices=("update", "check", "emerge"))
     submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
+    submit.add_argument("cmdline", nargs=argparse.REMAINDER, metavar="CMD",
+                        help="emerge: the command line, after --")
     cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
     cancel.add_argument("job", nargs="?", help="only this job")
     sub.add_parser("jobs", help="show the job queue")
@@ -338,7 +341,10 @@ def job_command(args, parser):
         return runner.Runner().run()
     try:
         if args.command == "submit":
-            if args.kind == "update":
+            if args.kind == "emerge":
+                tokens = args.cmdline[1:] if args.cmdline[:1] == ["--"] else args.cmdline
+                job = runner.submit_emerge(tokens)
+            elif args.kind == "update":
                 if not args.plan:
                     parser.error("submit update needs --plan")
                 job = runner.submit_update(args.plan)

@@ -435,10 +435,20 @@ class Runner:
         return code == 0 and (read_json(PLAN_FILE) or {}).get("generated") != plan_before
 
     def step_shell(self, job_id, step, log):
-        env = dict(os.environ, TERM="xterm")
-        env.pop("NOCOLOR", None)
         log("$ " + step["shell"])
-        proc = subprocess.Popen(["/bin/bash", "-c", step["shell"]], env=env,
+        return self.run_logged(job_id, step, log, ["/bin/bash", "-c", step["shell"]])
+
+    def step_argv(self, job_id, step, log):
+        """A checked emerge command line, run without a shell"""
+        log("$ " + " ".join("%s=%s" % kv for kv in sorted(step.get("env", {}).items()))
+            + (" " if step.get("env") else "") + shlex.join(step["argv"]))
+        return self.run_logged(job_id, step, log, step["argv"], step.get("env"))
+
+    def run_logged(self, job_id, step, log, argv, extra_env=None):
+        """Run argv into the job log, noting emerge's progress"""
+        env = dict(os.environ, TERM="xterm", **(extra_env or {}))
+        env.pop("NOCOLOR", None)
+        proc = subprocess.Popen(argv, env=env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.STDOUT, start_new_session=True)
         # cancel signals the whole process group
@@ -464,6 +474,99 @@ class Runner:
         code = proc.wait()
         log("(exit status %d)" % code)
         return code == 0
+
+
+# -- emerge jobs from Porthole ---------------------------------------------------
+
+# emerge options Porthole's actions and its advanced emerge dialog use; a
+# job may only contain these, package atoms and sets (nothing that changes
+# where or what emerge works on, and nothing interactive)
+EMERGE_FLAGS = {
+    "--alphabetical", "--buildpkg", "--buildpkgonly", "--changed-use", "--columns",
+    "--debug", "--deep", "--depclean", "--emptytree", "--fetch-all-uri", "--fetchonly",
+    "--getbinpkg", "--getbinpkgonly", "--ignore-default-opts", "--keep-going",
+    "--newuse", "--noconfmem", "--nodeps", "--noreplace", "--nospinner", "--oneshot",
+    "--onlydeps", "--quiet", "--resume", "--skipfirst", "--tree", "--unmerge",
+    "--update", "--usepkg", "--usepkgonly", "--verbose",
+}
+EMERGE_VALUES = {
+    "--with-bdeps": re.compile(r"^[yn]$"),
+    "--color": re.compile(r"^[yn]$"),
+    "--jobs": re.compile(r"^\d{1,3}$"),
+    "--load-average": re.compile(r"^\d{1,3}(\.\d+)?$"),
+    "--exclude": None,  # an atom, checked as one
+}
+EMERGE_SHORT = set("uDN1vqfkKgGeOtC")
+_USE_FLAG = re.compile(r"^-?[A-Za-z0-9][A-Za-z0-9+_@.-]*$")
+_SET = re.compile(r"^@[A-Za-z0-9_-]+$")
+
+
+def check_emerge(tokens):
+    """(argv, env) for an emerge command line from Porthole, e.g.
+    ['USE=gtk -qt', 'emerge', '--oneshot', '=cat/pkg-1']; JobError if any
+    part isn't allowed"""
+    from portage.dep import Atom
+    env, i = {}, 0
+    while i < len(tokens) and "=" in tokens[i] and not tokens[i].startswith("-"):
+        key, _sep, value = tokens[i].partition("=")
+        if key != "USE" or not all(_USE_FLAG.match(f) for f in value.split()):
+            raise JobError("Only a USE setting may come before emerge: %s" % tokens[i])
+        env["USE"] = value
+        i += 1
+    if i >= len(tokens) or tokens[i] != "emerge":
+        raise JobError("Only emerge commands can be queued")
+    argv, atoms = ["emerge"], []
+    for token in tokens[i + 1:]:
+        if token == "--ask" or token == "-a":
+            continue  # nobody to answer; the user confirmed in Porthole
+        if token in EMERGE_FLAGS:
+            argv.append(token)
+        elif token.startswith("--") and "=" in token:
+            name, _sep, value = token.partition("=")
+            if name not in EMERGE_VALUES:
+                raise JobError("Not an option Porthole can queue: %s" % token)
+            check = EMERGE_VALUES[name]
+            if check is None:
+                try:
+                    Atom(value, allow_wildcard=True)
+                except Exception:
+                    raise JobError("Not a package atom: %s" % value)
+            elif not check.match(value):
+                raise JobError("Bad value: %s" % token)
+            argv.append(token)
+        elif token.startswith("--"):
+            raise JobError("Not an option Porthole can queue: %s" % token)
+        elif token.startswith("-"):
+            if not token[1:] or not set(token[1:]) <= EMERGE_SHORT:
+                raise JobError("Not an option Porthole can queue: %s" % token)
+            argv.append(token)
+        elif _SET.match(token):
+            atoms.append(token)
+        else:
+            try:
+                Atom(token)
+            except Exception:
+                raise JobError("Not a package atom: %s" % token)
+            atoms.append(token)
+    if not atoms and "--resume" not in argv:
+        raise JobError("No packages given")
+    return _coloured(argv + atoms), env
+
+
+def submit_emerge(tokens):
+    """Queue an emerge or unmerge from Porthole's package actions"""
+    argv, env = check_emerge(tokens)
+    atoms = [a for a in argv[1:] if not a.startswith("-")]
+    verb = "Unmerge" if "--unmerge" in argv or "-C" in argv else "Emerge"
+    title = "%s %s" % (verb, ", ".join(atoms[:3]) + (" and %d more" % (len(atoms) - 3)
+                                                     if len(atoms) > 3 else ""))
+    job = new_job("emerge", title or verb,
+                  [{"kind": "argv", "title": title, "argv": argv, "env": env}],
+                  recheck=True)
+    with jobs_state() as state:
+        state["jobs"].append(job)
+        prune(state)
+    return job
 
 
 # -- choices -------------------------------------------------------------------

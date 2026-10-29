@@ -71,6 +71,30 @@ class ActionHandler(CategoryHandler):
         self.reload_db()
         self.refresh()
 
+    def submit_to_runner(self, package_name, command):
+        """Installs and removals run in the root job runner, so closing
+        Porthole never stops them; pretend runs stay here, as the user.
+        Returns True if the command was taken."""
+        from porthole.updater.commands import runner_tokens
+        tokens = runner_tokens(command, config.Prefs.emerge.pretend)
+        if tokens is None:
+            return False
+        from porthole.updater.elevate import run_as_root, service
+        run_as_root(service("submit", "emerge", "--", *tokens),
+                    lambda ok, out: self.runner_submitted(package_name, ok, out))
+        return True
+
+    def runner_submitted(self, package_name, ok, output):
+        """Follow a submitted job in the terminal, or say why it wasn't taken"""
+        if not ok:
+            SingleButtonDialog(_("Couldn't start"), self.mainwindow,
+                               output or _("Cancelled."), None, _("OK"))
+            return
+        from porthole.updater import follow
+        job_id = output.strip().splitlines()[-1]
+        self.process_manager.add(package_name, follow.command(job_id), self.reload_db,
+                                 _("Job runner"))
+
     def get_sync_time(self):
         """gets and returns the timestamp info saved during
            the last portage tree sync"""
@@ -169,6 +193,8 @@ class ActionHandler(CategoryHandler):
 
     def setup_command(self, package_name, command, run_anyway=False):
         """Setup the command to run or not"""
+        if self.submit_to_runner(package_name, command):
+            return
         if (self.is_root
                 or run_anyway
                 or (config.Prefs.emerge.pretend
