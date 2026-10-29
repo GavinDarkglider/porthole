@@ -131,9 +131,9 @@ class MainBase(object):
         about = AboutDialog(parent=self.mainwindow)
         about.run()
 
-    def configure_porthole(self, menuitem_widget):
-        """Shows the Configuration GUI"""
-        return ConfigDialog()
+    def configure_porthole(self, menuitem_widget=None, page=None):
+        """Shows the settings window"""
+        return ConfigDialog(page)
 
     def re_init_portage(self, *widget):
         """re-initializes the imported portage modules in order to

@@ -191,16 +191,8 @@ class MainWindow(PluginHandler):
         menu = self.wtree.get_object("menuitem1_menu")
         item = Gtk.MenuItem.new_with_mnemonic(_("_Update Assistant..."))
         item.connect("activate", self.open_update_assistant)
-        settings = Gtk.MenuItem.new_with_mnemonic(_("Update _Settings..."))
-        settings.connect("activate", self.open_update_settings)
-        menu.insert(Gtk.SeparatorMenuItem(), 0)
-        menu.insert(settings, 0)
         menu.insert(item, 0)
-        menu.show_all()
-
-    def open_update_settings(self, *widget):
-        from porthole.updater.settings import UpdaterSettings
-        UpdaterSettings(self.mainwindow)
+        item.show()
 
     def open_update_assistant(self, *widget):
         """Show the plan made by the update service"""
@@ -707,8 +699,8 @@ class MainWindow(PluginHandler):
                 debug.dprint("StatusHandler: _update_db_done(); " +
                     "Failed to get object: " + x)
         if self.plugin_manager and not self.plugin_manager.plugins:
-            # no plugins
-            self.wtree.get_object("plugin_settings").set_sensitive(False)
+            # no plugins installed: nothing to configure
+            self.wtree.get_object("plugin_settings").hide()
         # make sure we search again if we reloaded!
         mode = self.widget["view_filter"].get_active()
         debug.dprint("StatusHandler: _update_db_done() mode = " + str(mode) +

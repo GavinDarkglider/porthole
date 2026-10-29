@@ -32,7 +32,7 @@ from porthole import backends
 
 
 class ConfigDialog:
-    """Class to display a GUI for configuring Porthole"""
+    """Porthole's settings window"""
 
     # Define our response IDs (positive ints → GTK4-friendly)
     # keeping gtk3 values for now
@@ -41,8 +41,8 @@ class ConfigDialog:
     RESPONSE_CANCEL = -6 # Gtk.ResponseType.CANCEL still -6, ok for now
     RESPONSE_OK = -5     # Gtk.ResponseType.OK     still -5
 
-    def __init__(self):
-        """ Initialize Config GUI """
+    def __init__(self, page=None):
+        """ Initialize Config GUI; page names a tab to open at ("updates") """
 
         # Parse glade file
         self.gladefile = config.Prefs.DATA_PATH + "/glade/config.ui"
@@ -51,6 +51,7 @@ class ConfigDialog:
         self.builder.set_translation_domain(config.Prefs.APP)
 
         self.window = self.builder.get_object("config")
+        self.window.set_title(_("Porthole: settings"))
         self.KeywordsFrame = self.builder.get_object("archlist_frame")
 
         # register callbacks
@@ -76,7 +77,15 @@ class ConfigDialog:
         # set widget values to values in prefs
         self.set_widget_values()
 
+        # the update service's settings (updater.conf, saved as root)
+        from porthole.updater.settings import UpdaterSettingsPage
+        self.updates_page = UpdaterSettingsPage()
+        notebook = self.builder.get_object("primary_nb")
+        index = notebook.append_page(self.updates_page, Gtk.Label(label=_("Updates")))
+
         self.window.show_all()
+        if page == "updates":
+            notebook.set_current_page(index)
 
     #-----------------------------------------------
     # GUI Callback function definitions start here
@@ -88,13 +97,15 @@ class ConfigDialog:
         if response_id == self.RESPONSE_OK:
             debug.dprint("CONFIGDIALOG: on_config_response(): OK response_id '%s'" % response_id)
             self.apply_widget_values()
-            self.window.destroy()
+            self.updates_page.save(self.updates_saved)
+            self.window.hide()
         elif response_id == self.RESPONSE_CANCEL:
             debug.dprint("CONFIGDIALOG: on_config_response(): Cancel response_id '%s'" % response_id)
             self.window.destroy()
         elif response_id == self.RESPONSE_APPLY:
             debug.dprint("CONFIGDIALOG: on_config_response(): Apply response_id '%s'" % response_id)
             self.apply_widget_values()
+            self.updates_page.save(lambda ok, msg: self.updates_saved(ok, msg, close=False))
         elif response_id == self.RESPONSE_HELP:
             debug.dprint("CONFIGDIALOG: on_config_response(): Help response_id '%s'" % response_id)
             #Display help file with web browser
@@ -150,6 +161,22 @@ class ConfigDialog:
     # Support function definitions start here
     #------------------------------------------
 
+    def updates_saved(self, ok, message, close=True):
+        """After saving the update settings (as root, so it may be refused)"""
+        if not ok:
+            dialog = Gtk.MessageDialog(transient_for=self.window if not close else None,
+                                       modal=True, message_type=Gtk.MessageType.ERROR,
+                                       buttons=Gtk.ButtonsType.CLOSE,
+                                       text=_("The update settings weren't saved"))
+            dialog.format_secondary_text(message or _("Cancelled."))
+            dialog.run()
+            dialog.destroy()
+            if close:
+                self.window.show()  # let them try again
+                return
+        if close:
+            self.window.destroy()
+
     def hide_widgets(self):
         # hide unimplemented widgets
         hidelist = [ # widget names
@@ -161,10 +188,18 @@ class ConfigDialog:
             'sample_label_1',
             'sample_scrolled_window_2',
             'sample_label_2',
+            # placeholders with no setting behind them
+            'summary_showdl_size',
+            'checkbutton35',
+            'emerge_blank1',
+            # syncing is the update service's job now
+            'sync_box',
         ]
         for name in hidelist:
             widget = self.builder.get_object(name)
             if widget:
+                # show_all() later must not bring it back
+                widget.set_no_show_all(True)
                 widget.hide()
         # hide unimplemented notebook tabs
         # removelist = [ # [notebook, tab to remove]

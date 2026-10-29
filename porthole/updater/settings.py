@@ -1,7 +1,8 @@
 """
     Porthole update assistant: settings
 
-    Edits /etc/porthole/updater.conf. Anyone can look; saving goes through
+    The Updates page of Porthole's settings window, for
+    /etc/porthole/updater.conf. Anyone can look; saving goes through
     `porthole-update-service config` as root, which checks the values.
 
     Copyright (C) 2026 Porthole developers
@@ -33,73 +34,69 @@ def _ago(when):
     return "%d days ago" % (hours / 24)
 
 
-class UpdaterSettings(Gtk.Dialog):
-    def __init__(self, parent=None):
-        super().__init__(title="Porthole: update settings", transient_for=parent,
-                         modal=True)
-        self.set_default_size(460, -1)
-        self.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Save", Gtk.ResponseType.OK)
-        self.set_default_response(Gtk.ResponseType.OK)
-        config = load_config()
+class UpdaterSettingsPage(Gtk.Grid):
+    def __init__(self):
+        super().__init__(row_spacing=10, column_spacing=12, border_width=12)
+        self.saved_config = load_config()
+        config = self.saved_config
         state = read_json(STATE_FILE, {}) or {}
-
-        grid = Gtk.Grid(row_spacing=10, column_spacing=12, border_width=12)
         row = 0
 
-        grid.attach(Gtk.Label(label="Check for updates every", xalign=0), 0, row, 1, 1)
+        heading = Gtk.Label(xalign=0)
+        heading.set_markup("<b>Automatic update checks</b>")
+        self.attach(heading, 0, row, 2, 1)
+        row += 1
+
+        self.attach(Gtk.Label(label="Check for updates every", xalign=0), 0, row, 1, 1)
         days = Gtk.Box(spacing=6)
         self.interval = Gtk.SpinButton.new_with_range(1, 90, 1)
         self.interval.set_value(config["interval_days"])
         days.pack_start(self.interval, False, False, 0)
         days.pack_start(Gtk.Label(label="day(s)"), False, False, 0)
-        grid.attach(days, 1, row, 1, 1)
+        self.attach(days, 1, row, 1, 1)
         row += 1
 
         self.sync = Gtk.CheckButton(label="Sync the repositories before checking")
         self.sync.set_active(config["sync"])
-        grid.attach(self.sync, 0, row, 2, 1)
+        self.attach(self.sync, 0, row, 2, 1)
         row += 1
-        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         hint.set_markup("<small>Syncs happen at most once a day, even when you check "
                         "by hand, to be fair to the Gentoo mirrors.</small>")
-        grid.attach(hint, 0, row, 2, 1)
+        self.attach(hint, 0, row, 2, 1)
         row += 1
 
         self.battery = Gtk.CheckButton(label="Don't check while running on battery")
         self.battery.set_active(config["skip_on_battery"])
-        grid.attach(self.battery, 0, row, 2, 1)
+        self.attach(self.battery, 0, row, 2, 1)
         row += 1
 
-        status = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
+        status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last check: %s.  Last sync: %s.\nChecks run from cron "
-                          "every hour and only do anything when due.</small>"
+                          "every hour and only do anything when due. Changing these "
+                          "asks for administrator rights.</small>"
                           % (_ago(state.get("last_check")), _ago(last_repo_sync())))
-        grid.attach(status, 0, row, 2, 1)
+        self.attach(status, 0, row, 2, 1)
 
-        self.error = Gtk.Label(xalign=0, wrap=True, max_width_chars=56)
-        grid.attach(self.error, 0, row + 1, 2, 1)
-        self.get_content_area().add(grid)
-        self.connect("response", self.on_response)
-        self.show_all()
-        self.error.hide()
+    def values(self):
+        return {"interval_days": self.interval.get_value_as_int(),
+                "sync": self.sync.get_active(),
+                "skip_on_battery": self.battery.get_active()}
 
-    def on_response(self, dialog, response):
-        if response != Gtk.ResponseType.OK:
-            self.destroy()
+    def save(self, callback=None):
+        """Save if anything changed; callback(ok, message) when done"""
+        values = self.values()
+        if values == self.saved_config:
+            if callback:
+                callback(True, "")
             return
-        self.set_sensitive(False)
-        settings = [
-            "interval_days=%d" % self.interval.get_value_as_int(),
-            "sync=%s" % ("yes" if self.sync.get_active() else "no"),
-            "skip_on_battery=%s" % ("yes" if self.battery.get_active() else "no"),
-        ]
-        # the dialog stays open until saving is done
-        run_as_root(service("config", *settings), self.saved)
+        settings = ["interval_days=%d" % values["interval_days"],
+                    "sync=%s" % ("yes" if values["sync"] else "no"),
+                    "skip_on_battery=%s" % ("yes" if values["skip_on_battery"] else "no")]
 
-    def saved(self, ok, output):
-        if ok:
-            self.destroy()
-            return
-        self.set_sensitive(True)
-        self.error.set_markup("<b>Couldn't save:</b> %s" % (output or "cancelled"))
-        self.error.show()
+        def done(ok, output):
+            if ok:
+                self.saved_config = values
+            if callback:
+                callback(ok, output)
+        run_as_root(service("config", *settings), done)

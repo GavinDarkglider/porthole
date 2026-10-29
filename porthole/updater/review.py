@@ -28,7 +28,6 @@ from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
 from porthole.updater.service import PLAN_FILE, STATE_DIR, read_json
-from porthole.updater.settings import UpdaterSettings
 from porthole.updater.viewer import JobWindow, read_jobs
 
 
@@ -99,7 +98,7 @@ class UpdateAssistant(Gtk.Window):
         self.progress_button = Gtk.Button(label="Show progress")
         self.progress_button.connect("clicked", lambda b: self.show_progress())
         settings = Gtk.Button(label="Settings")
-        settings.connect("clicked", lambda b: UpdaterSettings(self))
+        settings.connect("clicked", lambda b: self.mainwindow.configure_porthole(page="updates"))
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.hide())
         self.start_button = Gtk.Button(label="Apply and start update")

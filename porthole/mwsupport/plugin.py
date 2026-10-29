@@ -60,6 +60,8 @@ class PluginHandler(ActionHandler):
         self.plugin_root_menu = Gtk.MenuItem(_("Active Plugins"))
         self.plugin_menu = Gtk.Menu()
         self.plugin_root_menu.set_submenu(self.plugin_menu)
+        # shown only once a plugin is enabled (show_all mustn't reveal it)
+        self.plugin_root_menu.set_no_show_all(True)
         self.wtree.get_object("menubar").append(self.plugin_root_menu)
         self.plugin_manager = PluginManager(self)
         self.plugin_package_tabs = {}
