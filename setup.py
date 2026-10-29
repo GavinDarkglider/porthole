@@ -19,10 +19,10 @@ setup( \
     packages = ['porthole',  'porthole.advancedemerge', 'porthole.backends', 'porthole.config',
                         'porthole.db', 'porthole.dialogs', 'porthole.loaders', 'porthole.mwsupport',
                         'porthole.plugins', 'porthole.readers', 'porthole.terminal',
-                        'porthole.utils', 'porthole.views', 'porthole._xml',
+                        'porthole.updater', 'porthole.utils', 'porthole.views', 'porthole._xml',
                         'porthole.views.packagebook'],
     package_dir = {'porthole':'porthole'},
-    scripts = ["scripts/porthole"],
+    scripts = ["scripts/porthole", "scripts/porthole-update-check"],
     data_files = [
         (datadir + "pixmaps",
             ["porthole/pixmaps/porthole-about.png", "porthole/pixmaps/porthole-icon.png", 
