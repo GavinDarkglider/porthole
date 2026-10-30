@@ -237,6 +237,7 @@ class Notifier(Gtk.Application):
             ("Check now", self.check_now),
             ("Sync now", self.sync_now),
             ("Job logs...", self.job_logs),
+            ("Keep building", self.keep_building),
             ("Cancel update", self.cancel_update),
         ):
             item = Gtk.MenuItem(label=label)
@@ -306,6 +307,9 @@ class Notifier(Gtk.Application):
         self.items["Show progress"].set_label("Show what failed" if failed and not active
                                               else "Show progress")
         self.items["Cancel update"].set_visible(active and job["kind"] == "update")
+        # a build paused for someone at the computer: they may want it to go on
+        self.items["Keep building"].set_visible(
+            active and job["status"] == "running" and bool(job.get("paused")))
         # while a job runs, refresh often: the tooltip shows its progress
         # (and setting it again revives a tray tooltip that stopped showing)
         if active and self.job_timer is None:
@@ -421,6 +425,12 @@ class Notifier(Gtk.Application):
             return False
         self.reload()
         return True
+
+    def keep_building(self):
+        """Carry on a paused build, and don't pause it again"""
+        job = current_job()
+        if job:
+            run_as_root(service("keep-building", job["id"]), lambda ok, out: self.reload())
 
     def cancel_update(self):
         dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.QUESTION,

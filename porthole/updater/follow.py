@@ -218,10 +218,56 @@ class Follower:
                              "Job runner")
             if new_window:
                 self.manager.window.connect("destroy", self.closed)
+        if new_window:
+            self.add_paused_bar()
         self.manager.window.present()
         os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
         with open(PIDFILE, "w") as f:
             f.write(str(os.getpid()))
+
+    def add_paused_bar(self):
+        """A bar while a followed build is paused for someone at the computer,
+        with Keep building: watching a build shouldn't stop it"""
+        from gi.repository import GLib, Gtk
+        bar = Gtk.InfoBar(message_type=Gtk.MessageType.INFO)
+        label = Gtk.Label(xalign=0, wrap=True)
+        bar.get_content_area().add(label)
+        bar.add_button("Keep building", 1)
+        bar.set_no_show_all(True)
+        box = self.manager.wtree.get_object("vbox3")
+        box.pack_start(bar, False, False, 0)
+        box.reorder_child(bar, 1)  # under the menu bar
+        state = {"job": None}
+
+        def keep(widget, response):
+            from porthole.updater.elevate import run_as_root, service
+            bar.set_sensitive(False)
+            run_as_root(service("keep-building", state["job"]),
+                        lambda ok, out: (bar.set_sensitive(True), refresh()))
+        bar.connect("response", keep)
+
+        def refresh():
+            if self.manager is None or not self.manager.window_visible:
+                return False
+            jobs = (read_json(JOBS_FILE, {}) or {}).get("jobs", [])
+            paused = next((j for j in jobs if j["id"] in self.followed
+                           and j["status"] == "running" and j.get("paused")), None)
+            if paused:
+                from porthole.updater.service import load_config
+                minutes = max(load_config()["idle_minutes"], 1)
+                state["job"] = paused["id"]
+                label.set_markup(
+                    "<b>Paused because the computer is in use.</b> It carries on once "
+                    "nobody has used it for %d minute%s. Watching it here counts as "
+                    "using it: choose Keep building to let it run while you're here."
+                    % (minutes, "" if minutes == 1 else "s"))
+                label.show()
+                bar.show()
+            else:
+                bar.hide()
+            return True
+        refresh()
+        GLib.timeout_add_seconds(3, refresh)
 
     def closed(self, window):
         if running_follower() == os.getpid():

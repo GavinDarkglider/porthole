@@ -20,6 +20,7 @@
         submit command -- LINE      queue a custom command (Porthole, unlocked)
         submit update|install ... --later   wait for the build window
         cancel [JOB]                cancel queued jobs, stop the running one
+        keep-building [JOB]         don't pause this build while someone works
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -551,6 +552,9 @@ def main(argv=None):
     cancel.add_argument("job", nargs="?", help="only this job")
     cancel.add_argument("--drop", action="store_true",
                         help="don't offer what an install didn't get to again")
+    keep = sub.add_parser("keep-building",
+                          help="carry on a paused build and don't pause it again")
+    keep.add_argument("job", nargs="?", help="the job (default: the running one)")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -661,6 +665,8 @@ def job_command(args, parser):
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
+        elif args.command == "keep-building":
+            print(runner.keep_building(args.job))
         elif args.command == "cancel":
             stopped = runner.cancel(args.job, keep_rest=not args.drop)
             print("\n".join(stopped) if stopped else "Nothing to cancel.")

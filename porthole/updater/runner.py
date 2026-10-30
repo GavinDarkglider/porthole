@@ -482,6 +482,24 @@ def cancel(job_id=None, keep_rest=True):
     return stopped
 
 
+def keep_building(job_id=None):
+    """The user wants the build to go on although they're at the computer:
+    carry on now and don't pause this job again. Returns the job id."""
+    with jobs_state() as state:
+        job = (find_job(state, job_id) if job_id else
+               next((j for j in state["jobs"] if j["status"] == "running"), None))
+        if not job or job["status"] not in ACTIVE:
+            raise JobError("No running or queued job to keep building")
+        job["keep_building"] = True
+        if job.get("paused") and job.get("pid"):
+            try:
+                os.killpg(job["pid"], signal.SIGCONT)
+            except OSError:
+                pass
+        job["paused"] = None
+        return job["id"]
+
+
 def preserved_rebuild_packages(log=lambda m: None):
     """What 'emerge @preserved-rebuild' would rebuild now (package names)"""
     try:
@@ -775,14 +793,26 @@ class Runner:
         while True:
             if pausing and time.monotonic() - checked >= 15:
                 checked = time.monotonic()
+                with jobs_state(write=False) as state:
+                    wanted = find_job(state, job_id).get("keep_building")
+                if wanted:
+                    # the user said to keep going (they may be watching it)
+                    pausing = False
+                    if paused:
+                        paused = False
+                        log("== Carrying on: you asked to keep building.\n")
+                    continue
                 idle = idle_for()
-                resume_after = max(config["idle_minutes"] * 60, 5 * 60)
+                # the admin's own "nobody has used it for" setting, at least a minute
+                resume_after = max(config["idle_minutes"] * 60, 60)
                 if not paused and idle is not None and idle < ACTIVE:
                     os.killpg(proc.pid, signal.SIGSTOP)
                     paused = True
                     self.update(job_id, paused=time.time())
                     log("\n== Paused: someone is using the computer. It carries on "
-                        "once they have been away %d minutes." % (resume_after // 60))
+                        "once nobody has used it for %d minute%s, or when you choose "
+                        "Keep building." % (resume_after // 60,
+                                             "" if resume_after < 120 else "s"))
                 elif paused and (idle is None or idle >= resume_after):
                     os.killpg(proc.pid, signal.SIGCONT)
                     paused = False

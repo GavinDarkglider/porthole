@@ -10,7 +10,7 @@
 
     The runner is root and can't ask an X session how long it has been
     idle, so the tray (running in the user's session) writes it down
-    every half minute in its runtime directory:
+    every few seconds in its runtime directory:
 
         /run/user/UID/porthole-activity   {"time": ..., "idle": seconds}
 
@@ -33,9 +33,10 @@ import re
 import time
 
 ACTIVITY_NAME = "porthole-activity"
-# the tray writes every WRITE_EVERY seconds; older notes are ignored
-WRITE_EVERY = 30
-FRESH = 3 * WRITE_EVERY
+# the tray writes every WRITE_EVERY seconds (often: a build mustn't start
+# on a note from before someone sat down); notes older than FRESH are ignored
+WRITE_EVERY = 10
+FRESH = 90
 # used within this long counts as someone at the machine (pause)
 ACTIVE = 60
 _WINDOW = re.compile(r"^\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\s*$")
