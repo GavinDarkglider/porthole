@@ -146,12 +146,8 @@ class MainWindow(PluginHandler):
         #self.hpane_bug = True
         # initialize now so that the update_db_callback doesn't puke
         self.status.set_statusbar2("Starting")
-        # set if we are root or not
+        # Porthole runs as the user; changes go to the root job runner
         self.is_root = utils.is_root()
-        debug.dprint("MAINWINDOW: __init__(); is_root = " + str(self.is_root))
-        if config.Prefs.main.show_nag_dialog:
-            # let the user know if he can emerge or not
-            self.check_for_root()
         self.toolbar_expander = self.wtree.get_object("toolbar_expander")
         # This should be set in the glade file, but doesn't seem to work ?
         self.toolbar_expander.set_expand(True)
@@ -395,24 +391,24 @@ class MainWindow(PluginHandler):
         """Set whether or not to search descriptions"""
         config.Prefs.main.search_desc = widget.get_active()
 
-    def emerge_btn(self, widget, sudo=False, oneshot=False):
+    def emerge_btn(self, widget, oneshot=False):
         """callback for the emerge toolbutton and menu entries; oneshot:
         install without adding the package to the world file"""
         if not self.process_selection("emerge --oneshot" if oneshot else "emerge"):
             package = utils.get_treeview_selection(self.package_view, 2)
-            self.emerge_package(package, sudo, oneshot)
+            self.emerge_package(package, oneshot)
 
     def adv_emerge_btn(self, *widget):
         """Advanced emerge of the currently selected package."""
         package = utils.get_treeview_selection(self.package_view, 2)
         self.adv_emerge_package(package)
 
-    def unmerge_btn(self, widget, sudo=False):
+    def unmerge_btn(self, widget):
         """callback for the Unmerge button and menu entry to
         unmerge the currently selected package."""
         if not self.process_selection("emerge --unmerge"):
             package = utils.get_treeview_selection(self.package_view, 2)
-            self.unmerge_package(package, sudo, self.package_view.selected_ebuild())
+            self.unmerge_package(package, self.package_view.selected_ebuild())
 
     def on_cancel_btn(self, *widget):
         """cancel button callback function"""
@@ -441,25 +437,6 @@ class MainWindow(PluginHandler):
             # save hpane, vpane positions
             config.Prefs.main.hpane = self.hpane.get_position()
             config.Prefs.main.vpane = self.vpane.get_position()
-
-    def upgrades_loaded_dialog_response(self, widget, response):
-        """ Get and parse user's response """
-        if response == 0: # Yes was selected; upgrade all
-            #self.load_upgrades_list()
-            #self.loaded_callback["Upgradable"] = self.upgrade_packages
-            if not utils.is_root() and utils.can_sudo() \
-                    and not config.Prefs.emerge.pretend:
-                self.setup_command('world',
-                        'sudo -p "Password: " emerge --update' +
-                        config.Prefs.emerge.get_string() + 'world')
-            else:
-                self.setup_command('world', "emerge --update" +
-                        config.Prefs.emerge.get_string() + 'world')
-        else:
-            # load the upgrades view to select which packages
-            self.widget["view_filter"].set_active(SHOW_UPGRADE)
-        # get rid of the dialog
-        self.upgrades_loaded_dialog.destroy()
 
     def load_descriptions_list(self):
         """ Load a list of all descriptions for searching """

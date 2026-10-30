@@ -59,23 +59,15 @@ class ActionHandler(CategoryHandler):
         # find the pkg in db.db
         db.db.update(PMS_LIB.extract_package(pkg))
 
-    def sync_callback(self):
-        """re-initializes portage so it uses the new metadata cache
-           then init our db"""
-        #self.re_init_portage()
-        PMS_LIB.settings.reset()
-        # self.reload==False is currently broken for init_data when
-        # reloading after a sync
-        #self.init_data()
-        self.new_sync = True
-        self.reload_db()
-        self.refresh()
-
     def submit_to_runner(self, package_name, command):
         """Installs and removals run in the root job runner, so closing
         Porthole never stops them; pretend runs stay here, as the user.
         Returns True if the command was taken."""
-        from porthole.updater.commands import install_targets, runner_tokens
+        from porthole.updater.commands import install_targets, runner_tokens, sync_command
+        if sync_command(command) and not config.Prefs.emerge.pretend:
+            # syncing is the runner's check job: Sync now
+            self.sync_tree()
+            return True
         tokens = runner_tokens(command, config.Prefs.emerge.pretend)
         if tokens is None:
             return False
@@ -242,8 +234,6 @@ class ActionHandler(CategoryHandler):
             config.Prefs.emerge.pretend = True
         else:
             config.Prefs.emerge.pretend = False
-        if "sudo" in action:
-            commands = ['sudo -p "Password: " '] + commands
         commands.append(config.Prefs.emerge.get_string())
         if "oneshot" in action and "--oneshot" not in commands[-1]:
             commands.append("--oneshot ")
@@ -266,71 +256,33 @@ class ActionHandler(CategoryHandler):
         return True
 
     def setup_command(self, package_name, command, run_anyway=False):
-        """Setup the command to run or not"""
+        """Installs, removals and syncs go to the root job runner (installs
+        by way of the queue); what is left (pretend, help and info runs, and
+        custom commands, run_anyway) runs here, as the user"""
         if self.submit_to_runner(package_name, command):
-            return
-        if (self.is_root
-                or run_anyway
-                or (config.Prefs.emerge.pretend
-                and not command.startswith(config.Prefs.globals.Sync))
-                or command.startswith("sudo ")
-                or utils.pretend_check(command)):
-            if command.startswith('sudo -p "Password: "'):
-                debug.dprint('MAINWINDOW: setup_command(); removing ' +
-                    '\'sudo -p "Password: "\' for pretend_check')
-                is_pretend = utils.pretend_check(command[21:])
-            else:
-                is_pretend = utils.pretend_check(command)
-            debug.dprint("MAINWINDOW: setup_command(); emerge.pretend = " +
-                "%s, pretend_check = %s, help_check = %s, info_check = %s"
-                    %(str(config.Prefs.emerge.pretend), str(is_pretend),
-                    str(utils.help_check(command)),
-                    str(utils.info_check(command))))
-            if (config.Prefs.emerge.pretend
-                    or is_pretend
-                    or utils.help_check(command)
-                    or utils.info_check(command)):
-                # temp set callback for testing
-                #callback = self.sync_callback
-                callback = lambda: None  # a function that does nothing
-                debug.dprint("MAINWINDOW: setup_command(); " +
-                    "callback set to lambda: None")
-            elif package_name == "Sync Portage Tree":
-                callback = self.sync_callback #self.init_data
-                debug.dprint("MAINWINDOW: setup_command(); " +
-                    "callback set to self.sync_callback")
-            else:
-                #debug.dprint("MAINWINDOW: setup_command(); " +
-                    #"setting callback()")
-                callback = self.reload_db
-                debug.dprint("MAINWINDOW: setup_command(); " +
-                    "callback set to self.reload_db")
-                #callback = self.package_update
-            #ProcessWindow(command, env, config.Prefs, callback)
-            self.process_manager.add(package_name, command, callback,
-                _("Porthole Main Window"))
-        else:
-            debug.dprint("MAINWINDOW: Must be root user to run command '%s' "
-                % command)
-            #self.sorry_dialog=utils.SingleButtonDialog(_("You are not root!"),
-            #        self.mainwindow,
-            #        _("Please run Porthole as root to emerge packages!"),
-            #        None, "_Ok")
-            self.check_for_root() # displays not root dialog
+            return True
+        is_pretend = config.Prefs.emerge.pretend or utils.pretend_check(command)
+        if not (run_anyway or is_pretend or utils.help_check(command)
+                or utils.info_check(command)):
+            SingleButtonDialog(_("Porthole can't run this"), self.mainwindow,
+                               _("'%s' needs root, and the job runner only runs emerge "
+                                 "commands that install, update, remove or sync. Run it "
+                                 "in a root terminal instead.") % command, None, _("OK"))
             return False
+        if is_pretend or utils.help_check(command) or utils.info_check(command):
+            callback = lambda: None  # changes nothing
+        else:
+            callback = self.reload_db  # a custom command may have
+        self.process_manager.add(package_name, command, callback,
+            _("Porthole Main Window"))
         return True
 
-    def emerge_package(self, package, sudo=False, oneshot=False):
+    def emerge_package(self, package, oneshot=False):
         """Emerge the package (oneshot: not added to the world file)."""
         options = config.Prefs.emerge.get_string()
         if oneshot and "--oneshot" not in options:
             options += "--oneshot "
-        if (sudo or (not utils.is_root() and utils.can_sudo())) \
-                and not config.Prefs.emerge.pretend:
-            self.setup_command(package.get_name(),
-                'sudo -p "Password: " emerge'+ options + package.full_name)
-        else:
-            self.setup_command(package.get_name(), "emerge" + options + package.full_name)
+        self.setup_command(package.get_name(), "emerge" + options + package.full_name)
 
     def adv_emerge_package(self, package, ebuild=None):
         """Advanced emerge of the package (starting at version ebuild)."""
@@ -339,34 +291,17 @@ class ActionHandler(CategoryHandler):
         return AdvancedEmergeDialog(package, self.setup_command,
                 self.re_init_portage, install=self.request_install, ebuild=ebuild)
 
-
-    def unmerge_package(self, package, sudo=False, ebuild=None):
+    def unmerge_package(self, package, ebuild=None):
         """Unmerge the package, or just one installed version of it."""
         target = "=" + ebuild if ebuild else package.full_name
-        if (sudo or (not self.is_root and utils.can_sudo())) \
-                and not config.Prefs.emerge.pretend:
-            self.setup_command(package.get_name(),
-                    'sudo -p "Password: " emerge --unmerge' +
-                    config.Prefs.emerge.get_string() + target)
-        else:
-            self.setup_command(package.get_name(), "emerge --unmerge" +
-                    config.Prefs.emerge.get_string() + target)
+        self.setup_command(package.get_name(), "emerge --unmerge" +
+                config.Prefs.emerge.get_string() + target)
 
     def sync_tree(self, *widget):
-        """Sync the portage tree and reload it when done."""
-        sync = config.Prefs.globals.Sync
-        if config.Prefs.emerge.verbose:
-            sync += " --verbose"
-        # emerge-webrsync and other sync commands don't know --nospinner
-        if config.Prefs.emerge.nospinner and sync.startswith("emerge "):
-            sync += " --nospinner "
-        if utils.is_root():
-            self.setup_command("Sync Portage Tree", sync)
-        elif utils.can_sudo():
-            self.setup_command("Sync Portage Tree", 'sudo -p "Password: " ' +
-                    sync)
-        else:
-            self.check_for_root()
+        """Sync the repositories (and check for updates) as a runner job"""
+        from porthole.updater.elevate import sync_now
+        from porthole.updater.follow import show_in_terminal
+        sync_now(self.mainwindow, show_in_terminal)
 
     def open_log(self, widget):
         """ Open a log of a previous emerge in a new terminal window """
@@ -380,19 +315,4 @@ class ActionHandler(CategoryHandler):
         #debug.dprint(config.Prefs.run_dialog.history)
         RunDialog(self.setup_command, run_anyway=True)
         return
-
-    def check_for_root(self, *args):
-        """figure out if the user can emerge or not..."""
-        if not self.is_root:
-            self.no_root_dialog = SingleButtonDialog(
-                _("No root privileges"),
-                self.mainwindow,
-                _("In order to access all the features of Porthole,\nplease run it with root privileges."
-                ), self.remove_nag_dialog,
-                _("_Ok"))
-
-    def remove_nag_dialog(self, widget, response):
-        """ Remove the nag dialog and set it to not display next time """
-        self.no_root_dialog.destroy()
-        config.Prefs.main.show_nag_dialog = False
 

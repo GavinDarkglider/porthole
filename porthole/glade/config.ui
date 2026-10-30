@@ -1043,24 +1043,6 @@
                                 <property name="position">0</property>
                               </packing>
                             </child>
-                            <child>
-                              <object class="GtkCheckButton" id="advemerge_show_make_conf_button">
-                                <property name="label" translatable="yes">Enable make.conf modification</property>
-                                <property name="visible">True</property>
-                                <property name="can-focus">True</property>
-                                <property name="receives-default">False</property>
-                                <property name="margin-top">2</property>
-                                <property name="margin-bottom">2</property>
-                                <property name="border-width">5</property>
-                                <property name="use-underline">True</property>
-                                <property name="draw-indicator">True</property>
-                              </object>
-                              <packing>
-                                <property name="expand">False</property>
-                                <property name="fill">True</property>
-                                <property name="position">1</property>
-                              </packing>
-                            </child>
                           </object>
                         </child>
                       </object>

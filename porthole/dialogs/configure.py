@@ -226,7 +226,6 @@ class ConfigDialog:
             ['emerge', 'nospinner'],
             ['globals', 'enable_archlist'],
             ##['globals', 'enable_all_keywords'],
-            ['advemerge', 'show_make_conf_button'],
             ['views', 'show_installed'],
             ['views', 'show_dl'],
             ['views', 'show_recommended'],

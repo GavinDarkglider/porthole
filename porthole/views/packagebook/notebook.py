@@ -28,7 +28,6 @@ from gi.repository import Gtk
 from gettext import gettext as _
 
 from porthole.utils import debug
-from porthole.utils import utils
 from porthole import backends
 #World = backends.portage_lib.settings.get_world()
 from porthole import config
@@ -153,8 +152,8 @@ class PackageNotebook(object):
             button = Gtk.Button("Save USE Flags")
             button.set_size_request(100,50)
             button.connect('clicked', self.save_use_flags_clicked)
-            if utils.is_root() or utils.can_gksu():
-                button.show()
+            # saving asks for root (see UserConfigs.set_user_config)
+            button.show()
             frame.pack_end(button, expand=False, fill=False, padding=2);
             frame.show()
             self.use_flag_page.add_with_viewport(frame)

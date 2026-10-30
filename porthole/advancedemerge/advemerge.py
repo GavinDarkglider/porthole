@@ -131,11 +131,11 @@ class AdvancedEmergeDialog:
         self.btnMakeConf = self.wtree.get_object("btnMakeConf")
         self.btnPkgUse = self.wtree.get_object("btnPkgUse")
         self.btnPkgKeywords = self.wtree.get_object("btnPkgKeywords")
-        if not self.is_root and not utils.can_gksu():
-            debug.dprint("ADVEMERGE: self.is_root = %s, utils.can_gksu = %s" %(self.is_root, utils.can_gksu))
-            self.btnMakeConf.hide()
-            self.btnPkgUse.hide()
-            self.btnPkgKeywords.hide()
+        # the chosen USE flags and keywords go with the queued install
+        # (get_request), so they aren't saved separately from here
+        self.btnMakeConf.hide()
+        self.btnPkgUse.hide()
+        self.btnPkgKeywords.hide()
 
         # Connect option toggles to on_toggled
         for checkbutton in self.wtree.get_object("table2").get_children():
@@ -621,16 +621,11 @@ class AdvancedEmergeDialog:
         else:
             self.btnPkgKeywords.set_sensitive(False)
 
-        # Build emerge or unmerge base command
-        if self.is_root:
-            emerge_unmerge = ''
-        else:
-            emerge_unmerge = 'sudo -p "Password: " '
-
+        # Build emerge or unmerge base command (the job runner runs it as root)
         if self.emerge_unmerge == "emerge":
-            emerge_unmerge += "emerge "
+            emerge_unmerge = "emerge "
         else: # self.emerge_unmerge == "unmerge"
-            emerge_unmerge += "emerge --unmerge "
+            emerge_unmerge = "emerge --unmerge "
 
         # Send command to be processed
         command = ''.join([ \
@@ -686,12 +681,6 @@ class AdvancedEmergeDialog:
             self.btnPkgUse.hide()
         else:
             UseFlagFrame.show()
-            if self.is_root or utils.can_gksu():
-                self.btnPkgUse.show()
-                if config.Prefs.advemerge.show_make_conf_button:
-                    self.btnMakeConf.show()
-                else:
-                    self.btnMakeConf.hide()
         # Build table to hold checkboxes
         uflag_widget = UseFlagWidget(use_flags, ebuild, self.window)
         uflag_widget.connect('grab-focus', self.on_toggled)
@@ -765,8 +754,6 @@ class AdvancedEmergeDialog:
             # Display the entire table
             table.show()
             KeywordsFrame.show()
-            if self.is_root or utils.can_gksu():
-                self.btnPkgKeywords.show()
         else:
             KeywordsFrame.hide()
             self.btnPkgKeywords.hide()

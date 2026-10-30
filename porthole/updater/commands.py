@@ -63,6 +63,28 @@ def runner_tokens(command, pretend=False):
     return tokens
 
 
+SYNC_PROGRAMS = ("emerge-webrsync", "emerge-delta-webrsync", "eix-sync")
+
+
+def sync_command(command):
+    """Whether a command line syncs the repositories (emerge --sync,
+    emaint sync, emerge-webrsync, eix-sync...): the runner does that
+    with its check job (see elevate.sync_now)"""
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return False
+    tokens = [t for t in tokens if t not in ("sudo", "-p", "Password: ")]
+    while tokens and "=" in tokens[0] and not tokens[0].startswith("-"):
+        tokens = tokens[1:]  # VAR=value
+    if not tokens:
+        return False
+    program, rest = os.path.basename(tokens[0]), tokens[1:]
+    return (program in SYNC_PROGRAMS
+            or (program == "emerge" and "--sync" in rest)
+            or (program == "emaint" and "sync" in rest))
+
+
 def install_targets(tokens):
     """For runner tokens that install packages, the emerge options and
     packages to plan; None for unmerges, resumes, fetches and commands

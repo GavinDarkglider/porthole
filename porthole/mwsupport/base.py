@@ -70,7 +70,6 @@ class MainBase(object):
             "on_emerge_package" : self.emerge_btn,
             "on_adv_emerge_package" : self.adv_emerge_btn,
             "on_unmerge_package" : self.unmerge_btn,
-            "on_sync_tree" : self.sync_tree,
             "on_update_assistant" : self.open_update_assistant,
             "on_upgrade_packages" : self.upgrade_packages,
             "on_package_search" : self.package_search,
@@ -86,7 +85,6 @@ class MainBase(object):
             #"on_main_window_size_request" : self.size_update,
             "on_plugin_settings_activate" : self.plugin_settings_activate,
             "on_view_refresh" : self.reload_view,
-            "on_root_warning_clicked" : self.check_for_root,
             "on_configure_porthole" : self.configure_porthole,
         }
         self.wtree.connect_signals(self.callbacks)

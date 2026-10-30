@@ -372,14 +372,9 @@ class DependsView(CommonTreeView):
         self.parent_tree = self.parent_tree[:-1]
         #debug.dprint("********** DependsView: dep_window_callback(); DependsView: dep_window['tree'] = " + str(self.dep_window['tree']))
 
-    def emerge(self, menuitem_widget, pretend=None, sudo=None):
+    def emerge(self, menuitem_widget):
         # a dependency: not for the world file
-        emergestring = ['emerge', 'oneshot']
-        if pretend:
-            emergestring.append('pretend')
-        if sudo:
-            emergestring.append('sudo')
-        self.dispatch(emergestring, {'caller': "DependsView: emerge()", 'package': utils.get_treeview_selection(self, 2)})
+        self.dispatch(['emerge', 'oneshot'], {'caller': "DependsView: emerge()", 'package': utils.get_treeview_selection(self, 2)})
 
     def change_use(self, widget):
         self.dispatch("change_use", {'caller': "DependsView: change_use()",

@@ -334,16 +334,11 @@ class PackageView(CommonTreeView):
         self.mainwindow_callback("change_use", {'package': package,
                                                 'caller': 'VIEWS: Package view change_use()'})
 
-    def emerge(self, widget, pretend=None, sudo=None):
-        emergestring = ['emerge']
-        if pretend:
-            emergestring.append('pretend')
-        if sudo:
-            emergestring.append('sudo')
-        self.mainwindow_callback(emergestring, {'full_name': self._last_selected, 'caller': 'VIEWS: Package view emerge()'})
+    def emerge(self, widget):
+        self.mainwindow_callback(['emerge'], {'full_name': self._last_selected, 'caller': 'VIEWS: Package view emerge()'})
 
-    def unmerge(self, widget, sudo=None):
-        action = ["unmerge", "sudo"] if sudo else ["unmerge"]
+    def unmerge(self, widget):
+        action = ["unmerge"]
         arg = {'full_name': self._last_selected, 'caller': 'VIEWS: Package view unmerge()'}
         ebuild = self.selected_ebuild()
         if ebuild:

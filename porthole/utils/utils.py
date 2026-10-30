@@ -95,31 +95,6 @@ def read_access():
     except: pass
     return write_access() or (portage in (os.getgroups() + [os.getegid()]))
 
-sudo_x_ok = os.access('/usr/bin/sudo', os.X_OK)
-
-def can_sudo():
-    """ return True if /usr/bin/sudo exists and is executable """
-    return sudo_x_ok
-    #return False # for testing
-
-gksudo_x_ok = os.access('/usr/bin/gksudo', os.X_OK)
-gksu_x_ok = os.access('/usr/bin/gksu', os.X_OK)
-gnomesu_x_ok = os.access('/usr/bin/gnomesu', os.X_OK)
-kdesu_x_ok = os.access('/usr/bin/kdesu', os.X_OK)
-
-def can_gksu(specific=None):
-    if not specific:
-        return gksudo_x_ok or gksu_x_ok or gnomesu_x_ok or kdesu_x_ok
-    if specific == 'gksudo':
-        return gksudo_x_ok
-    if specific == 'gksu':
-        return gksu_x_ok
-    if specific == 'gnomesu':
-        return gnomesu_x_ok
-    if specific == 'kdesu':
-        return kdesu_x_ok
-    return None
-
 def get_treeview_selection( treeview, num = None):
         """Get the value of whatever is selected in a treeview,
         num is the column, if num is nothing, the iter is returned"""
