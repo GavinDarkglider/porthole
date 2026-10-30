@@ -580,9 +580,13 @@ class Analyzer:
         those to the world file itself"""
         atoms = [t for t in self.base_targets if not t.startswith("-")]
         oneshot = [a for a in atoms if a not in self.world]
-        if not self.world or not oneshot or "--oneshot" not in self.targets:
+        if not self.world or "--oneshot" not in self.targets:
             return [(self.stage_title(), ["emerge", "--keep-going"] + self.targets)]
         options = [t for t in self.targets if t.startswith("-")]
+        if not oneshot:
+            # all of them for the world file after all
+            return [(self.stage_title(), ["emerge", "--keep-going"]
+                     + [o for o in self.targets if o != "--oneshot"])]
         return [
             ("Install %s (one-shot)" % ", ".join(oneshot),
              ["emerge", "--keep-going"] + options + oneshot),

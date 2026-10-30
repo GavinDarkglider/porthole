@@ -35,11 +35,18 @@ SETTING_FILES = {"use": "package.use", "keywords": "package.accept_keywords",
                  "mask": "package.mask"}
 
 
-class InstallQueue:
-    """[{"name", "targets": [options and atoms], "requested": [settings]}]"""
+OFFERED_FILE = os.path.join(os.path.dirname(QUEUE_FILE), "unfinished-offered.json")
 
-    def __init__(self, path=QUEUE_FILE):
+
+class InstallQueue:
+    """[{"name", "targets": [options and atoms], "requested": [settings]}],
+    plus for an install that stopped part way (see resume.py) "resume":
+    {"job", "started", "packages", "total"} and "world": the packages to
+    add to the world file"""
+
+    def __init__(self, path=QUEUE_FILE, offered_path=OFFERED_FILE):
         self.path = path
+        self.offered_path = offered_path
         self.listeners = []
         try:
             with open(path) as f:
@@ -66,6 +73,49 @@ class InstallQueue:
                            "requested": list(requested)})
         self.changed()
 
+    def prune(self):
+        """Drop what unfinished installs have had built since; True if
+        anything changed"""
+        from porthole.updater import resume
+        before = json.dumps(self.items)
+        self.items = [i for i in self.items if resume.refresh(i)]
+        return json.dumps(self.items) != before
+
+    def add_unfinished(self, jobs):
+        """Add entries carrying on with this user's installs that stopped
+        part way, each job once (removing its entry is the answer "no").
+        The first time, only the newest is offered. Returns their names."""
+        from porthole.updater import resume
+        try:
+            with open(self.offered_path) as f:
+                offered = set(json.load(f))
+            first = False
+        except (OSError, ValueError):
+            offered, first = set(), True
+        found = [(job_id, item) for job_id, item in resume.unfinished(jobs)
+                 if job_id not in offered]
+        if first:
+            found = found[:1]
+            offered |= {j["id"] for j in jobs if j.get("status") in resume.STOPPED}
+        added = []
+        for job_id, item in found:
+            offered.add(job_id)
+            packages = set(item["resume"]["packages"])
+            # an earlier unfinished entry for the same packages is replaced
+            self.items = [i for i in self.items
+                          if set((i.get("resume") or {}).get("packages") or ()) != packages]
+            self.items.append(item)
+            added.append(item["name"])
+        try:
+            os.makedirs(os.path.dirname(self.offered_path), exist_ok=True)
+            with open(self.offered_path, "w") as f:
+                json.dump(sorted(offered), f)
+        except OSError:
+            pass
+        if added:
+            self.changed()
+        return added
+
     def remove(self, index):
         del self.items[index]
         self.changed()
@@ -81,11 +131,17 @@ class InstallQueue:
         one-shot, targets has --oneshot and world lists the packages of the
         other entries: all are planned together, then the one-shot packages
         are emerged first and the world ones after (Analyzer.install_commands)"""
+        if self.prune():
+            self.changed()
         options, atoms, requested, lines = [], [], [], set()
         oneshot, world = [], []
         for item in self.items:
             mine = [t for t in item["targets"] if not t.startswith("-")]
             one = "--oneshot" in item["targets"] or "-1" in item["targets"]
+            if item.get("world"):
+                # an unfinished install: one-shot, but some for the world file
+                world.extend(a for a in item["world"] if a not in world)
+                mine = [a for a in mine if a not in item["world"]]
             for t in item["targets"]:
                 if t in ("--oneshot", "-1"):
                     continue
@@ -97,23 +153,24 @@ class InstallQueue:
                 if r["line"] not in lines:
                     lines.add(r["line"])
                     requested.append(r)
-        if oneshot:
+        world = [a for a in world if a not in oneshot]
+        if oneshot or any(i.get("world") for i in self.items):
             options.append("--oneshot")
         else:
             world = []  # emerge adds them itself
-        return options + atoms, requested, [a for a in world if a not in oneshot]
+        return options + atoms, requested, world
 
 
-def added_popup(parent, name, count, open_queue):
+def added_popup(parent, name, count, open_queue, detail=None, title=None):
     """A short note that a package went into the queue; it closes itself"""
     dialog = Gtk.MessageDialog(transient_for=parent, modal=False,
                                message_type=Gtk.MessageType.INFO,
                                buttons=Gtk.ButtonsType.NONE,
-                               text="%s added to the install queue" % name)
+                               text=title or "%s added to the install queue" % name)
     dialog.set_title("Porthole")
-    dialog.format_secondary_text(
+    dialog.format_secondary_text(detail or (
         "%d package%s queued. Nothing is installed until you process the queue "
-        "(the Queue button) and approve the plan." % (count, "s" if count != 1 else ""))
+        "(the Queue button) and approve the plan." % (count, "s" if count != 1 else "")))
     dialog.add_buttons("Open queue", 1, "OK", Gtk.ResponseType.OK)
     dialog.set_default_response(Gtk.ResponseType.OK)
 
@@ -186,11 +243,18 @@ class InstallQueueWindow(Gtk.Window):
         box.show_all()
 
     def refresh(self):
+        if self.queue.prune():
+            self.queue.changed()  # calls refresh again
+            return
         self.store.clear()
         for item in self.queue.items:
             settings = "; ".join("%s: %s" % (SETTING_FILES.get(r["kind"], r["kind"]), r["line"])
                                  for r in item["requested"])
-            self.store.append([item["name"], " ".join(item["targets"]), settings])
+            name = item["name"]
+            info = item.get("resume")
+            if info:
+                name += " (%d of %d left)" % (len(info["packages"]), info["total"])
+            self.store.append([name, " ".join(item["targets"]), settings])
         count = len(self.queue.items)
         self.heading.set_text(
             "Nothing is queued. Emerge, Advanced Emerge and Upgrade add packages here."

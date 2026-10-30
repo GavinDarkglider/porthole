@@ -445,24 +445,22 @@ class ProcessManager: #dbus.service.Object):
         del self.window
 
     def job_window(self):
-        """This window follows runner jobs: the queue's pause and timer
-        don't apply (a build can't be paused, the runner runs jobs in
-        turn), and play is Resume for a job that was stopped or failed.
-        Applied when the window is built (show_window)."""
+        """This window follows runner jobs: the queue's pause, play and
+        timer don't apply (a build can't be paused, the runner runs jobs
+        in turn), nor does Resume (what an install left goes back in the
+        install queue, see updater/resume.py). Applied when the window is
+        built (show_window)."""
         self.job_mode = True
         if self.window_visible:
             self.apply_job_window()
 
     def apply_job_window(self):
-        self.process_queue.job_mode = True
-        for name in ("pause_button", "timer_button", "pause", "timer", "resume_queue"):
+        for name in ("pause_button", "play_queue_button", "timer_button", "pause", "timer",
+                     "resume_queue", "resume"):
             widget = self.wtree.get_object(name)
             if widget is not None:
                 widget.set_no_show_all(True)
                 widget.hide()
-        play = self.wtree.get_object("play_queue_button")
-        play.set_tooltip_text(_("Resume the stopped job (asks for your password)"))
-        play.set_sensitive(self.resume_menu.get_sensitive())
 
     def followed_job(self):
         """The runner job the current queue entry follows, or None"""
@@ -1046,20 +1044,13 @@ class ProcessManager: #dbus.service.Object):
         self.set_statusbar(terminaled_string[:-1])
         self.do_callback()
         self.callback_armed = False
-        # set queue icon according to success or failure
-        # a followed job that failed or was cancelled can be resumed
-        followed = self.followed_job()
-        if followed:
-            # the queue moves on below; Resume still needs to know
-            self.process_queue.last_followed_job = followed
-        resumable = self.Failed and followed is not None
+        # set queue icon according to success or failure (a followed install
+        # that stopped part way goes back in the install queue instead)
         if self.Failed:
             self.process_queue.done(FAILED)
         else:
             self.process_queue.done(COMPLETED)
         self.task_completed = True
-        if resumable:
-            self.set_resume(True)
 
     def do_callback(self):
         # try to get a callback
@@ -1096,8 +1087,6 @@ class ProcessManager: #dbus.service.Object):
             self.process_queue.set_menu_state()
         else:
             self.resume_menu.set_sensitive(False)
-        if self.process_queue.job_mode:
-            self.wtree.get_object("play_queue_button").set_sensitive(active)
 
     def estimate_build_time(self):
         """Estimates build times based on emerge --pretend output"""

@@ -163,6 +163,14 @@ INSTALL_ONESHOT = {
 }
 
 
+INSTALL_ALL_WORLD = {
+    "doc": "An unfinished install where only what was asked for is left: "
+           "one-shot in the queue, but all of it for the world file",
+    "repo": INSTALL_PKGS, "installed": [inst("lib/l-1")], "world": [],
+    "request": {"targets": ["--oneshot", "=app/b-1"], "world": ["=app/b-1"]},
+}
+
+
 def with_choices(scenario, doc, **choices):
     return dict(scenario, doc=doc, choices=choices)
 
@@ -200,6 +208,7 @@ SCENARIOS = {
         decline=["replace:app/oldtool"]),
     "install-mixed": INSTALL_MIXED,
     "install-oneshot": INSTALL_ONESHOT,
+    "install-all-world": INSTALL_ALL_WORLD,
     "deselected": with_choices(
         CYCLES, "cycles, with media/q unticked", exclude=["media/q"]),
 }
@@ -250,6 +259,9 @@ EXPECTED = {
         ["emerge --keep-going --oneshot @preserved-rebuild"]]),
     "install-oneshot": expect("ready", ["app/a-1", "app/b-1", "lib/l-1"], steps=[
         ["emerge --keep-going --oneshot app/a app/b"],
+        ["emerge --keep-going --oneshot @preserved-rebuild"]]),
+    "install-all-world": expect("ready", ["app/b-1"], steps=[
+        ["emerge --keep-going =app/b-1"],
         ["emerge --keep-going --oneshot @preserved-rebuild"]]),
     "deselected": expect("needs-approval", ["lib/x-2", "lib/y-2"], mine=["media/p", "media/q"]),
 }

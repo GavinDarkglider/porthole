@@ -229,6 +229,23 @@ class MainWindow(PluginHandler):
             button.set_label(_("Queue (%d)") % n if n else _("Queue"))
         self.install_queue.listeners.append(count)
         count()
+        GLib.idle_add(self.offer_unfinished)
+
+    def offer_unfinished(self):
+        """Installs that stopped part way go back in the install queue,
+        with what is left of them (see updater/resume.py)"""
+        from porthole.updater.installqueue import added_popup
+        from porthole.updater.viewer import read_jobs
+        if self.install_queue.prune():
+            self.install_queue.changed()
+        for name in self.install_queue.add_unfinished(read_jobs()):
+            added_popup(self.mainwindow, name, len(self.install_queue.items),
+                        self.show_install_queue,
+                        _("What it didn't get to is in the install queue: process the "
+                          "queue to carry on (anything built meanwhile is left out), "
+                          "or remove it there."),
+                        title=_("%s stopped part way") % name.split(": ", 1)[-1])
+        return False
 
     def watch_jobs(self):
         """Reload the package lists whenever a runner job finishes, however
@@ -252,6 +269,7 @@ class MainWindow(PluginHandler):
                         if j["status"] not in ("queued", "running")}
             if finished - self.finished_jobs:
                 GLib.idle_add(self.reload_db)
+                GLib.idle_add(self.offer_unfinished)
             self.finished_jobs = finished
         self.jobs_monitor.connect("changed", changed)
 

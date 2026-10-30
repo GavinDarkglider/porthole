@@ -89,6 +89,10 @@ def follow(job_id=None, out=None):
             time.sleep(0.5)
     status = (job or {}).get("status", "gone")
     out.write(("\n*** Job %s\n" % status).encode())
+    if job and job.get("kind") == "install" and status in ("failed", "cancelled"):
+        out.write(b"*** What it didn't get to goes back in Porthole's install queue: "
+                  b"process the queue to carry on (packages built meanwhile are "
+                  b"left out), or remove it there.\n")
     out.flush()
     return 0 if status == "done" else 1
 
