@@ -43,11 +43,11 @@ class UpdaterSettingsPage(Gtk.Grid):
         row = 0
 
         heading = Gtk.Label(xalign=0)
-        heading.set_markup("<b>Automatic update checks</b>")
+        heading.set_markup("<b>Automatic sync</b>")
         self.attach(heading, 0, row, 2, 1)
         row += 1
 
-        self.attach(Gtk.Label(label="Check for updates every", xalign=0), 0, row, 1, 1)
+        self.attach(Gtk.Label(label="Sync the repositories every", xalign=0), 0, row, 1, 1)
         days = Gtk.Box(spacing=6)
         self.interval = Gtk.SpinButton.new_with_range(1, 90, 1)
         self.interval.set_value(config["interval_days"])
@@ -56,17 +56,21 @@ class UpdaterSettingsPage(Gtk.Grid):
         self.attach(days, 1, row, 1, 1)
         row += 1
 
-        self.sync = Gtk.CheckButton(label="Sync the repositories before checking")
-        self.sync.set_active(config["sync"])
-        self.attach(self.sync, 0, row, 2, 1)
-        row += 1
         hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-        hint.set_markup("<small>Syncs happen at most once a day, even when you check "
-                        "by hand, to be fair to the Gentoo mirrors.</small>")
+        hint.set_markup("<small>Counted from the last sync, also one you ran yourself. "
+                        "Never more than once a day, to be fair to the Gentoo "
+                        "mirrors.</small>")
         self.attach(hint, 0, row, 2, 1)
         row += 1
 
-        self.battery = Gtk.CheckButton(label="Don't check while running on battery")
+        self.check = Gtk.CheckButton(label="Check for updates after each sync")
+        self.check.set_tooltip_text("Work out what can be updated once the sync is done; "
+                                    "the tray tells you when there is something")
+        self.check.set_active(config["check_updates"])
+        self.attach(self.check, 0, row, 2, 1)
+        row += 1
+
+        self.battery = Gtk.CheckButton(label="Don't sync while running on battery")
         self.battery.set_active(config["skip_on_battery"])
         self.attach(self.battery, 0, row, 2, 1)
         row += 1
@@ -92,15 +96,16 @@ class UpdaterSettingsPage(Gtk.Grid):
         row += 1
 
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-        status.set_markup("<small>Last check: %s.  Last sync: %s.\nChecks run from cron "
-                          "every hour and only do anything when due. Changing these "
-                          "asks for administrator rights.</small>"
-                          % (_ago(state.get("last_check")), _ago(last_repo_sync())))
+        status.set_markup("<small>Last sync: %s.  Last check: %s.\nThe schedule runs "
+                          "from cron every hour and only does anything when due. Check "
+                          "now in the update assistant never needs a sync. Changing "
+                          "these asks for administrator rights.</small>"
+                          % (_ago(last_repo_sync()), _ago(state.get("last_check"))))
         self.attach(status, 0, row, 2, 1)
 
     def values(self):
         return {"interval_days": self.interval.get_value_as_int(),
-                "sync": self.sync.get_active(),
+                "check_updates": self.check.get_active(),
                 "skip_on_battery": self.battery.get_active(),
                 "live_rebuild": self.live.get_active(),
                 "live_exclude": self.live_exclude.get_text().split()}
@@ -113,7 +118,7 @@ class UpdaterSettingsPage(Gtk.Grid):
                 callback(True, "")
             return
         settings = ["interval_days=%d" % values["interval_days"],
-                    "sync=%s" % ("yes" if values["sync"] else "no"),
+                    "check_updates=%s" % ("yes" if values["check_updates"] else "no"),
                     "skip_on_battery=%s" % ("yes" if values["skip_on_battery"] else "no"),
                     "live_rebuild=%s" % ("yes" if values["live_rebuild"] else "no"),
                     "live_exclude=%s" % " ".join(values["live_exclude"])]

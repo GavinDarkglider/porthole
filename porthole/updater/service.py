@@ -24,11 +24,11 @@
     Settings live in /etc/porthole/updater.conf:
 
         [updater]
-        # days between checks, 1 or more
+        # sync the repositories every this many days, 1 or more
         interval_days = 7
-        # sync the repositories before checking
-        sync = yes
-        # don't start a check while running on battery
+        # check for updates after each sync
+        check_updates = yes
+        # don't sync while running on battery
         skip_on_battery = yes
         # check live (-9999) packages for new upstream commits
         # (smart-live-rebuild) and plan rebuilding the changed ones
@@ -100,7 +100,7 @@ SLACK = 3600
 
 DEFAULTS = {
     "interval_days": "7",
-    "sync": "yes",
+    "check_updates": "yes",
     "skip_on_battery": "yes",
     "live_rebuild": "yes",
     "live_exclude": "",
@@ -119,7 +119,7 @@ def load_config(path=CONFIG_FILE):
     return {
         # syncing more than once a day is unfair to the mirrors
         "interval_days": max(1, interval),
-        "sync": section.getboolean("sync", True),
+        "check_updates": section.getboolean("check_updates", True),
         "skip_on_battery": section.getboolean("skip_on_battery", True),
         "live_rebuild": section.getboolean("live_rebuild", True),
         "live_exclude": section.get("live_exclude", "").split(),
@@ -233,7 +233,9 @@ class Service:
         write_json(STATE_FILE, self.state)
 
     def due(self):
-        last = self.state.get("last_check")
+        """A sync is due interval_days after the last one, whoever ran it"""
+        last = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
+                   default=None)
         if not last:
             return True
         return time.time() - last >= self.config["interval_days"] * DAY - SLACK
@@ -287,8 +289,13 @@ class Service:
         self.save_state(running=True, started=time.time())
         try:
             sync_info = None
-            if sync and self.config["sync"]:
+            if sync:
                 sync_info = self.sync()
+            # a scheduled sync checks for updates only if asked to; a
+            # check someone asked for (force) always does
+            if not force and not self.config["check_updates"]:
+                self.log("Synced; checking for updates is turned off")
+                return 0 if (sync_info or {}).get("ok", True) else 1
             plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE),
                             live=self.config["live_rebuild"],
                             live_exclude=self.config["live_exclude"]).analyze()
@@ -308,9 +315,9 @@ class Service:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Porthole update service (run as root).")
     sub = parser.add_subparsers(dest="command", required=True)
-    run = sub.add_parser("run", help="check for updates if due")
+    run = sub.add_parser("run", help="sync (and check for updates) if due")
     run.add_argument("--force", action="store_true",
-                     help="check now, even if not due or on battery "
+                     help="sync and check now, even if not due or on battery "
                           "(the once-a-day sync limit still applies)")
     run.add_argument("--no-sync", action="store_true", help="don't sync first")
     run.add_argument("--quiet", action="store_true", help="only write the log file")
