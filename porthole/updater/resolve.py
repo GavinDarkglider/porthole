@@ -144,12 +144,54 @@ def circular_deps(depgraph):
         parents.append(line.split("(Change USE")[0].strip("- \n"))
     for sol, parent in zip(solutions, parents):
         sol["package"] = parent
+    solutions += edge_flag_solutions(depgraph, handler, solutions)
     return {
         "cycle": [str(p.cpv) for p in handler.shortest_cycle or ()],
         "merge_list": [str(p.cpv) for p in handler.merge_list or ()],
         "solutions": solutions,
         "message": handler.circular_dep_message,
     }
+
+
+def edge_flag_solutions(depgraph, handler, known):
+    """More ways to break a cycle: turning off any enabled flag that
+    guards one of a parent's dependencies on the next package in the cycle.
+
+    Portage looks at only one of a parent's atoms for each edge, picked
+    from a set, so which suggestions it makes varies from run to run
+    (util-linux's udev? dependency on virtual/libudev, say, is only
+    sometimes the one it looks at). The analyzer verifies each
+    suggestion, so offering more costs time, not safety."""
+    from portage.dep import extract_affecting_use
+    from portage.exception import InvalidDependString
+    seen = {(s.get("package"), tuple(sorted(s["changes"].items()))) for s in known}
+    extra = []
+    cycle = handler.shortest_cycle or ()
+    for pos, pkg in enumerate(cycle):
+        parent = cycle[pos - 1]
+        atoms = [atom for ppkg, atom in handler.all_parent_atoms.get(pkg) or ()
+                 if ppkg == parent and atom.package]
+        if not atoms:
+            continue
+        dep = " ".join(parent._metadata.get(k, "") for k in
+                       Package._buildtime_keys + ("RDEPEND", "PDEPEND"))
+        usemask, useforce = handler._get_use_mask_and_force(parent)
+        enabled = depgraph._pkg_use_enabled(parent)
+        flags = set()
+        for atom in atoms:
+            try:
+                flags |= extract_affecting_use(dep, atom.unevaluated_atom, eapi=parent.eapi)
+            except InvalidDependString:
+                continue
+        for flag in sorted(flags):
+            if flag not in enabled or flag in usemask or flag in useforce:
+                continue
+            key = (str(parent.cpv), ((flag, False),))
+            if key not in seen:
+                seen.add(key)
+                extra.append({"breaks_at": str(pkg.cpv), "package": str(parent.cpv),
+                              "changes": {flag: False}})
+    return extra
 
 
 def blockers(depgraph):

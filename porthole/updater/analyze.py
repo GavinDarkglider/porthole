@@ -304,7 +304,9 @@ def _solution_cost(solution):
     changes = solution["changes"]
     expand = sum(1 for f in changes if f.startswith(_EXPAND_PREFIXES))
     enables = sum(1 for on in changes.values() if on)
-    return (expand, enables, len(changes))
+    # then a fixed order, so the same tree always gives the same plan
+    return (expand, enables, len(changes), solution.get("package") or "",
+            sorted(changes.items()))
 
 
 def normalize_choices(choices):
@@ -502,10 +504,12 @@ class Analyzer:
                               scratch.root)
 
     def break_cycles(self, fixes, check):
-        """Break cycles one at a time with portage's USE suggestions.
+        """Break cycles one at a time with portage's USE suggestions (and
+        resolve.edge_flag_solutions'), cheapest first.
 
         Breaking one cycle often uncovers the next, so a suggestion counts
-        when its cycle disappears, even if another one shows up.
+        when its cycle disappears, even if another one shows up. One that
+        leaves other problems is used only if no other breaks it cleanly.
         Returns (temp_use_lines, cycles_broken, final_check).
         """
         temp_use, broken, seen = [], [], set()
@@ -518,7 +522,7 @@ class Analyzer:
                 break
             seen.add(key)
             self.log("Circular dependency: " + " -> ".join(circ["cycle"]))
-            next_check = None
+            next_check = fallback = None
             candidates = sorted(circ.get("solutions", []), key=_solution_cost)
             tried = set()
             while candidates and len(tried) < MAX_TRIES_PER_CYCLE:
@@ -534,16 +538,19 @@ class Analyzer:
                 self.log("  trying temporary USE: " + line)
                 result = self.verify(fixes, temp_use + [line])
                 new = result.get("circular")
-                # gone, or replaced by a different cycle; other problems (a
-                # slot conflict, say) are someone else's to solve
-                if result.get("success") or not new or not _same_cycle(new["cycle"], seen):
+                # gone, or replaced by a different cycle
+                if result.get("success") or (new and not _same_cycle(new["cycle"], seen)):
                     self.log("    breaks it" + ("" if result.get("success") else
-                                                 ", next cycle found" if new else
-                                                 ", other problems remain"))
-                    temp_use.append(line)
-                    broken.append({"cycle": circ["cycle"], "temp_use": line, "package": pkg})
-                    next_check = result
+                                                 ", next cycle found"))
+                    next_check = (line, pkg, result)
                     break
+                if not new:
+                    # gone, but leaving other problems (turning a flag on
+                    # can pull in a blocker, say): keep it in case nothing
+                    # else breaks the cycle cleanly
+                    self.log("    breaks it, but other problems remain; trying the others")
+                    fallback = fallback or (line, pkg, result)
+                    continue
                 if new and _cycle_key(new["cycle"]) != key:
                     # the change only moved the cycle (another slot, another
                     # provider); its suggestions may break the original one
@@ -552,9 +559,14 @@ class Analyzer:
                                         key=_solution_cost)
                 else:
                     self.log("    does not break it")
+            next_check = next_check or fallback
             if next_check is None:
                 break
-            check = next_check
+            line, pkg, check = next_check
+            if next_check is fallback:
+                self.log("  using " + line + " (nothing broke it without other problems)")
+            temp_use.append(line)
+            broken.append({"cycle": circ["cycle"], "temp_use": line, "package": pkg})
         return temp_use, broken, check
 
     def stages(self, temp_use, broken, verified):

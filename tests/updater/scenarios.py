@@ -6,7 +6,10 @@
     system (ROOT with its own vdb and world file). The analyzer resolves
     a world update against it; nothing is built. Runs as a normal user.
 
-    Usage: scenarios.py [--keep] [NAME...]     (default: all)
+    Each scenario's plan is checked against EXPECTED; the exit status
+    says whether they all came out as expected.
+
+    Usage: scenarios.py [--keep] [-q] [NAME...]     (default: all)
 
     Copyright (C) 2026 Porthole developers
 
@@ -104,6 +107,17 @@ BLOCKER = {
     "world": ["app/conflict", "app/oldtool"],
 }
 
+HARD_BLOCKER = {
+    "doc": "app/strict-2 hard-blocks (!!) app/legacytool, which is in world; "
+           "portage won't replace it during the merge",
+    "repo": [
+        pkg("app/strict-1"), pkg("app/strict-2", rdepend="!!app/legacytool"),
+        pkg("app/legacytool-1"),
+    ],
+    "installed": [inst("app/strict-1"), inst("app/legacytool-1")],
+    "world": ["app/strict", "app/legacytool"],
+}
+
 
 HELD_NEWER = {
     "doc": "app/user-1 (still in the tree) requires <lib/w-2; only app/user-2, "
@@ -151,6 +165,7 @@ SCENARIOS = {
     "subslot": SUBSLOT,
     "fixes": FIXES,
     "blocker": BLOCKER,
+    "hard-blocker": HARD_BLOCKER,
     "everything": combine(CYCLES, OLD_DEP, SUBSLOT, FIXES, BLOCKER),
     "held-newer": HELD_NEWER,
     "held-stuck": HELD_STUCK,
@@ -169,6 +184,55 @@ SCENARIOS = {
     "deselected": with_choices(
         CYCLES, "cycles, with media/q unticked", exclude=["media/q"]),
 }
+
+
+def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=()):
+    """What a scenario's plan should come to: its status, the versions it
+    merges, the packages held back, the packages held by the user's
+    choices, what it removes (kind:cpv) and what it unmerges outright"""
+    return {"status": status, "merge": sorted(merge), "held": sorted(held),
+            "mine": sorted(mine), "removed": sorted(removed), "unmerge": sorted(unmerge)}
+
+
+EXPECTED = {
+    "cycles": expect("needs-approval", ["lib/x-2", "lib/y-2", "media/p-2", "media/q-2"]),
+    "old-dep": expect("needs-approval", ["app/newthing-2", "lib/z-2"],
+                      removed=["orphan:app-old/legacy-1"]),
+    "subslot": expect("needs-approval", ["app/cons-1", "lib/abi-2.0"],
+                      removed=["orphan:app/frozen-1"]),
+    "fixes": expect("needs-approval", ["app/tool-2", "lib/feat-1", "lib/k-3"]),
+    "blocker": expect("needs-approval", ["app/conflict-2"],
+                      removed=["replaced:app/oldtool-1"]),
+    # portage won't replace a hard-blocked package itself: it is unmerged first
+    "hard-blocker": expect("needs-approval", ["app/strict-2"],
+                           removed=["replaced:app/legacytool-1"],
+                           unmerge=["app/legacytool"]),
+    "everything": expect(
+        "needs-approval",
+        ["app/conflict-2", "app/cons-1", "app/newthing-2", "app/tool-2", "lib/abi-2.0",
+         "lib/feat-1", "lib/k-3", "lib/x-2", "lib/y-2", "lib/z-2", "media/p-2", "media/q-2"],
+        removed=["orphan:app-old/legacy-1", "orphan:app/frozen-1",
+                 "replaced:app/oldtool-1"]),
+    "held-newer": expect("needs-approval", ["app/user-2", "app/wnew-2", "lib/w-2"]),
+    "held-stuck": expect("needs-help", held=["app/vnew-2", "lib/v-2"]),
+    "held-stuck-keep": expect("up-to-date", mine=["app/vnew", "lib/v"]),
+    "held-stuck-remove": expect("needs-approval", ["app/vnew-2", "lib/v-2"],
+                                removed=["chosen:app/stuck-1"]),
+    "fixes-rejected": expect("up-to-date", mine=["app/tool"]),
+    "blocker-declined": expect("up-to-date", mine=["app/conflict"]),
+    # media/p-2 needs media/q-2, so unticking media/q holds media/p too
+    "deselected": expect("needs-approval", ["lib/x-2", "lib/y-2"], mine=["media/p", "media/q"]),
+}
+
+
+def outcome(plan):
+    """A plan, in EXPECTED's terms"""
+    return expect(plan["status"],
+                  [m["cpv"] for m in plan["merge_list"]],
+                  [h["cpv"] for h in plan["held_back"]],
+                  [h["cp"] for h in plan["held_by_you"]],
+                  ["%s:%s" % (r["kind"], r["cpv"]) for r in plan.get("removed") or []],
+                  [c[-1] for st in plan["stages"] for c in st["commands"] if "--unmerge" in c])
 
 
 # -- building the fake system ------------------------------------------------
@@ -243,7 +307,7 @@ def build(work, scenario):
     return config, root
 
 
-def run(name, keep=False):
+def run(name, keep=False, quiet=False):
     scenario = SCENARIOS[name]
     work = tempfile.mkdtemp(prefix="porthole-scenario-%s-" % name)
     try:
@@ -261,10 +325,11 @@ def run(name, keep=False):
                "--root=" + root, "--sysroot=" + root],
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             timeout=1800)
-        print("=" * 72)
-        print("%s: %s" % (name, scenario["doc"]))
-        print("=" * 72)
-        print(proc.stdout)
+        if not quiet:
+            print("=" * 72)
+            print("%s: %s" % (name, scenario["doc"]))
+            print("=" * 72)
+            print(proc.stdout)
         with open(out) as f:
             return json.load(f)
     finally:
@@ -276,10 +341,19 @@ def run(name, keep=False):
 
 def main(argv):
     keep = "--keep" in argv
+    quiet = "-q" in argv
     names = [a for a in argv if not a.startswith("-")] or list(SCENARIOS)
+    failed = []
     for name in names:
-        run(name, keep)
-    return 0
+        got, wanted = outcome(run(name, keep, quiet)), EXPECTED[name]
+        wrong = {k: got[k] for k in wanted if got[k] != wanted[k]}
+        print("%s %s" % ("ok  " if not wrong else "FAIL", name), flush=True)
+        for key, value in wrong.items():
+            print("     %s: got %s, expected %s" % (key, value, wanted[key]))
+        if wrong:
+            failed.append(name)
+    print("%d of %d scenarios as expected" % (len(names) - len(failed), len(names)))
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
