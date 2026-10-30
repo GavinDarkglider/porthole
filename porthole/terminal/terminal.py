@@ -463,11 +463,12 @@ class ProcessManager: #dbus.service.Object):
 
     def apply_job_window(self):
         for name in ("pause_button", "play_queue_button", "timer_button", "pause", "timer",
-                     "resume_queue", "resume"):
+                     "resume_queue", "resume", "open"):
             widget = self.wtree.get_object(name)
             if widget is not None:
                 widget.set_no_show_all(True)
                 widget.hide()
+        self.process_queue.job_mode = True
 
     def apply_log_window(self):
         """A log viewer: nothing runs here, so no queue and no Kill"""
@@ -1329,6 +1330,9 @@ class ProcessManager: #dbus.service.Object):
             # no directory was specified, so we are making one up
             debug.dprint("LOG: directory not specified, setting to default: %s" %config.Prefs.LOG_FILE_DIR)
             self.directory = config.Prefs.LOG_FILE_DIR
+            # only root can write there
+            if not os.access(self.directory, os.W_OK):
+                self.directory = os.path.expanduser("~")
 
     def pretty_name(self):
         """pre-assigns generic filename & serial #"""

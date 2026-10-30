@@ -25,26 +25,35 @@
 <h1>Remove a Package</h1>
 
 <h2>Basic Removal</h2>
-<p>The simplest way to remove a package from your system is to select
-the package from the package list, then click the "Unmerge" button in
-the toolbar. This will almost always do what you want.</p>
-<p>However, this will not remove any dependencies that were installed
-when you installed the package. The safest way to remove these
-dependencies is to run the <a href="custcmd.html">custom command</a> "emerge --pretend --depclean", then manually remove the packages&nbsp;it returns that you know you don't need.</p>
-<p>If any package complains about missing dependencies - make sure you reinstall the <span style="font-style: italic;">package that complains</span>.</p>
+<p>To remove a package, select it in the package list and click
+"Unmerge" in the toolbar (or use <u>Unmerge</u> in its right-click menu, or
+<u>Package -&gt; Unmerge Package</u>). &nbsp;Removing needs root, so Porthole asks
+for your password and hands the removal to its job runner, which runs it
+in the background; the <a href="termwindow.html">job window</a> shows
+it.</p>
+<p>In the Updates, Deprecated and Sets views, the packages you tick are
+removed together, as one job.</p>
+<p>Removing a package doesn't remove the packages that were installed
+because it needed them. &nbsp;See <a href="#depclean">Removing what is no
+longer needed</a> below.</p>
+<p>If another package complains afterwards about something missing,
+reinstall <i>the package that complains</i>.</p>
 <h2>Removing a Specific Version</h2>
-<p>If you want to remove a specific version of a package (perhaps you
-have multiple versions of a package installed and one is now
-unnecessary), you can do so with the <a href="advemerge.html">Advanced Emerge</a> dialog, or equivalently you can right-click on the version you want to uninstall in the package summary, and select "Unmerge".</p>
-<h2>Advanced Dependency Removal</h2>
-<p>If you really want to get rid of all those useless dependencies,
-you're sure you don't need any of the packages output by "emerge
---pretend --depclean", and you've read all the warnings it output twice
-over, then run the <a href="custcmd.html">custom command</a> "emerge --depclean". If you change your mind while it's unmerging, hit &lt;Ctrl&gt;+C in the <a href="termwindow.html">terminal window</a> or press the "Kill" button to stop it.</p>
-
+<p>If you have more than one version of a package installed (in different
+slots, say) and want to remove just one, right-click that version in the
+version table of the package's summary tab and choose <u>Unmerge this
+version</u>. &nbsp;<a href="advemerge.html">Advanced Emerge</a> can do the
+same: choose "unmerge" and the version.</p>
+<h2><a name="depclean">Removing what is no longer needed</a></h2>
+<p>To see which packages nothing needs any more, run the
+<a href="custcmd.html">custom command</a> "emerge --pretend --depclean".
+&nbsp;A pretend run changes nothing, so it runs as you, without a password,
+in the terminal. &nbsp;Read its list, and its warnings, carefully.</p>
+<p>When you are sure, run the custom command "emerge --depclean".
+&nbsp;Porthole asks for your password and the job runner removes them. &nbsp;To
+stop it part way, press <u>Kill</u> in the job window and choose
+<u>Stop</u>; what was already removed stays removed.</p>
 <p>
-
-
 </p>
 <hr>
 <a name="notes">Notes:</a>

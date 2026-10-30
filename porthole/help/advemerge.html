@@ -13,151 +13,98 @@
 <br>
 <h1>Advanced Emerge</h1>
 <h2>Introduction</h2>
-<div class="warnleft">
-<b>Warning!</b> You can really screw up your system using
-advanced emerge
-if the wrong version or settings are used!
-</div>
 <p>
-As with all things technical, there is a deeper level of control
-afforded
-by portage when it comes to installing packages. &nbsp;Setting use
-flags, accepting keywords and specifying certain
-options during emerge allow the user to tailor and fine tune the system
-as well as override default installation behaviour.
+Advanced Emerge installs one package your way: a version of your
+choosing, with the USE flags and keyword you pick, and emerge options of
+your own. &nbsp;Open it from the package's right-click menu, or from the
+version table in the summary tab (it then starts at that version).
 </p>
 <p>
-The advanced emerge dialog can only emerge one package at a time.
-</p>
-<p>
-The advanced emerge dialog is split into three basic sections: emerge
-options, package options and a button bar. &nbsp;The package
-options section is further divided into four sub-sections:
-emerge/unmerge selector, version list selector, use flags and keyword acceptor.
-</p>
-<h2>Emerge Options</h2>
-<p>
-The emerge options control emerge's behaviour when managing packages.
-The features of this section are:
-</p>
-<ul>
-  <li>Float over help for emerge options. &nbsp;This text is
-almost verbatim from the emerge help manual.
-  </li>
-  <li>Self deconflicting emerge options. &nbsp;When you
-select two options that conflict with each other, the
-former is deselected automatically. &nbsp;E.G. if you select
-verbose, then quiet, verbose will
-automatically be deselected.
-  </li>
-  <li>Emerge options selected in the main window settings menu
-are automatically set here. </li>
-</ul>
-<p>
-Only the options that make sense for installing a package are listed.
-&nbsp;The options that display information which Porthole already supplies (e.g. --changelog) were omitted to save
-space on the menu and make the interface as simple as
-possible.
-</p>
-<p>A good practice is to use pretend first if you are not sure of
-the results of your selected options.
+<b>Execute</b> doesn't install straight away. &nbsp;The package goes into
+Porthole's <a href="install.html">install queue</a>, with your settings.
+&nbsp;When you process the queue, Porthole works out what the install
+needs (as you, without a password) and shows you the plan, including the
+lines it will add to your Portage settings. &nbsp;Only when you approve
+it is root asked for, and the job runner saves the settings and installs.
 </p>
 <div class="figinline">
 <img style="width: 614px; height: 477px;" alt="Advanced emerge dialog image." src="advemerge.png"><br>
-Figure 1. Advanced Emerge Dialog
+Figure 1. Advanced Emerge Dialog (an older version)
 </div>
+<h2>Emerge Options</h2>
+<p>
+The emerge options change what emerge does with the package:
+</p>
+<ul>
+  <li>Hover over an option for its help, taken from the emerge manual.</li>
+  <li>Options that conflict switch each other off: e.g. choosing quiet
+switches verbose off.</li>
+  <li>The emerge options chosen in Porthole's settings start out set here.</li>
+</ul>
+<p>
+<b>--oneshot</b> installs the package without adding it to your world
+file, so updates won't keep it unless something else needs it.
+</p>
 <h2>Package Options</h2>
 <div class="noteright">
-Note: Changing the version will change and reset the use flags and
-keyword to accept sections.
+Note: Changing the version resets the USE flags and keywords sections
+to that version's.
 </div>
-<h3>Command Selector</h3>
+<h3>Emerge or Unmerge</h3>
 <p>
-The command list is a drop-down selection list containing "emerge" or "unmerge" commands.
+"emerge" installs the chosen version; "unmerge" removes it (as a job of
+the job runner, after your password; see <a href="unmerge.html">Remove a
+Package</a>).
 </p>
 <h3>Version List</h3>
 <p>
-The version list is a drop-down select list containing all the
-different ebuilds for this package.
+All the versions of the package, oldest first<a href="#notes"><span class="note">1</span></a>,
+with each one's slot and masking, and which is installed and which
+Portage recommends. &nbsp;The recommended version is chosen to start with.
 </p>
-<p>The versions are sorted in release order<a href="#notes"><span class="note">1</span></a> with the oldest
-first and the most recent last. &nbsp;The default selection for the
-version selector is the oldest version.</p>
-<p>The list also contains that versions' slot number, masking
-status, and a note if that
-version is currently installed or it is the version recommended by
-Portage.
-</p>
-<h3>Use Flags</h3>
 <p>
-Use flags customize what features are included with this package.
-In general, the more use flags selected, the more software
-will be installed. The use flags displayed are specific to the
-version selected
-in the version drop-down list.
+<b>Keep this version</b> stops updates from moving past the chosen
+version: Porthole adds a package.mask line for the versions after it.
+&nbsp;Leave it unticked and the next update moves on as usual.
 </p>
-<div class="tipright">
-<b>TIP:</b> if you're not sure what a use flag
-does, you can hover the mouse over it for an explanatory tool-tip.
-</div>
-<p>The easy way to emerge a package with certain use flags, is to
-select the ones you want, de-select the ones you don't, and click
-"Emerge". However, if you do this the change will only be temporary,
-and the next time the package is updated the use flags will revert to
-their previous settings.</p>
-<p>If you wish the use flag settings to persist,
-and&nbsp;want them to apply <span style="font-style: italic;">only</span>
-to the current package, click "Update package.use". Beware! This is
-not thoroughly tested yet. So back up your package.use file (usually
-/etc/portage/package.use) first.</p>
-<p>If you want your use flag changes to apply to all packages,
-then click on "Update make.conf". This button&nbsp;is <span style="font-style: italic;">hidden by default</span>,
-due to your make.conf file being much more complex than the package.use
-and package.keywords files, and <span style="font-style: italic;">very</span>
-import to the overall health of your system. so <span style="font-weight: bold; font-style: italic;">back up your
-make.conf file</span> (/etc/make.conf) before letting Porthole do
-<span style="font-style: italic;">anything at all</span>
-to it. Safer yet, edit the file by hand. If, however, you're a brave
-soul who likes living on the edge and knows how to fix things when they
-go wrong (you're running Gentoo - of course you are!), you can enable
-the button in Porthole's configuration dialog (Settings -&gt;
-Configure Porthole). Good luck.</p>
+<h3>USE Flags</h3>
+<p>
+USE flags choose the features built into the package. &nbsp;Hover over a
+flag for what it does. &nbsp;The flags you change are saved for the package
+in package.use (Porthole's own file, /etc/portage/package.use/zz-porthole),
+so later versions are built the same way.
+</p>
+<p>
+If the flags break the package's rules (its REQUIRED_USE), the command
+preview says which rule fails and Execute stays greyed out until you fix
+it.
+</p>
+<p>
+To change the USE flags of something already installed, use <u>Change
+USE flags</u> in the package's right-click menu: it opens this dialog on
+the installed version, and rebuilds it with --oneshot.
+</p>
 <h3>Keyword to Accept</h3>
-<p>If a version is marked as "unstable", it will need to be
-keyword unmasked. The quick way to do this is to select your CPU
-architecture in the "Keyword to Accept" frame which will appear.
-However, this will also emerge unstable versions of any dependencies
-installed with the package, and as soon as you try to update the
-packages, Portage will downgrade them to the stable versions.</p>
-<p>The recommended way to emerge an unstable package is to select
-your CPU architecture as above and then click the button labelled
-"Update package.keywords". Beware! This is not thoroughly tested
-yet. So back up your package.keywords file (usually
-/etc/portage/package.keywords) first!
+<p>
+A version marked as testing ("~amd64", say) has to be accepted before it
+can be installed. &nbsp;Choose its keyword here and Porthole adds a
+package.accept_keywords line for the package (in zz-porthole), so its
+later testing versions can be installed too. &nbsp;Only that package is
+affected: its dependencies stay on stable unless they need otherwise, and
+the plan will tell you if they do.
 </p>
-<div class="tipright">
-<b>TIP:</b> Use the pretend option to test your settings
-before committing to an installation.
-</div>
 <h2>Command Preview</h2>
-<p>Shows the command that will be sent to the terminal when you choose "Execute"
+<p>
+Shows the emerge command the install will run, and under it each line
+that will be added to your Portage settings (package.use,
+package.accept_keywords, package.mask).
 </p>
 <h2>Buttons</h2>
 <ul>
-  <li>Help - brings up this window
-  </li>
-  <li>Cancel - closes window without executing an emerge
-  </li>
-  <li>Execute - builds a command string based on the above
-settings
-and submits it to the terminal window for execution.</li>
-  <li>Update package.use - commits any use flag changes to
-package.use so they're remembered for this package</li>
-  <li>Update package.keywords - commits any accept_keywords
-change to package.keywords so it's remembered for the selected version.</li>
-  <li>Update make.conf - this button is hidden by default. It
-commits any use flag changes to your make.conf file, so they're
-remembered by your system.</li>
+  <li>Help - this page.</li>
+  <li>Cancel - close the dialog; nothing is queued.</li>
+  <li>Execute - add the package, with these settings, to the install
+queue (or remove it, for unmerge).</li>
 </ul>
 <hr>
 <a name="notes">Notes:</a>

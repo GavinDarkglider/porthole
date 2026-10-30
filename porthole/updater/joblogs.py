@@ -142,13 +142,11 @@ class JobLogsWindow(Gtk.Window):
 
     def open_other(self):
         """A log saved from a terminal window (Save log)"""
-        from porthole import config
         dialog = Gtk.FileChooserDialog(title="Porthole: open a saved log", transient_for=self,
                                        action=Gtk.FileChooserAction.OPEN)
         dialog.add_buttons("_Cancel", Gtk.ResponseType.CANCEL, "_Open", Gtk.ResponseType.OK)
-        directory = getattr(config.Prefs, "LOG_FILE_DIR", None)
-        if directory and os.path.isdir(directory):
-            dialog.set_current_folder(directory)
+        # where Save Log puts them as a user (see ProcessManager.set_directory)
+        dialog.set_current_folder(os.path.expanduser("~"))
         logs = Gtk.FileFilter()
         logs.set_name("Logs")
         for pattern in ("*.log", "*.warning", "*.caution", "*.summary"):

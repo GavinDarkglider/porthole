@@ -614,7 +614,9 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: clear();")
         # check that task are completed
         if not self.task_completed:
-            self.pause()
+            # the job window has no pause (see ProcessManager.job_window)
+            if not getattr(self, "job_mode", False):
+                self.pause()
             return
         self.queue_model.clear()
         self.set_queue_moves([False, False, False, False, False, False])
