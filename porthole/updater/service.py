@@ -292,6 +292,8 @@ def main(argv=None):
                                        "install: the reviewed plan file")
     submit.add_argument("--generated", help="install --plan: its 'generated' time")
     submit.add_argument("--request", help="install: what to install (JSON)")
+    submit.add_argument("--expect", help="install --request: fingerprint of the plan "
+                                         "the user approved; install only that")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
     # after "--", so its options aren't taken for submit's own
@@ -355,7 +357,7 @@ def job_command(args, parser):
                     outcome, what = "queued", runner.submit_install_plan(
                         args.plan, args.generated)
                 elif args.request:
-                    outcome, what = runner.submit_install(args.request)
+                    outcome, what = runner.submit_install(args.request, args.expect)
                 else:
                     parser.error("submit install needs --request or --plan")
                 if outcome == "queued":

@@ -1374,6 +1374,29 @@ class Analyzer:
         return plan
 
 
+# -- approving a plan made by someone else ------------------------------------
+
+def plan_signature(plan):
+    """A fingerprint of what a plan would do: the packages it merges, the
+    config lines it adds and the commands it runs. A plan the user
+    reviewed (worked out as the user) is carried out only if the runner,
+    planning again as root, arrives at the same fingerprint. The
+    old-library rebuild is left out: it changes nothing by itself, and
+    only root can see the preserved libraries."""
+    import hashlib
+    commands = [c for st in plan.get("stages") or [] for c in st["commands"]
+                if "@preserved-rebuild" not in c]
+    temp = [line for st in plan.get("stages") or []
+            for line in (st.get("config") or {}).get("use") or []]
+    data = {
+        "fixes": sorted("%s %s" % (f["kind"], f["line"]) for f in plan.get("fixes") or []),
+        "merges": sorted(m["cpv"] for m in plan.get("merge_list") or []),
+        "commands": commands,
+        "temp_use": temp,
+    }
+    return hashlib.sha256(json.dumps(data, sort_keys=True).encode()).hexdigest()[:24]
+
+
 # -- text report -----------------------------------------------------------
 
 KIND_NAMES = {"update": "U", "new": "N", "new-slot": "NS", "rebuild": "R", "downgrade": "D"}
@@ -1620,6 +1643,8 @@ def main(argv=None):
         description="Work out a verified update plan (read-only).")
     parser.add_argument("--json", help="write the plan as JSON to this file")
     parser.add_argument("--choices", help="JSON file of standing choices (see choices.json)")
+    parser.add_argument("--request", help="plan an install request (JSON file: targets, "
+                                          "requested settings, choices)")
     parser.add_argument("--live", action="store_true",
                         help="also check live packages for new upstream commits")
     parser.add_argument("--config-root", default="/",
@@ -1632,8 +1657,18 @@ def main(argv=None):
     if args.choices:
         with open(args.choices) as f:
             choices = json.load(f)
-    plan = Analyzer(args.targets or None, args.config_root, choices=choices,
-                    live=args.live).analyze()
+    if args.request:
+        # an install, planned as the user for review
+        with open(args.request) as f:
+            request = json.load(f)
+        plan = Analyzer(request["targets"], args.config_root,
+                        choices=request.get("choices"),
+                        requested=request.get("requested") or ()).analyze()
+        plan["request"] = request
+        plan["signature"] = plan_signature(plan)
+    else:
+        plan = Analyzer(args.targets or None, args.config_root, choices=choices,
+                        live=args.live).analyze()
     if args.json:
         with open(args.json, "w") as f:
             json.dump(plan, f, indent=1)

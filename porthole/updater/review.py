@@ -355,29 +355,21 @@ class UpdateAssistant(Gtk.Window):
             self.choices_bar.set_sensitive(False)
             self.choices_label.set_text("Working out a new plan with your choices...")
             if self.install:
+                # planned as the user again: no password until Install
+                from porthole.updater.elevate import plan_as_user
                 request = dict(self.plan["request"], choices=self.pending)
-                run_as_root(service("submit", "install", "--request", json.dumps(request)),
-                            self.install_replanned)
+                plan_as_user(request, self.install_replanned)
                 return
             run_as_root(service("submit", "check", "--no-sync",
                                 "--choices", json.dumps(self.pending)), self.replanned)
 
-    def install_replanned(self, ok, output):
-        """A re-planned install is queued straight away when it needs
-        nothing approved, or shown again"""
+    def install_replanned(self, plan_file, error):
+        """The install worked out again with the changed choices"""
         self.choices_bar.set_sensitive(True)
-        if not ok:
-            self.error("Couldn't re-plan", output or "Cancelled.")
+        if not plan_file:
+            self.error("Couldn't re-plan", error)
             return
-        outcome, _sep, what = output.strip().splitlines()[-1].partition(" ")
-        if outcome == "queued":
-            if self.on_queued:
-                self.on_queued()
-            from porthole.updater.follow import show_in_terminal
-            show_in_terminal(what)
-            self.hide()
-            return
-        self.plan_file = what
+        self.plan_file = plan_file
         self.plan = None
         self.load()
 
@@ -549,8 +541,9 @@ class UpdateAssistant(Gtk.Window):
             return
         self.start_button.set_sensitive(False)
         if self.install:
-            run_as_root(service("submit", "install", "--plan", self.plan_file,
-                                "--generated", plan["generated"]),
+            # root plans it again and installs only if it is this same plan
+            run_as_root(service("submit", "install", "--request", json.dumps(plan["request"]),
+                                "--expect", plan["signature"]),
                         lambda ok, out: self.submitted(ok, out, show=True))
             return
         run_as_root(service("submit", "update", "--plan", plan["generated"]),

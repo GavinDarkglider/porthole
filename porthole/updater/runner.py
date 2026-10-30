@@ -319,25 +319,44 @@ def check_request(text):
             "review": review}
 
 
-def submit_install(text, log=None):
-    """Plan an install as root; queue it if it needs no approval.
-    Returns ("queued", job) or ("review", plan_path)."""
-    from porthole.updater.analyze import Analyzer
-    request = check_request(text)
-    plan = Analyzer(request["targets"], choices=request["choices"],
-                    requested=request["requested"],
-                    log=log or (lambda m: None)).analyze()
-    plan["request"] = request
+def store_install_plan(plan):
+    """Keep a root-made install plan (the last few) where users can read it"""
     os.makedirs(INSTALL_DIR, mode=0o755, exist_ok=True)
     name = "install-%s-%s.json" % (time.strftime("%Y%m%d-%H%M%S"), os.urandom(2).hex())
     path = os.path.join(INSTALL_DIR, name)
     write_json(path, plan)
-    # keep the last few
     for old in sorted(os.listdir(INSTALL_DIR))[:-20]:
         try:
             os.unlink(os.path.join(INSTALL_DIR, old))
         except OSError:
             pass
+    return path
+
+
+def submit_install(text, expect=None, log=None):
+    """With expect (the fingerprint of the plan the user reviewed, made as
+    the user): queue a job that plans again as root and installs only if
+    it matches. Without: plan as root now, queuing it if it needs no
+    approval. Returns ("queued", job) or ("review", plan_path)."""
+    from porthole.updater.analyze import Analyzer
+    request = check_request(text)
+    if expect:
+        if not re.match(r"^[0-9a-f]{24}$", expect):
+            raise JobError("Not a plan fingerprint: %s" % expect[:40])
+        wanted = [t for t in request["targets"] if not t.startswith("-")]
+        job = new_job("install", "Install " + ", ".join(wanted[:3])
+                      + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""),
+                      [{"kind": "plan-install", "title": "Check the plan you approved",
+                        "request": request, "expect": expect}], recheck=True)
+        with jobs_state() as state:
+            state["jobs"].append(job)
+            prune(state)
+        return "queued", job
+    plan = Analyzer(request["targets"], choices=request["choices"],
+                    requested=request["requested"],
+                    log=log or (lambda m: None)).analyze()
+    plan["request"] = request
+    path = store_install_plan(plan)
     if plan.get("status") == "ready" and not request["review"]:
         return "queued", queue_install(plan, path)
     return "review", path
@@ -505,7 +524,15 @@ class Runner:
         log = JobLog(job["log"])
         log("== %s (requested by %s)" % (job["title"], job["by"]))
         status = "done"
-        for index, step in enumerate(job["steps"]):
+        index = -1
+        while True:
+            # steps can add steps (plan-install), so read them each time
+            with jobs_state(write=False) as state:
+                steps = find_job(state, job_id)["steps"]
+            index += 1
+            if index >= len(steps):
+                break
+            step = steps[index]
             current = self.update_step(job_id, index, status="running", started=time.time())
             if current.get("cancel"):
                 status = "cancelled"
@@ -514,7 +541,7 @@ class Runner:
             if status != "done":
                 self.update_step(job_id, index, status="not run")
                 continue
-            log("\n== Step %d of %d: %s" % (index + 1, len(job["steps"]), step["title"]))
+            log("\n== Step %d: %s" % (index + 1, step["title"]))
             try:
                 ok = getattr(self, "step_" + step["kind"].replace("-", "_"))(
                     job_id, step, log)
@@ -544,6 +571,34 @@ class Runner:
                 log("!! re-check failed: %s: %s" % (type(e).__name__, e))
 
     # -- steps: each returns True on success --
+
+    def step_plan_install(self, job_id, step, log):
+        """Plan an install as root and carry it out only if it is the plan
+        the user approved (same fingerprint): then its steps are added"""
+        from porthole.updater.analyze import Analyzer, plan_signature
+        request = step["request"]
+        log("Working out the install as root, to compare with the plan you approved...")
+        plan = Analyzer(request["targets"], choices=request["choices"],
+                        requested=request["requested"], log=log).analyze()
+        plan["request"] = request
+        path = store_install_plan(plan)
+        if plan.get("status") not in ("ready", "needs-approval"):
+            log("!! It can't be installed as it stands (%s); see %s" % (plan.get("status"), path))
+            return False
+        signature = plan_signature(plan)
+        if signature != step["expect"]:
+            log("!! The plan differs from the one you approved (something changed since): "
+                "nothing was done. Process the queue again to review it. (New plan: %s)" % path)
+            return False
+        log("Same plan as approved.")
+        with jobs_state() as state:
+            job = find_job(state, job_id)
+            here = next(i for i, s in enumerate(job["steps"])
+                        if s["kind"] == "plan-install" and s.get("expect") == step["expect"])
+            job["steps"][here + 1:here + 1] = [
+                dict(s, status="queued") for s in plan_steps(plan)]
+            job["plan_file"] = path
+        return True
 
     def step_apply_config(self, job_id, step, log):
         try:

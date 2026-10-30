@@ -105,19 +105,26 @@ class ActionHandler(CategoryHandler):
         self.install_queue_window.present()
 
     def plan_install(self, package_name, targets, requested, on_queued=None):
-        """Have the runner plan the queue as root and show the plan for
-        review (always: only Install there starts it). on_queued() runs
-        once its job is queued."""
-        import json
-        from porthole.updater.elevate import run_as_root, service
+        """Work out the queue as the user (no password) and show the plan
+        for review; only Install there asks for root. on_queued() runs once
+        its job is queued."""
+        from porthole.updater.elevate import plan_as_user
         from porthole.updater.review import working
         busy = working(self.mainwindow, _("Working out what installing %s needs...")
                        % package_name)
-        request = json.dumps({"targets": list(targets), "requested": list(requested),
-                              "review": True})
-        run_as_root(service("submit", "install", "--request", request),
-                    lambda ok, out: (busy.destroy(),
-                                     self.install_planned(ok, out, on_queued)))
+        request = {"targets": list(targets), "requested": list(requested), "choices": {}}
+
+        def planned(plan_file, error):
+            busy.destroy()
+            if not plan_file:
+                SingleButtonDialog(_("Couldn't plan the install"), self.mainwindow,
+                                   error, None, _("OK"))
+                self.show_install_queue()  # still there to try again
+                return
+            from porthole.updater.review import UpdateAssistant
+            UpdateAssistant(self.mainwindow, self, plan_file=plan_file,
+                            on_queued=on_queued).present_plan()
+        plan_as_user(request, planned)
 
     def install_planned(self, ok, output, on_queued=None):
         if not ok:

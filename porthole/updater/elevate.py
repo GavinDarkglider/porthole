@@ -53,6 +53,38 @@ def run_as_root(argv, callback):
         _spawn(["pkexec"] + argv, callback)
 
 
+def plan_as_user(request, callback):
+    """Work out an install as the user (resolving needs no root):
+    callback(plan_file, error). The plan is only for review; the runner
+    plans again as root and installs only if it arrives at the same plan."""
+    import json
+    import tempfile
+    from porthole.updater.commands import LOCAL, SRC
+    cache = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+                         "porthole", "plans")
+    os.makedirs(cache, exist_ok=True)
+    for old in sorted(os.listdir(cache))[:-20]:
+        try:
+            os.unlink(os.path.join(cache, old))
+        except OSError:
+            pass
+    fd, request_file = tempfile.mkstemp(prefix="request-", suffix=".json", dir=cache)
+    with os.fdopen(fd, "w") as f:
+        json.dump(request, f)
+    out = request_file.replace("request-", "plan-")
+    env = {"PYTHONPATH": SRC} if LOCAL else {}
+
+    def done(ok, output):
+        os.unlink(request_file)
+        # the analyzer exits non-zero for plans needing help; the plan is there
+        if os.path.exists(out):
+            callback(out, None)
+        else:
+            callback(None, output or "The planner didn't produce a plan.")
+    _spawn([sys.executable, "-m", "porthole.updater.analyze", "--json", out,
+            "--request", request_file], done, env)
+
+
 def run_set_config(args, on_done=None):
     """Run porthole's config file editor (backends/set_config.py) as root,
     for edits to make.conf and /etc/portage/package.* the user can't
