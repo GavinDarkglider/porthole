@@ -243,9 +243,33 @@ def unsatisfied(depgraph):
             {
                 "atom": str(atom),
                 "parent": str(parent.cpv) if isinstance(parent, Package) else None,
+                "required_use": required_use_problem(depgraph, root, atom),
             }
         )
     return found
+
+
+def required_use_problem(depgraph, root, atom):
+    """If the newest versions matching atom are unusable because their USE
+    settings break REQUIRED_USE, say which rules fail (portage can't
+    suggest a fix for that)"""
+    from portage.dep import check_required_use
+    try:
+        portdb = depgraph._frozen_config.trees[root]["porttree"].dbapi
+        settings = portage.config(clone=depgraph._frozen_config.roots[root].settings)
+        for cpv in list(reversed(portdb.xmatch("match-all", atom)))[:3]:
+            required, eapi, iuse = portdb.aux_get(cpv, ["REQUIRED_USE", "EAPI", "IUSE"])
+            if not required:
+                continue
+            settings.setcpv(cpv, mydb=portdb)
+            valid = {flag.lstrip("+-") for flag in iuse.split()}
+            use = set(settings["PORTAGE_USE"].split()) & valid
+            result = check_required_use(required, use, valid.__contains__, eapi=eapi)
+            if not result:
+                return {"cpv": str(cpv), "failing": result.tounicode(), "use": sorted(use)}
+    except Exception:
+        return None
+    return None
 
 
 def merge_list(depgraph):

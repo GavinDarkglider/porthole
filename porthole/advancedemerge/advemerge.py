@@ -42,7 +42,8 @@ from porthole import db
 from porthole.backends.version_sort import ver_sort
 from porthole.backends.utilities import (
     # abs_list,
-    filter_flags
+    filter_flags,
+    get_reduced_flags,
 )
 from porthole.loaders.loaders import load_web_page
 from porthole.utils.dispatcher import Dispatcher
@@ -229,6 +230,31 @@ class AdvancedEmergeDialog:
             return
         # Submit the command for processing
         self.setup_command(self.package.get_name(), command)
+
+    def required_use_problem(self):
+        """The REQUIRED_USE rules the chosen version breaks with the chosen
+        USE flags, or None"""
+        from portage.dep import check_required_use
+        _iter = self.combobox.get_active_iter()
+        if _iter is None:
+            return None
+        ebuild = self.get_verInfo(self.combobox.get_model().get_value(_iter, 0))["name"]
+        try:
+            required, eapi, iuse = backends.portage_lib.settings.portdb.aux_get(
+                ebuild, ["REQUIRED_USE", "EAPI", "IUSE"])
+        except Exception:
+            return None
+        if not required:
+            return None
+        valid = {flag.lstrip("+-") for flag in iuse.split()}
+        use = set(get_reduced_flags(ebuild)) & valid
+        for flag in (self.get_use_flags() or "").split():
+            if flag.startswith("-"):
+                use.discard(flag[1:])
+            else:
+                use.add(flag.lstrip("+"))
+        result = check_required_use(required, use, valid.__contains__, eapi=eapi)
+        return None if result else result.tounicode()
 
     def get_request(self):
         """(targets, requested settings) for installing the chosen version,
@@ -595,6 +621,7 @@ class AdvancedEmergeDialog:
     def display_emerge_command(self):
         command = self.get_command()
         request = self.get_request()
+        problem = None
         if request:
             # what will actually happen: emerge, with the settings saved first
             targets, requested = request
@@ -602,6 +629,12 @@ class AdvancedEmergeDialog:
             for r in requested:
                 command += "\n+ package.%s: %s" % (
                     "accept_keywords" if r["kind"] == "keywords" else "use", r["line"])
+            problem = self.required_use_problem()
+            if problem:
+                command += ("\n\n!! These USE flags break the package's rules (REQUIRED_USE)."
+                            "\n!! Failing: " + problem)
+        # an impossible combination can't be installed; say so here
+        self.wtree.get_object("okbutton1").set_sensitive(problem is None)
         end = self.command_buffer.get_end_iter()
         start = self.command_buffer.get_start_iter()
         self.command_buffer.delete(start, end)

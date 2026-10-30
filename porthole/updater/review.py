@@ -489,8 +489,12 @@ class UpdateAssistant(Gtk.Window):
         changed = self.choices_changed()
         self.start_button.set_sensitive(can_start and not stale and not busy and not changed)
         self.recheck_button.set_sensitive(not busy)
+        if self.install:
+            # only this install's job, once it has one
+            jobs = [j for j in jobs if j.get("plan_file") == self.plan_file]
         self.progress_button.set_visible(bool(jobs))
-        self.cancel_button.set_visible(any(j["status"] in ACTIVE and j["kind"] == "update"
+        self.cancel_button.set_visible(any(j["status"] in ACTIVE
+                                           and j["kind"] in ("update", "install")
                                            for j in jobs))
         if busy:
             self.start_button.set_tooltip_text("An update or check is running")

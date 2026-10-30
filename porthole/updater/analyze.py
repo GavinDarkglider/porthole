@@ -1511,7 +1511,14 @@ def format_report(plan):
                 for p in b.get("blocked") or []) or b["atom"]
             out.append("  %s blocks %s" % (b["parent"], blocked))
         for u in rem.get("unsatisfied") or []:
-            out.append("  nothing satisfies %s (needed by %s)" % (u["atom"], u["parent"]))
+            ru = u.get("required_use")
+            if ru:
+                out.append("  %s can't be built with these USE flags: they break its "
+                           "rules (REQUIRED_USE). Failing: %s" % (ru["cpv"], ru["failing"]))
+                out.append("    flags it would get: %s" % " ".join(ru["use"]))
+            else:
+                out.append("  nothing satisfies %s (%s)" % (
+                    u["atom"], "needed by " + u["parent"] if u["parent"] else "asked for"))
         if plan.get("verify_error"):
             out.append("  resolver error: " + plan["verify_error"])
 
