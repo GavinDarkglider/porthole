@@ -73,6 +73,10 @@ def serve(minutes):
         op, args = request.get("op"), request.get("args")
         if not (isinstance(args, list) and all(isinstance(a, str) for a in args)):
             reply["error"] = "Bad request"
+        elif op == "service" and args[:2] == ["submit", "command"]:
+            # a root command line is too big a prize to hand out on an unlock:
+            # it always asks for the password itself (elevate.run_as_root fresh)
+            reply["error"] = "Custom commands always ask for the password"
         elif op == "service" and args and args[0] in SERVICE_VERBS:
             argv = script_command("porthole-update-service") + args
         elif op == "set_config":
@@ -198,6 +202,9 @@ class Session:
         # its replies no longer matter: _ended tidies up when it has gone
 
     def _start(self, argv, env, minutes, fallback):
+        # while the helper's pipe is open, nothing else running as this user
+        # may attach to Porthole or open its file descriptors through /proc
+        set_dumpable(False)
         try:
             proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, env=dict(os.environ, **env),
@@ -252,6 +259,7 @@ class Session:
             return False
         was = self.state
         self.proc, self.state, self.until = None, "locked", None
+        set_dumpable(True)
         with self.mutex:
             orphans, self.pending = self.pending, {}
         for callback, _from_thread in orphans.values():
@@ -324,6 +332,17 @@ class Session:
 
 
 SESSION = Session()
+
+
+def set_dumpable(on):
+    """prctl(PR_SET_DUMPABLE): off, /proc/PID of this process is root's and
+    other processes (even this user's) can't ptrace it or open its fds"""
+    import ctypes
+    try:
+        libc = ctypes.CDLL(None, use_errno=True)
+        return libc.prctl(4, 1 if on else 0, 0, 0, 0) == 0  # PR_SET_DUMPABLE
+    except (OSError, AttributeError):
+        return False
 
 
 def unlocked():

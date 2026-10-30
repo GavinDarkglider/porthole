@@ -181,9 +181,31 @@ class MainWindow(PluginHandler):
         self.setup_install_queue()
         self.setup_emerge_choices()
         self.setup_lock_button()
+        self.warn_unsafe_location()
         # first start: how should updates be run? (until someone answers)
         from porthole.updater.settings import ask_automation
         GLib.timeout_add_seconds(2, ask_automation, self.mainwindow)
+
+    def warn_unsafe_location(self):
+        """Running from a folder the user can change (a source checkout):
+        say so every time, it matters whenever something runs as root"""
+        from porthole.updater.commands import unsafe_location
+        where = unsafe_location()
+        if not where:
+            return
+        bar = Gtk.InfoBar(message_type=Gtk.MessageType.WARNING, show_close_button=True)
+        label = Gtk.Label(xalign=0, wrap=True)
+        label.set_markup(_(
+            "<b>Porthole is running from %s, which your user account can change.</b> "
+            "Everything it runs as root comes from there, so any program you run could "
+            "change what root runs. Fine for development; install Porthole for normal "
+            "use.") % GLib.markup_escape_text(where))
+        bar.get_content_area().add(label)
+        bar.connect("response", lambda b, r: b.destroy())
+        box = self.wtree.get_object("vbox1")
+        box.pack_start(bar, False, False, 0)
+        box.reorder_child(bar, 1)  # under the menu bar
+        bar.show_all()
 
     def setup_lock_button(self):
         """Unlock (one password for a while) / Lock, after Queue"""

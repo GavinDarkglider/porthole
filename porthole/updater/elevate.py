@@ -40,17 +40,19 @@ def service(*args):
     return script_command("porthole-update-service") + list(args)
 
 
-def run_as_root(argv, callback):
+def run_as_root(argv, callback, fresh=False):
     """Run argv as root without blocking; callback(ok, output) when done.
-    While Porthole is unlocked its root helper runs it (no password)."""
+    While Porthole is unlocked its root helper runs it (no password).
+    fresh: always ask for the password, unlocked or not, even if sudo
+    remembers one (custom commands)."""
     from porthole.updater.session import SESSION
-    if SESSION.run(argv, callback):
+    if not fresh and SESSION.run(argv, callback):
         return
     if os.geteuid() == 0:
         _spawn(argv, callback)
     elif shutil.which("sudo"):
         env = {"SUDO_ASKPASS": askpass()}
-        _spawn(["sudo", "-A", "--"] + argv, lambda ok, out: (
+        _spawn(["sudo", "-A"] + (["-k"] if fresh else []) + ["--"] + argv, lambda ok, out: (
             callback(ok, out) if ok or not any(r in out for r in _SUDO_REFUSED)
             else _spawn(["pkexec"] + argv, callback)), env)
     else:

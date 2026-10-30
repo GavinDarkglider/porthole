@@ -26,6 +26,25 @@ def script_command(name):
     return [shutil.which(name) or os.path.join("/usr/bin", name)]
 
 
+def unsafe_location():
+    """The folder Porthole runs from, if this user (or anyone but root)
+    could change it or a folder above it: whatever runs as root from
+    there could be changed by any program running as the user. None if
+    it is safe (an installed copy)."""
+    path = os.path.join(SRC, "porthole")
+    while True:
+        try:
+            st = os.stat(path)
+        except OSError:
+            return SRC
+        if st.st_uid != 0 or os.access(path, os.W_OK) or st.st_mode & 0o002:
+            return SRC
+        parent = os.path.dirname(path)
+        if parent == path:
+            return None
+        path = parent
+
+
 def icon_path():
     for base in (os.path.join(SRC, "porthole"), "/usr/share/porthole"):
         path = os.path.join(base, "pixmaps", "porthole-icon.png")

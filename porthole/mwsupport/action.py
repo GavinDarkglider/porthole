@@ -317,9 +317,10 @@ class ActionHandler(CategoryHandler):
         dialog.set_title("Porthole")
         dialog.format_secondary_markup(
             "<tt>%s</tt>\n\n%s" % (GLib.markup_escape_text(command), _(
-                "Porthole is unlocked, so this can run as root. It runs as a job "
-                "in the job window and can't ask you anything while it runs; "
-                "it is not checked the way installs are, so be sure of it.")))
+                "It runs as root, as a job in the job window, and can't ask you "
+                "anything while it runs. It is not checked the way installs are, so "
+                "be sure of it: your password is asked for again, even though Porthole "
+                "is unlocked.")))
         dialog.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
         if as_user:
             dialog.add_button(_("Run as you"), 1)
@@ -335,7 +336,7 @@ class ActionHandler(CategoryHandler):
             return False
         from porthole.updater.elevate import run_as_root, service
         run_as_root(service("submit", "command", "--", command),
-                    lambda ok, out: self.runner_submitted(package_name, ok, out))
+                    lambda ok, out: self.runner_submitted(package_name, ok, out), fresh=True)
         return True
 
     def emerge_package(self, package, oneshot=False):
