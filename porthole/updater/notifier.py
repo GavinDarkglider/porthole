@@ -233,7 +233,11 @@ class Notifier(Gtk.Application):
                   and self.seen.get("failed_seen") != job["id"])
         self.check_item.set_sensitive(not running and not active)
         self.items["Sync now"].set_sensitive(not running and not active)
-        self.items["Show progress"].set_visible(bool(jobs))
+        # only while a job runs, or to see why the last one failed: with
+        # nothing running it would replay an old log as if it were live
+        self.items["Show progress"].set_sensitive(active or failed)
+        self.items["Show progress"].set_label("Show what failed" if failed and not active
+                                              else "Show progress")
         self.items["Cancel update"].set_visible(active and job["kind"] == "update")
         # while a job runs, refresh often: the tooltip shows its progress
         # (and setting it again revives a tray tooltip that stopped showing)

@@ -53,8 +53,15 @@ def follow(job_id=None, out=None):
         out.write(b"No update jobs yet.\n")
         return 0
     job_id = job["id"]
-    out.write(("*** Following %s: %s (closing this window doesn't stop it)\n"
-               % (job_id, job["title"])).encode())
+    if job["status"] in ACTIVE:
+        out.write(("*** Following %s: %s (closing this window doesn't stop it)\n"
+                   % (job_id, job["title"])).encode())
+    else:
+        out.write(("*** %s: %s already finished (%s) at %s. This is its log; "
+                   "nothing is running.\n"
+                   % (job_id, job["title"], job["status"],
+                      time.strftime("%Y-%m-%d %H:%M", time.localtime(
+                          job.get("finished") or 0)))).encode())
     out.flush()
     # a queued job has no log yet
     while job and job["status"] == "queued" and not os.path.exists(job["log"]):

@@ -508,7 +508,13 @@ class UpdateAssistant(Gtk.Window):
         if self.install:
             # only this install's job, once it has one
             jobs = [j for j in jobs if j.get("plan_file") == self.plan_file]
-        self.progress_button.set_visible(bool(jobs))
+        # only while something runs: with nothing running it would replay
+        # the last job's log, which looks just like a build starting
+        running = any(j["status"] in ACTIVE for j in jobs)
+        self.progress_button.set_visible(bool(jobs) or not self.install)
+        self.progress_button.set_sensitive(running)
+        self.progress_button.set_tooltip_text(
+            None if running else "Nothing is running")
         self.cancel_button.set_visible(any(j["status"] in ACTIVE
                                            and j["kind"] in ("update", "install")
                                            for j in jobs))

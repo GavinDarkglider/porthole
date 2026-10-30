@@ -64,8 +64,12 @@ def text(b):
     return c.get_text() if isinstance(c, Gtk.Label) else "?"
 def shot(name):
     while Gtk.events_pending(): Gtk.main_iteration()
-    out = subprocess.run(["xwininfo", "-name", "Porthole: update assistant"], capture_output=True, text=True).stdout
-    wid = next(l.split()[3] for l in out.splitlines() if "Window id:" in l)
+    # this process's window: an installed Porthole may have one with the same title open
+    out = subprocess.run(["xwininfo", "-root", "-tree"], capture_output=True, text=True).stdout
+    wid = next(l.split()[0] for l in out.splitlines()
+               if '"Porthole: update assistant"' in l
+               and subprocess.run(["xprop", "-id", l.split()[0], "_NET_WM_PID"], capture_output=True,
+                                  text=True).stdout.split()[-1] == str(os.getpid()))
     subprocess.run(["import", "-window", wid, os.path.join(OUT, name)])
 def boxes(a):
     return {text(b): b for b in checks(a.content)}
