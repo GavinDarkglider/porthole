@@ -53,8 +53,9 @@ PROGRESS_EVERY = 2.0
 
 ACTIVE = ("queued", "running")
 EMERGING = re.compile(rb">>> Emerging (?:binary )?\((\d+) of (\d+)\) (\S+)")
-# colour codes, removed before looking for emerge's progress
-ANSI = re.compile(rb"\x1b\[[0-9;]*m")
+# terminal escapes (colours, window titles, ESC E and the like), removed
+# before looking for emerge's progress
+ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|\x1b[@-Z\\-_]")
 
 
 class JobError(Exception):

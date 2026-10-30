@@ -191,6 +191,8 @@ class TerminalQueue:
         # initialize some variables
         self.task_completed = True
         self.queue_paused = False
+        # the job window: entries follow runner jobs (see ProcessManager.job_window)
+        self.job_mode = False
         self.clear()
         # catch clicks to the queue tree
         self.queue_tree.connect("cursor-changed", self.clicked)
@@ -314,8 +316,10 @@ class TerminalQueue:
         self.queue_menu.set_sensitive(True)
 
     def restart(self, *widget):
-        """re-start the queue"""
+        """re-start the queue (in the job window: resume the stopped job)"""
         debug.dprint("TERM_QUEUE: restart()")
+        if self.job_mode:
+            return self.resume()
         self.queue_paused = False
         self.update_pause_play_state(self.queue_paused)
         debug.dprint("TERM_QUEUE: restart(); self.paused_id = " + str(self.paused_id))

@@ -139,6 +139,8 @@ class ProcessManager: #dbus.service.Object):
         self.killed_id = None
         # the window is not visible until a process is added
         self.window_visible = False
+        # following runner jobs (see job_window)
+        self.job_mode = False
         self.task_completed = True
         self.confirm = False
         self.status_text = ''
@@ -288,6 +290,8 @@ class ProcessManager: #dbus.service.Object):
         #self.wtree.get_object('timer_button_img').set_from_file(config.Prefs.DATA_PATH + "pixmaps/porthole-clock-20x20.png")
         self.timer_btn = self.wtree.get_object('timer_button')
         self.timer_btn.set_sensitive(False)
+        if self.job_mode:
+            self.apply_job_window()
         #self.wtree.get_object('timer_image').set_from_file(config.Prefs.DATA_PATH + "pixmaps/porthole-clock-20x20.png")
         self.timer_menuitem = self.wtree.get_object('timer')
         self.timer_menuitem.set_sensitive(False)
@@ -439,6 +443,26 @@ class ProcessManager: #dbus.service.Object):
         debug.dprint("TERMINAL: on_process_window_destroy(); ...destroying now")
         self.window.destroy()
         del self.window
+
+    def job_window(self):
+        """This window follows runner jobs: the queue's pause and timer
+        don't apply (a build can't be paused, the runner runs jobs in
+        turn), and play is Resume for a job that was stopped or failed.
+        Applied when the window is built (show_window)."""
+        self.job_mode = True
+        if self.window_visible:
+            self.apply_job_window()
+
+    def apply_job_window(self):
+        self.process_queue.job_mode = True
+        for name in ("pause_button", "timer_button", "pause", "timer", "resume_queue"):
+            widget = self.wtree.get_object(name)
+            if widget is not None:
+                widget.set_no_show_all(True)
+                widget.hide()
+        play = self.wtree.get_object("play_queue_button")
+        play.set_tooltip_text(_("Resume the stopped job (asks for your password)"))
+        play.set_sensitive(self.resume_menu.get_sensitive())
 
     def followed_job(self):
         """The runner job the current queue entry follows, or None"""
@@ -1072,6 +1096,8 @@ class ProcessManager: #dbus.service.Object):
             self.process_queue.set_menu_state()
         else:
             self.resume_menu.set_sensitive(False)
+        if self.process_queue.job_mode:
+            self.wtree.get_object("play_queue_button").set_sensitive(active)
 
     def estimate_build_time(self):
         """Estimates build times based on emerge --pretend output"""

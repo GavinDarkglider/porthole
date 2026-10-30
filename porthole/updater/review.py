@@ -31,6 +31,9 @@ from porthole.updater.service import (
     PLAN_FILE, STATE_DIR, USER_PLAN_FILE, latest_plan, read_json, world_request)
 from porthole.updater.viewer import read_jobs
 
+# jobs that ended part way, which the job window can resume
+STOPPED = ("failed", "cancelled")
+
 
 def _label(text, mono=False, bold=False, markup=None, selectable=False, **props):
     label = Gtk.Label(xalign=0, wrap=True, selectable=selectable, **props)
@@ -508,13 +511,15 @@ class UpdateAssistant(Gtk.Window):
         if self.install:
             # only this install's job, once it has one
             jobs = [j for j in jobs if j.get("plan_file") == self.plan_file]
-        # only while something runs: with nothing running it would replay
-        # the last job's log, which looks just like a build starting
+        # only while something runs, or for a stopped job (to resume it):
+        # otherwise it would replay an old log, which looks like a build
         running = any(j["status"] in ACTIVE for j in jobs)
+        stopped = not running and bool(jobs) and jobs[-1]["status"] in STOPPED
         self.progress_button.set_visible(bool(jobs) or not self.install)
-        self.progress_button.set_sensitive(running)
+        self.progress_button.set_sensitive(running or stopped)
+        self.progress_button.set_label("Show the stopped job" if stopped else "Show progress")
         self.progress_button.set_tooltip_text(
-            None if running else "Nothing is running")
+            "Its window has Resume" if stopped else None if running else "Nothing is running")
         self.cancel_button.set_visible(any(j["status"] in ACTIVE
                                            and j["kind"] in ("update", "install")
                                            for j in jobs))

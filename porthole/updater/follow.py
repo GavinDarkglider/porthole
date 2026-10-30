@@ -190,6 +190,7 @@ class Follower:
         from porthole.utils import utils
         if self.manager is None or not self.manager.window_visible:
             self.manager = ProcessManager(utils.environment())
+            self.manager.job_window()
             self.followed = set()
         job = find(job_id)
         new_window = not self.followed
