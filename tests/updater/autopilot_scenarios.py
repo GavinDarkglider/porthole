@@ -28,6 +28,9 @@ EXPECTED = {
     "held-stuck": ("needs-help", [], []),
     # a testing version that would free a held-back update: left for the user
     "held-newer": ("needs-approval", ["app/user-2", "app/wnew-2", "lib/w-2"], []),
+    # licences and unmasking are never accepted by itself
+    "licensed": ("up-to-date", [], ["=lib/codec-2 EULA"]),
+    "masked": ("up-to-date", [], ["=lib/dec-2"]),
 }
 # the same, testing versions not allowed (auto_testing = no, the default):
 # what needs a ~amd64 keyword is held back

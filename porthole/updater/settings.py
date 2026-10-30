@@ -123,11 +123,28 @@ class UpdaterSettingsPage(Gtk.Grid):
         self.attach(self.automation, 0, row, 2, 1)
         row += 1
 
+        heading = Gtk.Label(xalign=0, margin_top=8)
+        heading.set_markup("<b>Reminders</b> <small>(just for you, no password "
+                           "needed)</small>")
+        self.attach(heading, 0, row, 2, 1)
+        row += 1
+        from porthole.updater.notifier import reminders_enabled
+        self.reminders = Gtk.CheckButton(
+            label="Remind me when updates have been waiting a few days")
+        self.reminders.set_tooltip_text(
+            "The tray reminds you after 3 days and every 3 days after that, more "
+            "firmly the longer updates wait. Not while an update is queued or "
+            "building.")
+        self.reminders.set_active(reminders_enabled())
+        self.attach(self.reminders, 0, row, 2, 1)
+        row += 1
+
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last sync: %s.  Last check: %s.\nThe schedule runs "
                           "from cron every hour and only does anything when due. Check "
-                          "now in the update assistant never needs a sync. Changing "
-                          "the settings above asks for administrator rights.</small>"
+                          "now in the update assistant never needs a sync. Apart from "
+                          "reminders, changing these settings asks for administrator "
+                          "rights.</small>"
                           % (_ago(last_repo_sync()), _ago(state.get("last_check"))))
         self.attach(status, 0, row, 2, 1)
 
@@ -142,6 +159,8 @@ class UpdaterSettingsPage(Gtk.Grid):
 
     def save(self, callback=None):
         """Save if anything changed; callback(ok, message) when done"""
+        from porthole.updater.notifier import set_reminders
+        set_reminders(self.reminders.get_active())  # the user's own: no root
         try:
             values = self.values()
         except ValueError as e:

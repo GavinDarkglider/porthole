@@ -102,6 +102,12 @@ def _para(text, indent=""):
                          break_long_words=False)
 
 
+def _sentences(lines):
+    """The planner's explanation lines as sentences"""
+    text = " ".join(" ".join(lines or []).split())
+    return text + "." if text and text[-1] not in ".!?" else text
+
+
 def _file_for(kind):
     return "/etc/portage/%s/%s" % (CONFIG_DIRS.get(kind, "package." + kind), OWNED_NAME)
 
@@ -127,7 +133,7 @@ def _refused_text(item):
                 item.get("why") or "",
                 "Replacing installed software is your decision. Open Updates, click "
                 "Check now and approve it there if you want it.")
-    why = " ".join(item.get("explanation") or [])
+    why = _sentences(item.get("explanation"))
     if item.get("unlocks"):
         return ("Did not add '%s' to %s, so %s stays held back."
                 % (item["line"], _file_for(item["kind"]), item["unlocks"]),
@@ -206,7 +212,7 @@ def news_text(plan, refused, window_text, job_id=None):
             out.append("")
             out.append(_para("Added '%s' to %s." % (fix["line"], _file_for(fix["kind"])),
                              "* "))
-            why = " ".join(fix.get("explanation") or [])
+            why = _sentences(fix.get("explanation"))
             if why:
                 out.append(_para("Why: " + why, "  "))
             out.append(_para(

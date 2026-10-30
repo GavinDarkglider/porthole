@@ -29,9 +29,9 @@ import tempfile
 SRC = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
-def pkg(cpv, slot="0", iuse="", depend="", rdepend="", keywords="amd64"):
+def pkg(cpv, slot="0", iuse="", depend="", rdepend="", keywords="amd64", license="MIT"):
     return {"cpv": cpv, "slot": slot, "iuse": iuse, "depend": depend,
-            "rdepend": rdepend, "keywords": keywords}
+            "rdepend": rdepend, "keywords": keywords, "license": license}
 
 
 def inst(cpv, use="", **kw):
@@ -181,6 +181,27 @@ DEPCLEAN = {
 }
 
 
+LICENSED = {
+    "doc": "app/viewer-2 needs lib/codec-2, whose licence (EULA) isn't accepted",
+    "repo": [pkg("app/viewer-1", rdepend="lib/codec"),
+             pkg("app/viewer-2", rdepend=">=lib/codec-2"),
+             pkg("lib/codec-1"), pkg("lib/codec-2", license="EULA")],
+    "installed": [inst("app/viewer-1", rdepend="lib/codec"), inst("lib/codec-1")],
+    "world": ["app/viewer"],
+    "accept_license": "MIT",
+}
+
+MASKED = {
+    "doc": "app/player-2 needs lib/dec-2, which the profile masks",
+    "repo": [pkg("app/player-1", rdepend="lib/dec"),
+             pkg("app/player-2", rdepend=">=lib/dec-2"),
+             pkg("lib/dec-1"), pkg("lib/dec-2")],
+    "installed": [inst("app/player-1", rdepend="lib/dec"), inst("lib/dec-1")],
+    "world": ["app/player"],
+    "masked": ["=lib/dec-2"],
+}
+
+
 def with_choices(scenario, doc, **choices):
     return dict(scenario, doc=doc, choices=choices)
 
@@ -216,6 +237,8 @@ SCENARIOS = {
     "blocker-declined": with_choices(
         BLOCKER, "blocker, but the user wants to keep app/oldtool",
         decline=["replace:app/oldtool"]),
+    "licensed": LICENSED,
+    "masked": MASKED,
     "install-mixed": INSTALL_MIXED,
     "install-oneshot": INSTALL_ONESHOT,
     "install-all-world": INSTALL_ALL_WORLD,
@@ -264,6 +287,8 @@ EXPECTED = {
                  "replaced:app/oldtool-1"]),
     "held-newer": expect("needs-approval", ["app/user-2", "app/wnew-2", "lib/w-2"]),
     "held-stuck": expect("needs-help", held=["app/vnew-2", "lib/v-2"]),
+    "licensed": expect("needs-approval", ["app/viewer-2", "lib/codec-2"]),
+    "masked": expect("needs-approval", ["app/player-2", "lib/dec-2"]),
     "held-stuck-keep": expect("up-to-date", mine=["app/vnew", "lib/v"]),
     "held-stuck-remove": expect("needs-approval", ["app/vnew-2", "lib/v-2"],
                                 removed=["chosen:app/stuck-1"]),
@@ -336,16 +361,19 @@ def build(work, scenario):
         cat, name, ver, pf = split(p["cpv"])
         write(os.path.join(repo, cat, name, pf + ".ebuild"),
               'EAPI=8\nDESCRIPTION="scenario package"\nHOMEPAGE="https://example.org"\n'
-              'LICENSE="MIT"\nSLOT="%(slot)s"\nKEYWORDS="%(keywords)s"\n'
+              'LICENSE="%(license)s"\nSLOT="%(slot)s"\nKEYWORDS="%(keywords)s"\n'
               'IUSE="%(iuse)s"\nDEPEND="%(depend)s"\nRDEPEND="%(rdepend)s"\n'
               'S="${WORKDIR}"\n' % p)
 
     etc = os.path.join(config, "etc", "portage")
     write(os.path.join(etc, "make.conf"),
-          'ACCEPT_LICENSE="*"\nFEATURES="-news"\n'
+          'ACCEPT_LICENSE="%s"\nFEATURES="-news"\n'
           'PORTAGE_TMPDIR="%s"\nDISTDIR="%s"\nPKGDIR="%s"\n'
-          % (os.path.join(work, "tmp"), os.path.join(work, "distfiles"),
-             os.path.join(work, "packages")))
+          % (scenario.get("accept_license", "*"), os.path.join(work, "tmp"),
+             os.path.join(work, "distfiles"), os.path.join(work, "packages")))
+    if scenario.get("masked"):
+        write(os.path.join(repo, "profiles", "package.mask"),
+              "".join(a + "\n" for a in scenario["masked"]))
     write(os.path.join(etc, "repos.conf", "scenario.conf"),
           "[DEFAULT]\nmain-repo = scenario\n\n[scenario]\nlocation = %s\n"
           "auto-sync = no\n" % repo)

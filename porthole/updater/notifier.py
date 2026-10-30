@@ -46,6 +46,67 @@ SPAWN_LOG = os.path.join(
 # a check that has claimed to be running this long has died
 STALE_RUN = 3 * 3600
 PENDING = ("ready", "needs-approval", "needs-help")
+# the user's own reminder setting (Settings, Updates; no root needed)
+REMINDERS_FILE = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config"),
+    "porthole", "reminders.json")
+DAY = 24 * 3600
+# remind when updates have waited this long, then this often
+REMIND_AFTER = 3 * DAY
+REMIND_EVERY = 3 * DAY
+SNOOZE = 7 * DAY
+
+
+def reminders_enabled():
+    return bool((read_json(REMINDERS_FILE, {}) or {}).get("enabled", True))
+
+
+def set_reminders(enabled):
+    os.makedirs(os.path.dirname(REMINDERS_FILE), exist_ok=True)
+    with open(REMINDERS_FILE, "w") as f:
+        json.dump({"enabled": bool(enabled)}, f)
+
+
+def reminder(seen, now, pending, handled, size, enabled=True, window=False):
+    """Whether to remind about waiting updates now. seen holds
+    pending_since and reminded_at (changed in place). pending: a plan with
+    updates; handled: an update is queued or running; window: a build
+    window is set (so it can be suggested). Returns (title, body) or None."""
+    if not pending or handled:
+        seen.pop("pending_since", None)
+        seen.pop("reminded_at", None)
+        return None
+    since = seen.setdefault("pending_since", now)
+    waited = now - since
+    if not enabled or waited < REMIND_AFTER:
+        return None
+    if now - seen.get("reminded_at", since) < (REMIND_EVERY if "reminded_at" in seen
+                                                  else REMIND_AFTER):
+        return None
+    seen["reminded_at"] = now
+    days = int(waited // DAY)
+    title = "Updates have been waiting %d days" % days
+    if days >= 14:
+        body = ("%s. The longer updates wait, the more likely they need fixing by "
+                "hand. %s" % (size, "Review them now, or approve them to build in the "
+                              "build window." if window else "Review them now."))
+    elif days >= 7:
+        body = ("%s, and the list grows each week. %s" % (
+            size, "Review them, or approve them for the build window so they run "
+                  "while you're away." if window else
+                  "Review them when you can; you can also set a build window in "
+                  "Settings, Updates, so updates build while you're away."))
+    else:
+        body = "%s. Review them when you have a moment." % size
+    return title, body
+
+
+def waiting_text(seen, now):
+    """For the tooltip: how long updates have waited, if a while"""
+    since = seen.get("pending_since")
+    if since is None or now - since < REMIND_AFTER:
+        return ""
+    return "\nWaiting %d days." % ((now - since) // DAY)
 
 class TrayIcon:
     """Gtk.StatusIcon (XEmbed trays such as lxpanel) or an AppIndicator"""
@@ -258,9 +319,19 @@ class Notifier(Gtk.Application):
             tooltip = "Checking for updates..."
         else:
             tooltip = "%s\n%s" % (title, body) if body else title
+        handled = any(j["kind"] in ("update", "install") and j["status"] in ACTIVE
+                      for j in jobs)
+        from porthole.updater.service import load_config
+        nudge = reminder(self.seen, time.time(), pending, handled, title,
+                         reminders_enabled(), load_config()["build_window"] is not None)
+        self.save_seen()
+        if not (active or failed or running):
+            tooltip += waiting_text(self.seen, time.time())
         self.tray.set_tooltip(tooltip)
         self.tray.set_visible(pending or bool(running) or active or failed)
         self.announce_finished(jobs)
+        if nudge:
+            self.notify(*nudge, snooze=True)
 
         generated = (self.plan or {}).get("generated")
         if pending and generated and generated != self.seen.get("notified"):
@@ -305,11 +376,16 @@ class Notifier(Gtk.Application):
         except OSError:
             pass
 
-    def notify(self, title, body, progress=False):
+    def notify(self, title, body, progress=False, snooze=False):
         self.notification = Notify.Notification.new(
             title, body, icon_path() or "software-update-available")
         if "actions" in (Notify.get_server_caps() or []):
-            if progress:
+            if snooze:
+                self.notification.add_action("review", "Review and update",
+                                             lambda *a: self.review())
+                self.notification.add_action("snooze", "Remind me next week",
+                                             lambda *a: self.snooze())
+            elif progress:
                 self.notification.add_action("progress", "Show progress",
                                              lambda *a: self.show_progress())
             else:
@@ -323,6 +399,11 @@ class Notifier(Gtk.Application):
             pass
 
     # -- actions -----------------------------------------------------------
+
+    def snooze(self):
+        """The next reminder in a week instead of in three days"""
+        self.seen["reminded_at"] = time.time() + SNOOZE - REMIND_EVERY
+        self.save_seen()
 
     def on_tray_click(self):
         job = current_job()
