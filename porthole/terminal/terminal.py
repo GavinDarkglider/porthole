@@ -440,8 +440,34 @@ class ProcessManager: #dbus.service.Object):
         self.window.destroy()
         del self.window
 
+    def followed_job(self):
+        """The runner job the current queue entry follows, or None"""
+        from porthole.updater.follow import job_of
+        return job_of(self.process_queue.get_command())
+
+    def cancel_followed_job(self, job_id):
+        """Kill on a followed job stops the job itself, through the runner"""
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.YES_NO,
+                                   text=_("Stop this job?"))
+        dialog.format_secondary_text(_(
+            "The package being built is stopped; packages already installed stay "
+            "installed. Use Resume to carry on later."))
+        response = dialog.run()
+        dialog.destroy()
+        if response == Gtk.ResponseType.YES:
+            from porthole.updater.elevate import run_as_root, service
+            run_as_root(service("cancel", job_id), lambda ok, out: None)
+        return True
+
     def kill_process(self, widget = None, confirm = False):
         """ Kill currently running process """
+        # the Kill button on a followed job stops the job; closing the
+        # window (no widget) only stops following it
+        job_id = self.followed_job() if widget is not None else None
+        if job_id and self.reader.process_running:
+            return self.cancel_followed_job(job_id)
         # Prevent conflicts while changing process queue
         #self.Semaphore.acquire()
         #debug.dprint("TERMINAL: kill_process; Semaphore acquired")
@@ -996,11 +1022,19 @@ class ProcessManager: #dbus.service.Object):
         self.do_callback()
         self.callback_armed = False
         # set queue icon according to success or failure
+        # a followed job that failed or was cancelled can be resumed
+        followed = self.followed_job()
+        if followed:
+            # the queue moves on below; Resume still needs to know
+            self.process_queue.last_followed_job = followed
+        resumable = self.Failed and followed is not None
         if self.Failed:
             self.process_queue.done(FAILED)
         else:
             self.process_queue.done(COMPLETED)
         self.task_completed = True
+        if resumable:
+            self.set_resume(True)
 
     def do_callback(self):
         # try to get a callback

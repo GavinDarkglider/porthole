@@ -154,6 +154,8 @@ class TerminalQueue:
         self.set_resume = set_resume
         # packages added again while already queued, reported together
         self.duplicates = []
+        # the runner job followed last, for Resume once the queue moved on
+        self.last_followed_job = None
         self.window = wtree.get_object("process_window")
         self.queue_tree = wtree.get_object("queue_treeview")
         self.queue_menu = wtree.get_object("queue1")
@@ -812,10 +814,34 @@ class TerminalQueue:
         else:
             self.skip_queue_menu.set_sensitive(False)
 
+    def runner_resume(self, skip_first=False):
+        """Resuming a followed job: 'emerge --resume' is a new runner job
+        (root's emerge kept the resume list), followed here. Returns True
+        if the current entry was a followed job."""
+        from porthole.updater.follow import job_of
+        if job_of(self.get_command()) is None and not self.last_followed_job:
+            return False
+        from porthole.updater.elevate import run_as_root, service
+        argv = ["emerge", "--resume"] + (["--skipfirst"] if skip_first else [])
+        run_as_root(service("submit", "emerge", "--", *argv), self.runner_resumed)
+        self.set_resume(False)
+        return True
+
+    def runner_resumed(self, ok, output):
+        if not ok:
+            SingleButtonDialog(_("Couldn't resume"), None, output or _("Cancelled."),
+                               None, _("OK"))
+            return
+        from porthole.updater.follow import command
+        self.add(_("Resume"), command(output.strip().splitlines()[-1]), lambda: None,
+                 _("Job runner"))
+
     def resume( self, *widget):
+        if self.runner_resume():
+            return
         # add resume to the command only if it's queue id matches.
         # this allows Resume to restart the queue if the killed process was removed from the queue
-        if self.Process_iter:
+        if self.process_iter:
             if self.killed_id == self.queue_model.get_value(self.process_iter, self.queue_model.column['id']):
                 command = self.get_command()
                 command += " --resume"
@@ -824,6 +850,8 @@ class TerminalQueue:
 
     def resume_skip_first(self, widget):
         """ Resume killed process, skipping first package """
+        if self.runner_resume(skip_first=True):
+            return
         command = self.get_command()
         command += " --resume --skipfirst"
         self.queue_model.set_value(self.process_iter, self.queue_model.column['command'], command)

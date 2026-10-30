@@ -112,6 +112,15 @@ def display_command(command_string):
     return job["title"]
 
 
+def job_of(command_string):
+    """The id of the job a follower command follows, or None"""
+    match = _FOLLOW.search(command_string or "")
+    if not match:
+        return None
+    job = find(match.group(1))
+    return job["id"] if job else None
+
+
 def running_follower():
     """pid of the process showing jobs in a terminal window, if any"""
     try:
