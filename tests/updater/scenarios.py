@@ -146,6 +146,23 @@ HELD_STUCK = {
 }
 
 
+# installs from Porthole's queue: planned from a request, not @world
+INSTALL_PKGS = [pkg("lib/l-1"), pkg("app/a-1"), pkg("app/b-1", rdepend="lib/l")]
+
+INSTALL_MIXED = {
+    "doc": "The queue has app/a one-shot and app/b normally: one plan, emerged "
+           "one-shot first, then app/b (which goes in the world file)",
+    "repo": INSTALL_PKGS, "installed": [], "world": [],
+    "request": {"targets": ["--oneshot", "app/a", "app/b"], "world": ["app/b"]},
+}
+
+INSTALL_ONESHOT = {
+    "doc": "The queue has only one-shot installs: one emerge",
+    "repo": INSTALL_PKGS, "installed": [], "world": [],
+    "request": {"targets": ["--oneshot", "app/a", "app/b"]},
+}
+
+
 def with_choices(scenario, doc, **choices):
     return dict(scenario, doc=doc, choices=choices)
 
@@ -181,17 +198,23 @@ SCENARIOS = {
     "blocker-declined": with_choices(
         BLOCKER, "blocker, but the user wants to keep app/oldtool",
         decline=["replace:app/oldtool"]),
+    "install-mixed": INSTALL_MIXED,
+    "install-oneshot": INSTALL_ONESHOT,
     "deselected": with_choices(
         CYCLES, "cycles, with media/q unticked", exclude=["media/q"]),
 }
 
 
-def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=()):
+def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=(), steps=None):
     """What a scenario's plan should come to: its status, the versions it
     merges, the packages held back, the packages held by the user's
-    choices, what it removes (kind:cpv) and what it unmerges outright"""
-    return {"status": status, "merge": sorted(merge), "held": sorted(held),
-            "mine": sorted(mine), "removed": sorted(removed), "unmerge": sorted(unmerge)}
+    choices, what it removes (kind:cpv) and what it unmerges outright;
+    steps, if given: each stage's emerge commands, root options left out"""
+    wanted = {"status": status, "merge": sorted(merge), "held": sorted(held),
+              "mine": sorted(mine), "removed": sorted(removed), "unmerge": sorted(unmerge)}
+    if steps is not None:
+        wanted["steps"] = steps
+    return wanted
 
 
 EXPECTED = {
@@ -221,6 +244,13 @@ EXPECTED = {
     "fixes-rejected": expect("up-to-date", mine=["app/tool"]),
     "blocker-declined": expect("up-to-date", mine=["app/conflict"]),
     # media/p-2 needs media/q-2, so unticking media/q holds media/p too
+    "install-mixed": expect("ready", ["app/a-1", "app/b-1", "lib/l-1"], steps=[
+        ["emerge --keep-going --oneshot app/a"],
+        ["emerge --keep-going app/b"],
+        ["emerge --keep-going --oneshot @preserved-rebuild"]]),
+    "install-oneshot": expect("ready", ["app/a-1", "app/b-1", "lib/l-1"], steps=[
+        ["emerge --keep-going --oneshot app/a app/b"],
+        ["emerge --keep-going --oneshot @preserved-rebuild"]]),
     "deselected": expect("needs-approval", ["lib/x-2", "lib/y-2"], mine=["media/p", "media/q"]),
 }
 
@@ -232,7 +262,9 @@ def outcome(plan):
                   [h["cpv"] for h in plan["held_back"]],
                   [h["cp"] for h in plan["held_by_you"]],
                   ["%s:%s" % (r["kind"], r["cpv"]) for r in plan.get("removed") or []],
-                  [c[-1] for st in plan["stages"] for c in st["commands"] if "--unmerge" in c])
+                  [c[-1] for st in plan["stages"] for c in st["commands"] if "--unmerge" in c],
+                  [[" ".join(a for a in c if not a.startswith(("--root=", "--sysroot=")))
+                    for c in st["commands"]] for st in plan["stages"]])
 
 
 # -- building the fake system ------------------------------------------------
@@ -315,14 +347,21 @@ def run(name, keep=False, quiet=False):
         out = os.path.join(work, "plan.json")
         env = dict(os.environ, PYTHONPATH=SRC)
         choices = []
+        system = ["--root=" + root, "--sysroot=" + root]
+        if scenario.get("request"):
+            # an install from the queue, as Porthole asks for it
+            request = dict(scenario["request"], choices={}, requested=[])
+            request["targets"] = request["targets"] + system
+            write(os.path.join(work, "request.json"), json.dumps(request))
+            choices = ["--request", os.path.join(work, "request.json")]
         if scenario.get("choices"):
             write(os.path.join(work, "choices.json"), json.dumps(scenario["choices"]))
             choices = ["--choices", os.path.join(work, "choices.json")]
         proc = subprocess.run(
             [sys.executable, "-m", "porthole.updater.analyze", "--json", out] + choices
-            + ["--config-root", config, "--",
-             "--update", "--deep", "--newuse", "@world",
-               "--root=" + root, "--sysroot=" + root],
+            + ["--config-root", config]
+            + ([] if scenario.get("request") else
+               ["--", "--update", "--deep", "--newuse", "@world"] + system),
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
             timeout=1800)
         if not quiet:

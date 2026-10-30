@@ -32,20 +32,51 @@ from porthole.readers.commonreader import CommonReader
 # (that includes your own, from /etc/portage/sets)
 SET_GROUPS = [
     (_("Main"), ["world", "selected", "system", "profile", "installed"]),
-    (_("Rebuilds"), ["preserved-rebuild", "smart-live-rebuild", "live-rebuild",
+    (_("Fixes and rebuilds"), ["security", "preserved-rebuild", "smart-live-rebuild", "live-rebuild",
                      "deprecated-live-rebuild", "changed-subslot", "changed-deps",
                      "module-rebuild", "x11-module-rebuild", "golang-rebuild",
                      "rust-rebuild", "rebuilt-binaries"]),
 ]
 OTHER = _("Other")
-# only root can work these out; showing them empty would say "nothing"
-SKIPPED_SETS = {"security", "selected-packages", "selected-sets"}
+# the same as @selected, split
+SKIPPED_SETS = {"selected-packages", "selected-sets"}
+# only root can work these out: the root update check lists them
+FROM_ROOT_CHECK = {"preserved-rebuild", "security"}
+# slow to work out (@module-rebuild reads every installed file list):
+# worked out when opened in the view (see packages_of)
+LAZY_SETS = {"module-rebuild", "unavailable", "changed-subslot", "downgrade", "changed-deps"}
 # the category tree nests on "-", so names keep theirs as U+2011
 NB_HYPHEN = "\u2011"
 
 
 def category(group, name):
     return "%s-@%s" % (group, name.replace("-", NB_HYPHEN))
+
+
+def set_packages(config, name):
+    """The package names in a set (nested sets included)"""
+    if name in FROM_ROOT_CHECK:
+        # root's own plan (the user's can't see these)
+        from porthole.updater.service import PLAN_FILE, read_json
+        plan = read_json(PLAN_FILE) or {}
+        if name == "security":
+            return set(plan.get("security") or ())
+        return {m["cp"] for m in (plan.get("preserved") or {}).get("merge_list") or []}
+    try:
+        return {atom.cp for atom in config.getSetAtoms(name)}
+    except Exception as e:
+        debug.dprint("READERS: SetListReader(); @%s: %s" % (name, e))
+        return set()
+
+
+def packages_of(name, config=None):
+    """{name: Package} for a set, for the package view"""
+    if config is None:
+        import portage
+        from portage._sets import load_default_config
+        config = load_default_config(portage.settings, portage.db[portage.root])
+    return {cp: db.db.get_package(cp) or Package(cp)
+            for cp in sorted(set_packages(config, name))}
 
 
 class SetListReader(CommonReader):
@@ -61,6 +92,8 @@ class SetListReader(CommonReader):
         self.pkg_count = {}
         self.count = 0
         self.pkg_dict_total = 0
+        # {category: set name} of the sets left to work out when opened
+        self.lazy = {}
 
     def run( self ):
         """fill SETS tree"""
@@ -76,15 +109,18 @@ class SetListReader(CommonReader):
             for name in members:
                 if self.cancelled: self.done = True; return
                 key = category(group, name)
-                self.pkg_dict[key] = {}
-                self.pkg_count[key] = 0
-                for cp in sorted(self.set_packages(config, name)):
-                    self.count += 1
-                    package = db.db.get_package(cp) or Package(cp)
-                    self.pkg_dict[key][cp] = package
-                    self.pkg_count[key] += 1
+                if name in LAZY_SETS:
+                    self.lazy[key] = name
+                    self.pkg_dict[key] = {}
+                    self.pkg_count[key] = None  # not known yet
+                    continue
+                self.pkg_dict[key] = packages_of(name, config)
+                self.pkg_count[key] = len(self.pkg_dict[key])
+                self.count += self.pkg_count[key]
         self.pkg_dict_total = 0
         for key in self.pkg_count:
+            if key in self.lazy:
+                continue
             self.pkg_dict_total += self.pkg_count[key]
             if self.pkg_dict[key] == {}:
                 pkg = Package(_("None"))
@@ -92,16 +128,3 @@ class SetListReader(CommonReader):
         # set the thread as finished
         self.done = True
         return
-
-    def set_packages(self, config, name):
-        """The package names in a set (nested sets included)"""
-        if name == "preserved-rebuild":
-            # the registry is root's; the update check (as root) lists them
-            from porthole.updater.service import latest_plan
-            plan, _path = latest_plan()
-            return {m["cp"] for m in ((plan or {}).get("preserved") or {}).get("merge_list") or []}
-        try:
-            return {atom.cp for atom in config.getSetAtoms(name)}
-        except Exception as e:
-            debug.dprint("READERS: SetListReader(); @%s: %s" % (name, e))
-            return set()

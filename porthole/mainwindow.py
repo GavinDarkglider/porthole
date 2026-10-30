@@ -858,6 +858,8 @@ class MainWindow(PluginHandler):
             self.pkg_count[reader_type] = self.reader.pkg_count
             if reader_type == "Upgradable":
                 self.package_view.plan_versions = self.reader.plan_versions
+            elif reader_type == "Sets":
+                self.lazy_sets = dict(self.reader.lazy)
             debug.dprint("MAINWINDOW: _reader_done(): " +
                 "pkg_count = " + str(self.pkg_count))
             self.loaded[reader_type] = True

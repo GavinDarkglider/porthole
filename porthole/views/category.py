@@ -158,7 +158,10 @@ class CategoryView(CommonTreeView):
                         self.model.set_value( parent_iter[i+1], C_ITEM["full_name"], full_name )
                         if counts != None: # and counts[cat] != 0:
                             #debug.dprint("VIEWS: Counts: %s = %s" %(cat, str(counts[cat])))
-                            self.model.set_value( parent_iter[i+1], C_ITEM["count"], str(counts[cat]) )
+                            # None: not worked out yet (a set that is slow to)
+                            count = counts[cat]
+                            self.model.set_value( parent_iter[i+1], C_ITEM["count"],
+                                                  "?" if count is None else str(count) )
                             path = self.model.get_path( parent_iter[i+1])
                             p = i
                             while p > 0:
@@ -167,9 +170,25 @@ class CategoryView(CommonTreeView):
                                 _iter = self.model.get_iter( path)
                                 prev_count = self.model.get_value( _iter, C_ITEM["count"] )
                                 #debug.dprint(" VIEWS: CategoryView.populate(): 181 p = "+str(p)+" prev_count = "+str(prev_count)+" new count = " + str(counts[cat]) +" new parent total = " +str(counts[cat]+int(prev_count)))
-                                self.model.set_value( _iter, C_ITEM["count"], str(counts[cat]+ int(prev_count)) )
+                                self.model.set_value( _iter, C_ITEM["count"], str((count or 0) + int(prev_count)) )
                                 p -= 1
 
+
+    def set_count(self, full_name, count):
+        """Change a category's count (and its parents' totals)"""
+        def visit(model, path, _iter):
+            if model.get_value(_iter, C_ITEM["full_name"]) != full_name:
+                return False
+            old = model.get_value(_iter, C_ITEM["count"])
+            change = count - (int(old) if old and old.isdigit() else 0)
+            model.set_value(_iter, C_ITEM["count"], str(count))
+            parent = model.iter_parent(_iter)
+            while parent is not None:
+                total = model.get_value(parent, C_ITEM["count"]) or "0"
+                model.set_value(parent, C_ITEM["count"], str(int(total) + change))
+                parent = model.iter_parent(parent)
+            return True
+        self.model.foreach(visit)
 
     def populate_search( self, categories, counts ):
         debug.dprint("VIEWS: populating category view with search history")

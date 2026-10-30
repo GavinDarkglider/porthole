@@ -23,6 +23,7 @@
     Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
 '''
 
+from gettext import gettext as _
 
 from porthole import db
 from porthole.utils import debug
@@ -48,6 +49,8 @@ class CategoryHandler(PackageHandler):
         '''
         PackageHandler.__init__(self)
         self.category_view = None
+        # Sets view categories still to work out (see work_out_set)
+        self.lazy_sets = {}
         self.current_cat_name = None
         self.current_cat_cursor = None
         self.current_pkg_cursor = []
@@ -145,7 +148,31 @@ class CategoryHandler(PackageHandler):
             self._mode_readers_(category, mode)
 
     def _mode_sets_(self, category, mode):
+        name = self.lazy_sets.pop(category, None)
+        if name:
+            self.work_out_set(category, name)
         self._mode_readers_(category, mode)
+
+    def work_out_set(self, category, name):
+        """Work out a set that is slow to (see readers/sets.py LAZY_SETS)
+        in the background, then show it"""
+        import threading
+        from gi.repository import GLib
+        from porthole.readers.sets import packages_of
+        from porthole.db.package import Package
+        self.status.set_statusbar2(_("Working out @%s...") % name)
+
+        def done(packages):
+            self.pkg_count["Sets"][category] = len(packages)
+            self.pkg_list["Sets"][category] = packages or {_("None"): Package(_("None"))}
+            self.category_view.set_count(category, len(packages))
+            if (self.widget["view_filter"].get_active() == SHOW_SETS
+                    and self.current_cat_name["Sets"] == category):
+                self._mode_readers_(category, SHOW_SETS)
+            self.status.set_statusbar2(_("@%s: %d packages") % (name, len(packages)))
+            return False
+        threading.Thread(target=lambda: GLib.idle_add(done, packages_of(name)),
+                         daemon=True).start()
 
     def _mode_binpkgs_(self, category, mode):
         packages = db.db.binpkgs[category]

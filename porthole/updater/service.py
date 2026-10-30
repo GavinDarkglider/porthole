@@ -209,6 +209,20 @@ def last_repo_sync():
     return max(times) if times else None
 
 
+def security_packages(log):
+    """Installed packages affected by a GLSA not yet applied (@security),
+    which only root can work out; for Porthole's Sets view. None if it
+    couldn't be worked out."""
+    try:
+        import portage
+        from portage._sets import load_default_config
+        config = load_default_config(portage.settings, portage.db[portage.root])
+        return sorted({atom.cp for atom in config.getSetAtoms("security")})
+    except Exception as e:
+        log("Couldn't work out @security: %s" % e)
+        return None
+
+
 def check_lock(wait=True):
     """Hold this while checking, so two checks never overlap. Returns
     the open lock file, or None if not waiting and it is taken."""
@@ -301,6 +315,7 @@ class Service:
                             live=self.config["live_rebuild"],
                             live_exclude=self.config["live_exclude"]).analyze()
             plan["sync"] = sync_info
+            plan["security"] = security_packages(self.log)
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds, "
                      "%d live rebuilds"
