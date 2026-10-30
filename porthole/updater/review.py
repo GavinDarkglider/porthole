@@ -28,8 +28,11 @@ from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
 from porthole.updater.service import (
-    PLAN_FILE, STATE_DIR, USER_PLAN_FILE, latest_plan, read_json, world_request)
+    PLAN_FILE, STATE_DIR, USER_PLAN_FILE, latest_plan, load_config, read_json, world_request)
 from porthole.updater.viewer import read_jobs
+
+# the start dialog's "build in the build window" answer
+LATER = 2
 
 
 def _label(text, mono=False, bold=False, markup=None, selectable=False, **props):
@@ -630,37 +633,60 @@ class UpdateAssistant(Gtk.Window):
                                    buttons=Gtk.ButtonsType.NONE, text="Start the %s?" % what)
         dialog.set_title("Porthole")
         dialog.format_secondary_text("\n\n".join(details))
-        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
-                           "Start " + what, Gtk.ResponseType.OK)
+        dialog.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        # approve now, build when nobody is working (see window.py)
+        build_window = load_config()["build_window"]
+        if build_window:
+            from porthole.updater.window import format_window
+            dialog.add_button("Build %s" % format_window(build_window), LATER)
+        dialog.add_button("Start %s now" % what if build_window else "Start " + what,
+                          Gtk.ResponseType.OK)
         response = dialog.run()
         dialog.destroy()
-        if response != Gtk.ResponseType.OK:
+        if response not in (Gtk.ResponseType.OK, LATER):
             return
+        later = ["--later"] if response == LATER else []
+        done = lambda ok, out: self.submitted(ok, out, show=True, later=bool(later))
         self.start_button.set_sensitive(False)
         if self.install:
             # root plans it again and installs only if it is this same plan
             run_as_root(service("submit", "install", "--request", json.dumps(plan["request"]),
-                                "--expect", plan["signature"]),
-                        lambda ok, out: self.submitted(ok, out, show=True))
+                                "--expect", plan["signature"], *later), done)
             return
         if plan.get("signature"):
             # the user's own plan: root plans again and starts only if it is
             # this same plan, then keeps these choices for later checks
             request = dict(plan["request"], save_choices=True)
             run_as_root(service("submit", "install", "--request", json.dumps(request),
-                                "--expect", plan["signature"]),
-                        lambda ok, out: self.submitted(ok, out, show=True))
+                                "--expect", plan["signature"], *later), done)
             return
-        run_as_root(service("submit", "update", "--plan", plan["generated"]),
-                    lambda ok, out: self.submitted(ok, out, show=True))
+        run_as_root(service("submit", "update", "--plan", plan["generated"], *later), done)
 
-    def submitted(self, ok, output, show=False):
+    def submitted(self, ok, output, show=False, later=False):
         if not ok:
             self.error("Couldn't start", output or "Cancelled.")
             self.load()
             return
         if show and self.install and self.on_queued:
             self.on_queued()
+        if later:
+            from porthole.updater.window import format_window
+            window = load_config()["build_window"]
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                       message_type=Gtk.MessageType.INFO,
+                                       buttons=Gtk.ButtonsType.OK,
+                                       text="It will be built %s" % format_window(window))
+            dialog.set_title("Porthole")
+            dialog.format_secondary_text(
+                "It starts once the build window is open and nobody has used the "
+                "computer for a while%s. If you come back while it builds, it pauses "
+                "until you leave again. The tray shows it waiting; you can cancel it "
+                "there or here." % (" (and on mains power)"
+                                    if load_config()["window_needs_ac"] else ""))
+            dialog.run()
+            dialog.destroy()
+            self.hide()
+            return
         if show:
             # an update or install started: the job window takes over
             # ("JOB" from submit update, "queued JOB" from submit install)

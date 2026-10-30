@@ -39,6 +39,11 @@ def describe(job):
     if not job:
         return ""
     progress = job.get("progress") or {}
+    if job["status"] == "running" and job.get("paused"):
+        return "%s: paused while you use the computer" % job["title"]
+    if job["status"] == "queued" and job.get("when") == "window":
+        return "%s: waits for the build window%s" % (
+            job["title"], " (%s)" % job["waiting"] if job.get("waiting") else "")
     if job["status"] == "running" and job.get("rechecking"):
         return "%s: checking what is left" % job["title"]
     if job["status"] == "running" and progress:

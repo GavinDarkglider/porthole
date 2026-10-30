@@ -18,6 +18,7 @@
         submit install --request J  plan an install; queue it unless it needs review
         submit install --plan F --generated T   queue a reviewed install plan
         submit command -- LINE      queue a custom command (Porthole, unlocked)
+        submit update|install ... --later   wait for the build window
         cancel [JOB]                cancel queued jobs, stop the running one
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
@@ -42,6 +43,17 @@
         # list packages nothing needs any more (emerge --depclean), so the
         # update assistant can offer to remove them after the update
         offer_depclean = yes
+        # when approved updates may be built (HH:MM-HH:MM, may wrap past
+        # midnight; empty: none, updates start when you say)
+        build_window =
+        # only start in the window on mains power
+        window_needs_ac = yes
+        # only start once nobody has used the computer this long (0: don't wait)
+        idle_minutes = 15
+        # pause a window build while someone uses the computer
+        pause_when_active = yes
+        # build at the lowest CPU and disk priority
+        low_priority = yes
 
     Copyright (C) 2026 Porthole developers
 
@@ -113,6 +125,11 @@ DEFAULTS = {
     "live_rebuild": "yes",
     "live_exclude": "",
     "offer_depclean": "yes",
+    "build_window": "",
+    "window_needs_ac": "yes",
+    "idle_minutes": "15",
+    "pause_when_active": "yes",
+    "low_priority": "yes",
 }
 
 
@@ -133,7 +150,37 @@ def load_config(path=CONFIG_FILE):
         "live_rebuild": section.getboolean("live_rebuild", True),
         "live_exclude": section.get("live_exclude", "").split(),
         "offer_depclean": section.getboolean("offer_depclean", True),
+        "build_window": _window(section.get("build_window", "")),
+        "window_needs_ac": section.getboolean("window_needs_ac", True),
+        "idle_minutes": _minutes(section.get("idle_minutes")),
+        "pause_when_active": section.getboolean("pause_when_active", True),
+        "low_priority": section.getboolean("low_priority", True),
     }
+
+
+def setting_text(key, value):
+    """A loaded setting as updater.conf writes it"""
+    if key == "build_window":
+        from porthole.updater.window import format_window
+        return format_window(value) if value else ""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    return " ".join(value) if isinstance(value, list) else str(value)
+
+
+def _window(text):
+    from porthole.updater.window import parse_window
+    try:
+        return parse_window(text)
+    except ValueError:
+        return None
+
+
+def _minutes(text):
+    try:
+        return min(240, max(0, int(text)))
+    except (TypeError, ValueError):
+        return int(DEFAULTS["idle_minutes"])
 
 
 def read_json(path, default=None):
@@ -259,6 +306,24 @@ def plan_command(text):
     return 0
 
 
+def runner_waiting():
+    """The runner is only waiting for the build window to suit (on
+    battery, or someone at the computer), not running anything"""
+    from porthole.updater.runner import JOBS_FILE
+    return bool((read_json(JOBS_FILE, {}) or {}).get("runner_waiting"))
+
+
+def start_waiting_jobs():
+    """From cron: start a runner for jobs waiting for the build window
+    once it has opened (the runner decides whether they can go)"""
+    from porthole.updater import runner
+    from porthole.updater.window import in_window
+    jobs = (read_json(runner.JOBS_FILE, {}) or {}).get("jobs", [])
+    if (any(j["status"] == "queued" and j.get("when") == "window" for j in jobs)
+            and in_window(load_config()["build_window"]) and not runner.runner_active()):
+        runner.start_runner()
+
+
 def check_lock(wait=True):
     """Hold this while checking, so two checks never overlap. Returns
     the open lock file, or None if not waiting and it is taken."""
@@ -323,7 +388,7 @@ class Service:
     def run(self, force=False, sync=True, from_runner=False):
         if not from_runner:
             from porthole.updater.runner import runner_active
-            if runner_active():
+            if runner_active() and not runner_waiting():
                 self.log("Update jobs are running; checking later")
                 return 0
         if not force:
@@ -386,6 +451,8 @@ def main(argv=None):
     submit.add_argument("--sync-now", action="store_true",
                         help="check: sync even if synced within the last day")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
+    submit.add_argument("--later", action="store_true",
+                        help="update, install: start in the build window, not now")
     # after "--", so its options aren't taken for submit's own
     submit.add_argument("cmdline", nargs="*", metavar="CMD",
                         help="emerge, command: the command line, after --")
@@ -420,7 +487,7 @@ def main(argv=None):
         return 0
     if args.command == "config" and not args.settings:
         for key, value in load_config().items():
-            print("%s = %s" % (key, " ".join(value) if isinstance(value, list) else value))
+            print("%s = %s" % (key, setting_text(key, value)))
         return 0
 
     if args.command == "status":
@@ -448,6 +515,7 @@ def main(argv=None):
         return 0
     if args.command != "run":
         return job_command(args, parser)
+    start_waiting_jobs()
     lock = check_lock(wait=False)
     if lock is None:
         print("Another check is already running.", file=sys.stderr)
@@ -476,9 +544,10 @@ def job_command(args, parser):
                 # prints "queued JOB" or "review PLAN_FILE"
                 if args.plan:
                     outcome, what = "queued", runner.submit_install_plan(
-                        args.plan, args.generated)
+                        args.plan, args.generated, later=args.later)
                 elif args.request:
-                    outcome, what = runner.submit_install(args.request, args.expect)
+                    outcome, what = runner.submit_install(args.request, args.expect,
+                                                          later=args.later)
                 else:
                     parser.error("submit install needs --request or --plan")
                 if outcome == "queued":
@@ -494,7 +563,7 @@ def job_command(args, parser):
             elif args.kind == "update":
                 if not args.plan:
                     parser.error("submit update needs --plan")
-                job = runner.submit_update(args.plan)
+                job = runner.submit_update(args.plan, later=args.later)
             else:
                 if args.choices is not None:
                     runner.set_choices(args.choices)
@@ -512,7 +581,7 @@ def job_command(args, parser):
                     parser.error("settings are KEY=VALUE")
                 changes[key.strip()] = value.strip()
             for key, value in runner.set_config(changes).items():
-                print("%s = %s" % (key, " ".join(value) if isinstance(value, list) else value))
+                print("%s = %s" % (key, setting_text(key, value)))
     except runner.JobError as e:
         print(e, file=sys.stderr)
         return 3

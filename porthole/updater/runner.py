@@ -222,8 +222,18 @@ def prune(state):
 
 # -- submitting ------------------------------------------------------------
 
-def submit_update(generated):
-    """Queue the reviewed plan; `generated` names the plan the user saw"""
+def later_extra(later):
+    """Job fields for one that waits for the build window (later)"""
+    if not later:
+        return {}
+    if load_config()["build_window"] is None:
+        raise JobError("No build window is set (Settings, Updates).")
+    return {"when": "window"}
+
+
+def submit_update(generated, later=False):
+    """Queue the reviewed plan; `generated` names the plan the user saw.
+    later: wait for the build window"""
     plan = read_json(PLAN_FILE)
     if not plan:
         raise JobError("There is no update plan. Check for updates first.")
@@ -251,7 +261,8 @@ def submit_update(generated):
         parts.append("remove %d unneeded" % removing)
     title = " and ".join(parts)
     title = title[:1].upper() + title[1:]
-    job = new_job("update", title, steps, recheck=True, plan=generated)
+    job = new_job("update", title, steps, recheck=True, plan=generated,
+                  **later_extra(later))
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
             raise JobError("An update is already queued or running.")
@@ -360,7 +371,7 @@ def store_install_plan(plan):
     return path
 
 
-def submit_install(text, expect=None, log=None):
+def submit_install(text, expect=None, log=None, later=False):
     """With expect (the fingerprint of the plan the user reviewed, made as
     the user): queue a job that plans again as root and installs only if
     it matches. Without: plan as root now, queuing it if it needs no
@@ -377,7 +388,8 @@ def submit_install(text, expect=None, log=None):
             + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""))
         job = new_job("update" if world else "install", title,
                       [{"kind": "plan-install", "title": "Check the plan you approved",
-                        "request": request, "expect": expect}], recheck=True)
+                        "request": request, "expect": expect}], recheck=True,
+                      **later_extra(later))
         with jobs_state() as state:
             if world and any(j["kind"] == "update" for j in active_jobs(state)):
                 raise JobError("An update is already queued or running.")
@@ -394,7 +406,7 @@ def submit_install(text, expect=None, log=None):
     return "review", path
 
 
-def submit_install_plan(path, generated):
+def submit_install_plan(path, generated, later=False):
     """Queue an install plan the user reviewed"""
     path = os.path.realpath(path)
     if os.path.dirname(path) != os.path.realpath(INSTALL_DIR):
@@ -407,14 +419,15 @@ def submit_install_plan(path, generated):
     stale = stale_reason(plan)
     if stale:
         raise JobError(stale + " Work out the install again.")
-    return queue_install(plan, path)
+    return queue_install(plan, path, later)
 
 
-def queue_install(plan, path):
+def queue_install(plan, path, later=False):
     wanted = [t for t in plan["request"]["targets"] if not t.startswith("-")]
     job = new_job("install", "Install " + ", ".join(wanted[:3])
                   + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""),
-                  plan_steps(plan), recheck=True, plan=plan["generated"], plan_file=path)
+                  plan_steps(plan), recheck=True, plan=plan["generated"], plan_file=path,
+                  **later_extra(later))
     with jobs_state() as state:
         state["jobs"].append(job)
         prune(state)
@@ -457,6 +470,7 @@ def cancel(job_id=None, keep_rest=True):
                 if pid:
                     try:
                         os.killpg(pid, signal.SIGTERM)
+                        os.killpg(pid, signal.SIGCONT)  # if paused
                     except OSError:
                         pass
             stopped.append(job["id"])
@@ -531,6 +545,7 @@ class JobLog(Log):
 class Runner:
     def __init__(self):
         self.lock = None
+        self.window_job = False
 
     def run(self):
         os.makedirs(os.path.dirname(RUNNER_LOCK), exist_ok=True)
@@ -540,19 +555,40 @@ class Runner:
         except BlockingIOError:
             return 0  # the running one will get to the queue
         os.makedirs(JOB_LOG_DIR, mode=0o755, exist_ok=True)
+        from porthole.updater.window import can_start, in_window
         while True:
+            config = load_config()
+            allowed, why = can_start(config)
             with jobs_state() as state:
                 queued = [j for j in state["jobs"] if j["status"] == "queued"]
-                if not queued:
+                # what the user started runs now; the rest waits for the window
+                ready = [j for j in queued if j.get("when") != "window" or allowed]
+                waiting = [j for j in queued if j not in ready]
+                for j in waiting:
+                    j["waiting"] = why
+                if not ready and not (waiting and in_window(config["build_window"])):
                     # let go while the list is still locked, so a job
-                    # submitted now finds the lock free for its own runner
+                    # submitted now finds the lock free for its own runner.
+                    # Outside the window cron starts a runner again.
                     state.pop("runner_pid", None)
+                    state.pop("runner_waiting", None)
                     self.lock.close()
                     return 0
-                job = queued[0]
-                job["status"] = "running"
-                job["started"] = time.time()
                 state["runner_pid"] = os.getpid()
+                if not ready:
+                    # in the window, but on battery or someone is working
+                    state["runner_waiting"] = why
+                    job = None
+                else:
+                    state.pop("runner_waiting", None)
+                    job = ready[0]
+                    job.pop("waiting", None)
+                    job["status"] = "running"
+                    job["started"] = time.time()
+            if job is None:
+                time.sleep(60)
+                continue
+            self.window_job = job.get("when") == "window"
             self.run_job(job["id"])
 
     def update(self, job_id, **changes):
@@ -698,7 +734,12 @@ class Runner:
         pseudo-terminal, so emerge behaves as in a terminal: colours, and
         the window titles Porthole's terminal shows"""
         import pty
+        import select
+        from porthole.updater.window import ACTIVE, idle_for, low_priority_env
+        config = load_config()
         env = dict(os.environ, TERM="xterm", **(extra_env or {}))
+        if config["low_priority"] or self.window_job:
+            env.update(low_priority_env())
         env.pop("NOCOLOR", None)
         master, slave = pty.openpty()
         try:
@@ -714,7 +755,27 @@ class Runner:
         if self.update(job_id, pid=proc.pid).get("cancel"):
             os.killpg(proc.pid, signal.SIGTERM)
         partial, latest, last = b"", None, 0.0
+        pausing = self.window_job and config["pause_when_active"]
+        paused, checked = False, 0.0
         while True:
+            if pausing and time.monotonic() - checked >= 15:
+                checked = time.monotonic()
+                idle = idle_for()
+                resume_after = max(config["idle_minutes"] * 60, 5 * 60)
+                if not paused and idle is not None and idle < ACTIVE:
+                    os.killpg(proc.pid, signal.SIGSTOP)
+                    paused = True
+                    self.update(job_id, paused=time.time())
+                    log("\n== Paused: someone is using the computer. It carries on "
+                        "once they have been away %d minutes." % (resume_after // 60))
+                elif paused and (idle is None or idle >= resume_after):
+                    os.killpg(proc.pid, signal.SIGCONT)
+                    paused = False
+                    self.update(job_id, paused=None)
+                    log("== Carrying on.\n")
+            if pausing and not select.select([master], [], [], 5)[0]:
+                if proc.poll() is None:
+                    continue
             data = proc.stdout.read1(65536)
             if not data:
                 break
@@ -730,6 +791,8 @@ class Runner:
                     "total": int(latest.group(2)),
                     "current": latest.group(3).decode(errors="replace")})
                 latest = None
+        if paused:
+            self.update(job_id, paused=None)
         code = proc.wait()
         log("(exit status %d)" % code)
         return code == 0
@@ -903,6 +966,21 @@ def set_config(changes, path=CONFIG_FILE):
             if not 1 <= days <= 90:
                 raise JobError("interval_days must be between 1 and 90")
             clean[key] = str(days)
+        elif key == "build_window":
+            from porthole.updater.window import format_window, parse_window
+            try:
+                window = parse_window(value)
+            except ValueError as e:
+                raise JobError(str(e))
+            clean[key] = format_window(window) if window else ""
+        elif key == "idle_minutes":
+            try:
+                minutes = int(value)
+            except ValueError:
+                raise JobError("idle_minutes must be a number")
+            if not 0 <= minutes <= 240:
+                raise JobError("idle_minutes must be between 0 and 240")
+            clean[key] = str(minutes)
         elif key == "live_exclude":
             from portage.dep import Atom
             names = value.split()

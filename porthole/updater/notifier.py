@@ -199,6 +199,11 @@ class Notifier(Gtk.Application):
             self.monitor = None
         # and poll now and then in case the directory didn't exist yet
         GLib.timeout_add_seconds(600, self.reload)
+        # how long this session has been idle, for builds in the build window
+        # (the runner is root and can't ask X itself; see window.py)
+        from porthole.updater.window import WRITE_EVERY, write_activity
+        if write_activity():
+            GLib.timeout_add_seconds(WRITE_EVERY, lambda: write_activity() or True)
         self.reload()
 
     def do_activate(self):

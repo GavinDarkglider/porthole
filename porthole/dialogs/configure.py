@@ -80,7 +80,9 @@ class ConfigDialog:
         from porthole.updater.settings import UpdaterSettingsPage
         self.updates_page = UpdaterSettingsPage()
         notebook = self.builder.get_object("primary_nb")
-        index = notebook.append_page(self.updates_page, Gtk.Label(label=_("Updates")))
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(self.updates_page)
+        index = notebook.append_page(scroller, Gtk.Label(label=_("Updates")))
 
         self.window.show_all()
         if page == "updates":
