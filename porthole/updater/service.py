@@ -15,6 +15,8 @@
         submit update --plan TIME   queue the reviewed plan
         submit check                queue a sync and check
         submit emerge -- CMD...     queue an emerge from Porthole (checked)
+        submit install --request J  plan an install; queue it unless it needs review
+        submit install --plan F --generated T   queue a reviewed install plan
         cancel [JOB]                cancel queued jobs, stop the running one
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
@@ -285,8 +287,11 @@ def main(argv=None):
     run.add_argument("--quiet", action="store_true", help="only write the log file")
     sub.add_parser("status", help="show the last plan")
     submit = sub.add_parser("submit", help="queue a job for the runner")
-    submit.add_argument("kind", choices=("update", "check", "emerge"))
-    submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed")
+    submit.add_argument("kind", choices=("update", "check", "emerge", "install"))
+    submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed; "
+                                       "install: the reviewed plan file")
+    submit.add_argument("--generated", help="install --plan: its 'generated' time")
+    submit.add_argument("--request", help="install: what to install (JSON)")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
     # after "--", so its options aren't taken for submit's own
@@ -344,6 +349,21 @@ def job_command(args, parser):
         return runner.Runner().run()
     try:
         if args.command == "submit":
+            if args.kind == "install":
+                # prints "queued JOB" or "review PLAN_FILE"
+                if args.plan:
+                    outcome, what = "queued", runner.submit_install_plan(
+                        args.plan, args.generated)
+                elif args.request:
+                    outcome, what = runner.submit_install(args.request)
+                else:
+                    parser.error("submit install needs --request or --plan")
+                if outcome == "queued":
+                    runner.start_runner()
+                    print("queued", what["id"])
+                else:
+                    print("review", what)
+                return 0
             if args.kind == "emerge":
                 tokens = args.cmdline[1:] if args.cmdline[:1] == ["--"] else args.cmdline
                 job = runner.submit_emerge(tokens)

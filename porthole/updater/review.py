@@ -54,9 +54,27 @@ def _section(title):
     return box, inner
 
 
+def working(parent, text):
+    """A small window saying something is being worked out; destroy() it"""
+    window = Gtk.Window(title="Porthole", transient_for=parent, modal=False,
+                        resizable=False, border_width=16)
+    box = Gtk.Box(spacing=12)
+    spinner = Gtk.Spinner(active=True)
+    box.pack_start(spinner, False, False, 0)
+    box.pack_start(Gtk.Label(label=text), False, False, 0)
+    window.add(box)
+    window.show_all()
+    return window
+
+
 class UpdateAssistant(Gtk.Window):
-    def __init__(self, parent, mainwindow):
-        super().__init__(title="Porthole: update assistant")
+    def __init__(self, parent, mainwindow, plan_file=None):
+        """The world update plan; with plan_file, a plan for installing
+        packages from Porthole (worked out by the runner)"""
+        self.plan_file = plan_file or PLAN_FILE
+        self.install = plan_file is not None
+        super().__init__(title="Porthole: install" if self.install
+                         else "Porthole: update assistant")
         # a window of its own, not transient for Porthole's: window managers
         # keep transients above their parent and won't minimize them alone
         if icon_path():
@@ -103,7 +121,8 @@ class UpdateAssistant(Gtk.Window):
         settings.connect("clicked", lambda b: self.mainwindow.configure_porthole(page="updates"))
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.hide())
-        self.start_button = Gtk.Button(label="Apply and start update")
+        self.start_button = Gtk.Button(label="Install" if self.install
+                                       else "Apply and start update")
         self.start_button.get_style_context().add_class("suggested-action")
         self.start_button.connect("clicked", self.on_start)
         buttons.pack_start(self.news_button, False, False, 0)
@@ -115,6 +134,11 @@ class UpdateAssistant(Gtk.Window):
         buttons.pack_end(close, False, False, 0)
         outer.pack_start(buttons, False, False, 0)
         self.add(outer)
+        if self.install:
+            # an install plan: checks, news and settings belong to updates
+            for widget in (self.news_button, self.recheck_button, settings):
+                widget.set_no_show_all(True)
+                widget.hide()
 
         # the service replaces its files with a rename, so watch the directory
         self.monitor = None
@@ -130,7 +154,7 @@ class UpdateAssistant(Gtk.Window):
 
     def load(self, *args):
         previous = (self.plan or {}).get("generated")
-        self.plan = read_json(PLAN_FILE)
+        self.plan = read_json(self.plan_file)
         for child in self.content.get_children():
             child.destroy()
         plan = self.plan
@@ -169,7 +193,8 @@ class UpdateAssistant(Gtk.Window):
         self._packages(plan)
 
         stale = stale_reason(plan)
-        self._jobs()
+        if not self.install:
+            self._jobs()
         self.show_buttons(status in ("ready", "needs-approval"), stale)
         self.show_all()
         self.update_choices_bar()
@@ -327,8 +352,30 @@ class UpdateAssistant(Gtk.Window):
         elif response == 2:
             self.choices_bar.set_sensitive(False)
             self.choices_label.set_text("Working out a new plan with your choices...")
+            if self.install:
+                request = dict(self.plan["request"], choices=self.pending)
+                run_as_root(service("submit", "install", "--request", json.dumps(request)),
+                            self.install_replanned)
+                return
             run_as_root(service("submit", "check", "--no-sync",
                                 "--choices", json.dumps(self.pending)), self.replanned)
+
+    def install_replanned(self, ok, output):
+        """A re-planned install is queued straight away when it needs
+        nothing approved, or shown again"""
+        self.choices_bar.set_sensitive(True)
+        if not ok:
+            self.error("Couldn't re-plan", output or "Cancelled.")
+            return
+        outcome, _sep, what = output.strip().splitlines()[-1].partition(" ")
+        if outcome == "queued":
+            from porthole.updater.follow import show_in_terminal
+            show_in_terminal(what)
+            self.hide()
+            return
+        self.plan_file = what
+        self.plan = None
+        self.load()
 
     def replanned(self, ok, output):
         self.choices_bar.set_sensitive(True)
@@ -351,7 +398,7 @@ class UpdateAssistant(Gtk.Window):
             for command in stage["commands"]:
                 inner.pack_start(_label("$ " + shlex.join(command), mono=True,
                                         selectable=True), False, False, 0)
-        inner.pack_start(_label("The update runs on its own, so you can close Porthole. "
+        inner.pack_start(_label("This runs on its own, so you can close Porthole. "
                                 "If a step fails the rest are skipped, and the plan is "
                                 "checked again to show what is left."), False, False, 0)
         self.content.pack_start(box, False, False, 0)
@@ -472,8 +519,9 @@ class UpdateAssistant(Gtk.Window):
         plan = self.plan
         fixes = plan.get("fixes") or []
         stages = plan.get("stages") or []
-        details = ["The update runs in the background as root. You can close Porthole; "
-                   "progress shows in the update window and the tray."]
+        what = "install" if self.install else "update"
+        details = ["The %s runs in the background as root. You can close Porthole; "
+                   "progress shows in the job window and the tray." % what]
         if fixes:
             details.insert(0, "These lines will be added to /etc/portage:\n"
                            + "\n".join("  " + f["line"] for f in fixes))
@@ -482,16 +530,21 @@ class UpdateAssistant(Gtk.Window):
                 s["title"] for s in stages if s.get("approval")) + ".")
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
-                                   buttons=Gtk.ButtonsType.NONE, text="Start the update?")
+                                   buttons=Gtk.ButtonsType.NONE, text="Start the %s?" % what)
         dialog.set_title("Porthole")
         dialog.format_secondary_text("\n\n".join(details))
         dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
-                           "Start update", Gtk.ResponseType.OK)
+                           "Start " + what, Gtk.ResponseType.OK)
         response = dialog.run()
         dialog.destroy()
         if response != Gtk.ResponseType.OK:
             return
         self.start_button.set_sensitive(False)
+        if self.install:
+            run_as_root(service("submit", "install", "--plan", self.plan_file,
+                                "--generated", plan["generated"]),
+                        lambda ok, out: self.submitted(ok, out, show=True))
+            return
         run_as_root(service("submit", "update", "--plan", plan["generated"]),
                     lambda ok, out: self.submitted(ok, out, show=True))
 
@@ -501,7 +554,12 @@ class UpdateAssistant(Gtk.Window):
             self.load()
             return
         if show:
-            self.show_progress()
+            # "JOB" from submit update/check, "queued JOB" from submit install
+            from porthole.updater.follow import show_in_terminal
+            show_in_terminal(output.strip().splitlines()[-1].split()[-1])
+        if self.install:
+            self.hide()
+            return
         self.load()
 
     def show_progress(self):

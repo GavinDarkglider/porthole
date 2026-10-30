@@ -51,11 +51,13 @@ from porthole.views.useflags import UseFlagWidget
 class AdvancedEmergeDialog:
     """Class to perform advanced emerge dialog functionality."""
 
-    def __init__(self, package, setup_command, re_init_portage):
-        """ Initialize Advanced Emerge Dialog window """
+    def __init__(self, package, setup_command, re_init_portage, install=None):
+        """ Initialize Advanced Emerge Dialog window; install(name, targets,
+        requested) plans and queues an install with the chosen settings """
         # Preserve passed parameters
         self.package = package
         self.setup_command = setup_command
+        self.install = install
         self.re_init_portage = re_init_portage
         self.arch = backends.portage_lib.get_arch()
         self.system_use_flags = backends.portage_lib.settings.SystemUseFlags
@@ -215,13 +217,40 @@ class AdvancedEmergeDialog:
 
     def ok_clicked(self, widget):
         """ Interrogate object for settings and start the ebuild """
+        request = self.get_request()
         command = self.get_command()
 
         # Dispose of the dialog
         self.window.destroy()
 
+        if request:
+            # planned by the runner with these settings saved for the package
+            self.install(self.package.get_name(), *request)
+            return
         # Submit the command for processing
         self.setup_command(self.package.get_name(), command)
+
+    def get_request(self):
+        """(targets, requested settings) for installing the chosen version,
+        or None to run the command as it is (unmerge, pretend)"""
+        if (not self.install or self.emerge_unmerge != "emerge"
+                or self.wtree.get_object("cbPretend").get_active()):
+            return None
+        _iter = self.combobox.get_active_iter()
+        if _iter is None:
+            return None
+        ebuild = self.get_verInfo(self.combobox.get_model().get_value(_iter, 0))["name"]
+        targets = self.get_options().split() + ["=" + ebuild]
+        requested = []
+        flags = (self.get_use_flags() or "").split()
+        if flags:
+            # for the package, so the next version keeps them
+            requested.append({"kind": "use", "line": " ".join(
+                [self.package.full_name] + [f.lstrip("+") for f in flags])})
+        keyword = self.get_keyword()
+        if keyword and not keyword.startswith("-"):
+            requested.append({"kind": "keywords", "line": "=%s %s" % (ebuild, keyword)})
+        return targets, requested
 
     def cancel_clicked(self, widget):
         """ Cancel emerge """
@@ -478,8 +507,8 @@ class AdvancedEmergeDialog:
                 ('cbAsk', '-a ', '--ask '),
                 ('cbBuildPkg', '-b ', '--buildpkg '),
                 ('cbBuildPkgOnly', '-B ', '--buildpkgonly '),
-                ('cbColorY', '--color y ', '--color y ' ),
-                ('cbColorN', '--color n ', '--color n ' ),
+                ('cbColorY', '--color=y ', '--color=y ' ),
+                ('cbColorN', '--color=n ', '--color=n ' ),
                 ('cbDebug', '-d ', '--debug '),
                 ('cbDeep', '-D ', '--deep '),
                 ('cbEmptyTree', '-e ', '--emptytree '),
@@ -503,8 +532,8 @@ class AdvancedEmergeDialog:
                 ('cbUsePkg', '-k ', '--usepkg '),
                 ('cbUsePkgOnly', '-K ', '--usepkgonly '),
                 ('cbVerbose', '-v ', '--verbose '),
-                ('cbWithBDepsY', '--with-bdeps y ', '--with-bdeps y '),
-                ('cbWithBDepsN', '--with-bdeps n ', '--with-bdeps n ')
+                ('cbWithBDepsY', '--with-bdeps=y ', '--with-bdeps=y '),
+                ('cbWithBDepsN', '--with-bdeps=n ', '--with-bdeps=n ')
                 ]
         options = ''
         for Name, ShortOption, LongOption in List:
@@ -565,6 +594,14 @@ class AdvancedEmergeDialog:
 
     def display_emerge_command(self):
         command = self.get_command()
+        request = self.get_request()
+        if request:
+            # what will actually happen: emerge, with the settings saved first
+            targets, requested = request
+            command = "emerge " + " ".join(targets)
+            for r in requested:
+                command += "\n+ package.%s: %s" % (
+                    "accept_keywords" if r["kind"] == "keywords" else "use", r["line"])
         end = self.command_buffer.get_end_iter()
         start = self.command_buffer.get_start_iter()
         self.command_buffer.delete(start, end)

@@ -31,6 +31,12 @@ CASES = [
       "cmdline": ["emerge", "--oneshot", "=sys-libs/zlib-1.3.2-r1"]}),
     (["submit", "emerge", "--", "USE=gtk -qt", "emerge", "--update", "@world"],
      {"kind": "emerge", "cmdline": ["USE=gtk -qt", "emerge", "--update", "@world"]}),
+    (["submit", "install", "--request", '{"targets": ["app-misc/foo"]}'],
+     {"kind": "install", "request": '{"targets": ["app-misc/foo"]}', "plan": None}),
+    (["submit", "install", "--plan", "/var/lib/porthole/installs/x.json",
+      "--generated", "2026-10-29T17:00:00-0700"],
+     {"kind": "install", "plan": "/var/lib/porthole/installs/x.json",
+      "generated": "2026-10-29T17:00:00-0700"}),
 ]
 
 

@@ -61,3 +61,19 @@ def runner_tokens(command, pretend=False):
                          "--searchdesc", "--version") for t in rest)):
         return None
     return tokens
+
+
+def install_targets(tokens):
+    """For runner tokens that install packages, the emerge options and
+    packages to plan; None for unmerges, resumes, fetches and commands
+    with USE=... (those run as they are)"""
+    at = tokens.index("emerge")
+    if at:
+        return None
+    rest = tokens[at + 1:]
+    short = "".join(t[1:] for t in rest if t.startswith("-") and not t.startswith("--"))
+    if ("C" in short or "f" in short or "F" in short or any(
+            t in ("--unmerge", "--depclean", "--resume", "--skipfirst", "--fetchonly",
+                  "--fetch-all-uri") for t in rest)):
+        return None
+    return rest

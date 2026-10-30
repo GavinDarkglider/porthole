@@ -234,14 +234,7 @@ def submit_update(generated):
     if stale:
         raise JobError(stale + " Check again before updating.")
 
-    steps = []
-    if plan.get("fixes"):
-        steps.append({"kind": "apply-config",
-                      "title": "Add the approved changes to /etc/portage",
-                      "fixes": plan["fixes"]})
-    for stage in plan.get("stages") or []:
-        steps.append({"kind": "shell", "title": stage["title"],
-                      "shell": stage_shell(stage)})
+    steps = plan_steps(plan)
     count = len(plan.get("merge_list") or []) + len(
         (plan.get("preserved") or {}).get("merge_list") or [])
     lives = len((plan.get("live") or {}).get("changed") or [])
@@ -255,6 +248,113 @@ def submit_update(generated):
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
             raise JobError("An update is already queued or running.")
+        state["jobs"].append(job)
+        prune(state)
+    return job
+
+
+def plan_steps(plan):
+    """Job steps carrying out a verified plan"""
+    steps = []
+    if plan.get("fixes"):
+        steps.append({"kind": "apply-config",
+                      "title": "Add the approved changes to /etc/portage",
+                      "fixes": plan["fixes"]})
+    for stage in plan.get("stages") or []:
+        steps.append({"kind": "shell", "title": stage["title"],
+                      "shell": stage_shell(stage)})
+    return steps
+
+
+# -- installs from Porthole -------------------------------------------------------
+
+INSTALL_DIR = os.path.join(STATE_DIR, "installs")
+_KEYWORD = re.compile(r"^(-?~?[A-Za-z0-9_-]+|\*\*|~\*|\*)$")
+
+
+def check_request(text):
+    """An install request from Porthole, checked: {"targets": emerge
+    options and packages, "requested": [{"kind": "use"|"keywords", "line":
+    ...}], "choices": {...}}"""
+    import json
+    from portage.dep import Atom
+    try:
+        request = json.loads(text)
+    except ValueError as e:
+        raise JobError("The request isn't valid JSON: %s" % e)
+    if not isinstance(request, dict) or not isinstance(request.get("targets"), list):
+        raise JobError("The request needs a list of targets")
+    argv, env = check_emerge(["emerge"] + [str(t) for t in request["targets"]])
+    if env:
+        raise JobError("USE settings go in as package.use lines, not USE=")
+    targets = [a for a in argv[1:] if a != "--color=y"]
+    if any(t in ("--unmerge", "-C", "--depclean", "--resume") for t in targets) or any(
+            t.startswith("-") and not t.startswith("--") and "C" in t for t in targets):
+        raise JobError("Only installs are planned; unmerges run as they are")
+    requested = []
+    for r in request.get("requested") or []:
+        kind, line = r.get("kind"), str(r.get("line", ""))
+        words = line.split()
+        if kind not in ("use", "keywords") or len(words) < 2 or "\n" in line:
+            raise JobError("Not a setting Porthole can add: %s %s" % (kind, line[:60]))
+        try:
+            Atom(words[0])
+        except Exception:
+            raise JobError("Not a package atom: %s" % words[0])
+        check = _USE_FLAG if kind == "use" else _KEYWORD
+        if not all(check.match(w) for w in words[1:]):
+            raise JobError("Not a valid %s setting: %s" % (kind, line[:60]))
+        requested.append({"kind": kind, "line": " ".join(words)})
+    choices = validate_choices(request.get("choices") or {})
+    return {"targets": targets, "requested": requested, "choices": choices}
+
+
+def submit_install(text, log=None):
+    """Plan an install as root; queue it if it needs no approval.
+    Returns ("queued", job) or ("review", plan_path)."""
+    from porthole.updater.analyze import Analyzer
+    request = check_request(text)
+    plan = Analyzer(request["targets"], choices=request["choices"],
+                    requested=request["requested"],
+                    log=log or (lambda m: None)).analyze()
+    plan["request"] = request
+    os.makedirs(INSTALL_DIR, mode=0o755, exist_ok=True)
+    name = "install-%s-%s.json" % (time.strftime("%Y%m%d-%H%M%S"), os.urandom(2).hex())
+    path = os.path.join(INSTALL_DIR, name)
+    write_json(path, plan)
+    # keep the last few
+    for old in sorted(os.listdir(INSTALL_DIR))[:-20]:
+        try:
+            os.unlink(os.path.join(INSTALL_DIR, old))
+        except OSError:
+            pass
+    if plan.get("status") == "ready":
+        return "queued", queue_install(plan, path)
+    return "review", path
+
+
+def submit_install_plan(path, generated):
+    """Queue an install plan the user reviewed"""
+    path = os.path.realpath(path)
+    if os.path.dirname(path) != os.path.realpath(INSTALL_DIR):
+        raise JobError("Not an install plan: %s" % path)
+    plan = read_json(path)
+    if not plan or plan.get("generated") != generated:
+        raise JobError("The plan changed after you reviewed it. Review it again.")
+    if plan.get("status") not in ("ready", "needs-approval"):
+        raise JobError("This plan can't be run automatically (%s)." % plan.get("status"))
+    stale = stale_reason(plan)
+    if stale:
+        raise JobError(stale + " Work out the install again.")
+    return queue_install(plan, path)
+
+
+def queue_install(plan, path):
+    wanted = [t for t in plan["request"]["targets"] if not t.startswith("-")]
+    job = new_job("install", "Install " + ", ".join(wanted[:3])
+                  + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""),
+                  plan_steps(plan), recheck=True, plan=plan["generated"], plan_file=path)
+    with jobs_state() as state:
         state["jobs"].append(job)
         prune(state)
     return job
@@ -581,14 +681,21 @@ _STAGE_KEY = re.compile(r"^(remove|replace):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^g
 
 
 def set_choices(text):
-    """Replace choices.json, after checking every entry: excluded packages
-    end up on emerge's command line, so only plain cat/pkg names pass"""
+    """Replace choices.json, after checking every entry"""
     import json
-    from portage.dep import Atom
     try:
         choices = json.loads(text)
     except ValueError as e:
         raise JobError("Choices aren't valid JSON: %s" % e)
+    clean = validate_choices(choices)
+    write_json(CHOICES_FILE, clean)
+    return clean
+
+
+def validate_choices(choices):
+    """Checked choices: excluded packages end up on emerge's command line,
+    so only plain cat/pkg names pass"""
+    from portage.dep import Atom
     if not isinstance(choices, dict):
         raise JobError("Choices must be a JSON object")
     clean = {}
@@ -609,7 +716,6 @@ def set_choices(text):
             elif key == "reject_fixes" and ("\n" in value or len(value) > 500):
                 raise JobError("Not a config line: %s" % value[:60])
         clean[key] = sorted(set(values))
-    write_json(CHOICES_FILE, clean)
     return clean
 
 

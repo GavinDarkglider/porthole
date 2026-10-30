@@ -257,7 +257,14 @@ def known_fstype(fstype):
 
 
 def _cp(cpv):
-    return Atom("=" + cpv).cp
+    """cat/pkg of a cpv, or of an atom (a command-line target can be a
+    parent: games-fps/eduke32)"""
+    for text in ("=" + cpv, cpv):
+        try:
+            return Atom(text).cp
+        except Exception:
+            pass
+    return cpv
 
 
 def _short_atom(atom):
@@ -331,8 +338,11 @@ def _is_exact_pin(atom):
 
 class Analyzer:
     def __init__(self, targets=None, config_root="/", log=None, choices=None,
-                 live=False, live_exclude=()):
+                 live=False, live_exclude=(), requested=()):
         self.choices = normalize_choices(choices)
+        # config lines the user chose (e.g. in Advanced Emerge):
+        # [{"kind": "use"|"keywords", "line": "cat/pkg flag -flag"}]
+        self.requested = [dict(r) for r in requested]
         # check live (-9999) packages for new upstream commits
         self.live = live
         self.live_exclude = set(live_exclude)
@@ -438,7 +448,7 @@ class Analyzer:
                        " (for %s)" % _limit(wanted) if wanted else "", fix["cpv"],
                        fix["line"].split()[-1]))
             if not lines:
-                lines.append("Only a testing (%s) version satisfies the update."
+                lines.append("Only a testing (%s) version satisfies this."
                              % fix["line"].split()[-1])
         elif fix["kind"] == "use":
             for p in fix.get("parents", []):
@@ -543,7 +553,7 @@ class Analyzer:
     def stages(self, temp_use, broken, verified):
         if not temp_use:
             return [{
-                "title": "Update",
+                "title": self.stage_title(),
                 "commands": [["emerge", "--keep-going"] + self.targets],
                 "verified": verified,
             }]
@@ -564,6 +574,13 @@ class Analyzer:
                 "verified": "after previous stage",
             },
         ]
+
+    def stage_title(self):
+        """'Update' for the world, 'Install ...' for packages asked for"""
+        if "@world" in self.targets:
+            return "Update"
+        wanted = [t for t in self.base_targets if not t.startswith("-")]
+        return "Install " + ", ".join(wanted) if wanted else "Update"
 
     def options(self):
         """emerge options from the targets, for follow-up commands"""
@@ -1154,9 +1171,48 @@ class Analyzer:
 
     def analyze(self):
         try:
-            return self._analyze()
+            if not self.requested:
+                return self._analyze()
+            # everything is resolved with the user's chosen settings in place
+            original = self.config_root
+            with ScratchConfig(original) as scratch:
+                for r in self.requested:
+                    scratch.add_lines(r["kind"], [r["line"]])
+                self.config_root = scratch.root
+                try:
+                    plan = self._analyze()
+                finally:
+                    self.config_root = original
+            return self.add_requested(plan)
         finally:
             self.drop_scratch_root()
+
+    def add_requested(self, plan):
+        """The user's chosen settings are written with the other fixes"""
+        if plan.get("status") == "error":
+            return plan
+        have = {f["line"] for f in plan["fixes"]}
+        chosen = []
+        for r in self.requested:
+            if r["line"] in have:
+                continue
+            atom = r["line"].split()[0]
+            try:
+                cpv = Atom(atom).cpv if Atom(atom).operator else Atom(atom).cp
+            except Exception:
+                cpv = atom
+            chosen.append({"kind": r["kind"], "cpv": cpv, "line": r["line"],
+                           "requested": True, "verified": plan.get("verified", False),
+                           "explanation": ["You chose this setting."]})
+        plan["fixes"] = chosen + plan["fixes"]
+        plan["requested"] = self.requested
+        # the user's own choices don't need approving again
+        if (plan["status"] == "needs-approval"
+                and not [f for f in plan["fixes"] if not f.get("requested")]
+                and not plan.get("cycles_broken")
+                and not any(st.get("approval") for st in plan.get("stages") or [])):
+            plan["status"] = "ready"
+        return plan
 
     def _analyze(self):
         started = time.monotonic()
@@ -1503,6 +1559,10 @@ def summarize(plan):
     elif status == "ready":
         title = "%d updates ready to install" % count
         body = ["No configuration changes are needed."]
+    elif status == "needs-approval" and plan.get("request"):
+        title = "%d package%s to install" % (count, "s" if count != 1 else "")
+        body = ["%d change%s need%s your approval first (already tested to work)."
+                % (changes, "s" if changes != 1 else "", "" if changes != 1 else "s")]
     elif status == "needs-approval":
         title = "%d updates available" % count
         body = ["%d change%s need%s your approval first (already tested to work)."

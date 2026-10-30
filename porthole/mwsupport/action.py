@@ -75,14 +75,44 @@ class ActionHandler(CategoryHandler):
         """Installs and removals run in the root job runner, so closing
         Porthole never stops them; pretend runs stay here, as the user.
         Returns True if the command was taken."""
-        from porthole.updater.commands import runner_tokens
+        from porthole.updater.commands import install_targets, runner_tokens
         tokens = runner_tokens(command, config.Prefs.emerge.pretend)
         if tokens is None:
             return False
+        targets = install_targets(tokens)
+        if targets is not None:
+            # an install: worked out (and its fixes verified) before it runs
+            self.request_install(package_name, targets)
+            return True
         from porthole.updater.elevate import run_as_root, service
         run_as_root(service("submit", "emerge", "--", *tokens),
                     lambda ok, out: self.runner_submitted(package_name, ok, out))
         return True
+
+    def request_install(self, package_name, targets, requested=()):
+        """Have the runner plan an install as root: it is queued if it needs
+        nothing approved, otherwise the plan is shown for review"""
+        import json
+        from porthole.updater.elevate import run_as_root, service
+        from porthole.updater.review import working
+        busy = working(self.mainwindow, _("Working out what installing %s needs...")
+                       % package_name)
+        request = json.dumps({"targets": list(targets), "requested": list(requested)})
+        run_as_root(service("submit", "install", "--request", request),
+                    lambda ok, out: (busy.destroy(), self.install_planned(ok, out)))
+
+    def install_planned(self, ok, output):
+        if not ok:
+            SingleButtonDialog(_("Couldn't plan the install"), self.mainwindow,
+                               output or _("Cancelled."), None, _("OK"))
+            return
+        outcome, _sep, what = output.strip().splitlines()[-1].partition(" ")
+        if outcome == "queued":
+            from porthole.updater.follow import show_in_terminal
+            show_in_terminal(what)
+        else:
+            from porthole.updater.review import UpdateAssistant
+            UpdateAssistant(self.mainwindow, self, plan_file=what).present_plan()
 
     def runner_submitted(self, package_name, ok, output):
         """Follow a submitted job in the terminal, or say why it wasn't taken"""
@@ -263,7 +293,7 @@ class ActionHandler(CategoryHandler):
         # Activate the advanced emerge dialog window
         # re_init_portage callback is for when package.use etc. are modified
         return AdvancedEmergeDialog(package, self.setup_command,
-                self.re_init_portage)
+                self.re_init_portage, install=self.request_install)
 
 
     def unmerge_package(self, package, sudo=False, ebuild=None):
