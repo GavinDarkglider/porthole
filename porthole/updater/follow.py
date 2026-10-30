@@ -104,11 +104,17 @@ def display_command(command_string):
     job = find(match.group(1))
     if not job:
         return command_string
-    steps = job.get("steps") or []
-    if len(steps) == 1 and steps[0].get("argv"):
-        env = " ".join("%s=%s" % (k, shlex.quote(v)) for k, v in
-                       sorted((steps[0].get("env") or {}).items()))
-        return (env + " " if env else "") + shlex.join(steps[0]["argv"])
+    for step in job.get("steps") or []:
+        if step.get("argv"):
+            env = " ".join("%s=%s" % (k, shlex.quote(v)) for k, v in
+                           sorted((step.get("env") or {}).items()))
+            return (env + " " if env else "") + shlex.join(
+                [a for a in step["argv"] if a != "--color=y"])
+        # a plan stage: its emerge command(s), without the shell around them
+        commands = [c.strip() for c in step.get("shell", "").split(";")[-1].split("&&")
+                    if c.strip().startswith("emerge")]
+        if commands:
+            return " && ".join(c.replace(" --color=y", "") for c in commands)
     return job["title"]
 
 
@@ -135,17 +141,28 @@ def running_follower():
     return pid
 
 
-def raise_existing():
-    """Ask the process already showing jobs to bring its window up (and
-    follow the current job). True if there was one."""
+def raise_existing(job_id=None):
+    """Ask the process already showing jobs to bring its window up and
+    follow job_id (default: the current job). True if there was one."""
     pid = running_follower()
     if pid is None or pid == os.getpid():
         return False
     try:
+        with open(PIDFILE + ".want", "w") as f:
+            f.write(job_id or "")
         os.kill(pid, signal.SIGUSR1)
     except OSError:
         return False
     return True
+
+
+def wanted_job():
+    """The job another launch asked us to follow (see raise_existing)"""
+    try:
+        with open(PIDFILE + ".want") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
 
 
 class Follower:
@@ -158,7 +175,7 @@ class Follower:
         from gi.repository import GLib
         # another launch asks us to show the window instead of opening one
         GLib.unix_signal_add(GLib.PRIORITY_DEFAULT, signal.SIGUSR1,
-                             lambda: (self.show(), True)[1])
+                             lambda: (self.show(wanted_job()), True)[1])
 
     def show(self, job_id=None):
         """Bring the window up, following job_id (default: the current job)"""
@@ -190,21 +207,34 @@ class Follower:
             self.on_close()
 
 
-def show_in_terminal(job_id=None, on_close=None):
-    """Follow a job in Porthole's job terminal window, opening it unless
-    one is already open in this or another process (Porthole's
-    preferences must be loaded). Returns this process's Follower, or None
-    if another process shows it."""
-    global _follower
-    if raise_existing():
-        return None
-    if _follower is None:
-        _follower = Follower(on_close)
-    _follower.show(job_id)
-    return _follower
+# set by Porthole when it opens the job window, for the job to follow
+JOB_ENV = "PORTHOLE_FOLLOW_JOB"
 
 
-_follower = None
+def show_in_terminal(job_id=None):
+    """Bring up the job window following job_id (default: the current
+    job). It is a process of its own ('porthole --follow-job'), so closing
+    Porthole doesn't close it, and there is only ever one."""
+    if raise_existing(job_id):
+        return
+    import subprocess
+    from porthole.updater.commands import script_command
+    env = dict(os.environ)
+    if job_id:
+        env[JOB_ENV] = job_id
+    subprocess.Popen(script_command("porthole") + ["--follow-job"], env=env,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL, start_new_session=True)
+
+
+def run_window(on_close):
+    """For 'porthole --follow-job': show the window here, unless another
+    process already does (it is asked to come up). False if so."""
+    job_id = os.environ.get(JOB_ENV)
+    if raise_existing(job_id):
+        return False
+    Follower(on_close).show(job_id)
+    return True
 
 
 if __name__ == "__main__":

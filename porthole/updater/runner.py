@@ -420,6 +420,20 @@ def runner_active():
 
 # -- running ---------------------------------------------------------------
 
+class _PtyReader:
+    """read1() over a pty master; EOF once the child side has closed"""
+
+    def __init__(self, fd):
+        self.fd = fd
+
+    def read1(self, size):
+        try:
+            return os.read(self.fd, size)
+        except OSError:  # EIO: every writer has gone
+            os.close(self.fd)
+            return b""
+
+
 class JobLog(Log):
     """Lines for both the job's log and the updater log"""
 
@@ -551,12 +565,22 @@ class Runner:
         return self.run_logged(job_id, step, log, step["argv"], step.get("env"))
 
     def run_logged(self, job_id, step, log, argv, extra_env=None):
-        """Run argv into the job log, noting emerge's progress"""
+        """Run argv into the job log, noting emerge's progress. It gets a
+        pseudo-terminal, so emerge behaves as in a terminal: colours, and
+        the window titles Porthole's terminal shows"""
+        import pty
         env = dict(os.environ, TERM="xterm", **(extra_env or {}))
         env.pop("NOCOLOR", None)
-        proc = subprocess.Popen(argv, env=env,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, start_new_session=True)
+        master, slave = pty.openpty()
+        try:
+            import fcntl as _fcntl, struct, termios
+            _fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
+        except OSError:
+            pass
+        proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=slave,
+                                stderr=slave, start_new_session=True)
+        os.close(slave)
+        proc.stdout = _PtyReader(master)
         # cancel signals the whole process group
         if self.update(job_id, pid=proc.pid).get("cancel"):
             os.killpg(proc.pid, signal.SIGTERM)

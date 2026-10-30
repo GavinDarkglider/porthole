@@ -948,7 +948,8 @@ class ProcessManager: #dbus.service.Object):
         """extracts the ebuild name and assigns it to self.filename"""
         x = line.split("/")
         y = x[1].split(" ")
-        name = y[0]
+        # current emerge: ">>> Emerging (1 of 9) cat/pkg-1.0::repo"
+        name = y[0].split("::")[0]
         self.filename = name + "." + self.term.view_buffer_types[TAB_PROCESS]
         debug.dprint("TERMINAL: New ebuild detected, new filename: " + self.filename)
         return

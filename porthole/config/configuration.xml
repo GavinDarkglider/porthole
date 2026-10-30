@@ -61,7 +61,7 @@
     </caution>
     <notcaution py_type="list" item_count="0">
     </notcaution>
-    <emerge>^&gt;&gt;&gt; emerge [^/]</emerge>
+    <emerge>^&gt;&gt;&gt; (emerge [^/]|Emerging (binary )?\()</emerge>
     <ebuild>^\d+\s+\[ebuild.*</ebuild>
     <merged>merged.$</merged>
     <unmerged>^\*\*\* Unmerging</unmerged>
