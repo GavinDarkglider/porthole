@@ -41,7 +41,9 @@ it update);</li>
   <li>libraries still in use by programs that need rebuilding
 (@preserved-rebuild), and live (-9999) packages with new commits, if you
 turned live rebuilds on;</li>
-  <li>Gentoo news you haven't read.</li>
+  <li>Gentoo news you haven't read;</li>
+  <li>packages <b>no longer needed</b>: installed, but nothing in your
+world set needs them any more (what emerge --depclean would remove).</li>
 </ul>
 <p>You can untick packages you don't want updated this time, and make
 choices for held-back packages; the plan is worked out again with your
@@ -49,6 +51,20 @@ choices before anything runs. <b>Check now</b> makes a fresh plan from
 the package tree you have, without waiting for the next background
 check; <b>Sync now</b> syncs the tree first (see
 <a href="sync.html">Syncing</a>).</p>
+
+<h3><a name="depclean">Packages no longer needed</a></h3>
+<p>Packages pulled in for something you have since removed or updated
+stay installed until you remove them. The assistant lists them under
+<b>No longer needed</b>, with a box for each; none are ticked to start
+with. Tick the ones to remove (or <b>Tick all</b>), re-plan, and the
+update ends by removing them, before rebuilding anything that used their
+libraries. Only the packages you ticked are removed, and emerge still
+keeps any that something needs by then. With nothing to update, the plan
+just removes them.</p>
+<p>If you use one of them yourself, don't remove it: emerge it (not
+one-shot) so it goes in your world file. What an update itself leaves
+unneeded (an old slot, say) shows up at the next check. You can turn the
+list off in <b>Settings</b> (Packages nothing needs).</p>
 
 <p>Nothing needs a password until you press <b>Start</b>. The update then
 runs in Porthole's job runner, as root, in the background: you can close

@@ -171,6 +171,16 @@ INSTALL_ALL_WORLD = {
 }
 
 
+DEPCLEAN = {
+    "doc": "Up to date, with a library nothing needs any more (lib/old) "
+           "and one an installed package still needs (lib/l)",
+    "repo": [pkg("app/a-1", rdepend="lib/l"), pkg("lib/l-1"), pkg("lib/old-1")],
+    "installed": [inst("app/a-1", rdepend="lib/l"), inst("lib/l-1"), inst("lib/old-1")],
+    "world": ["app/a"],
+    "depclean": True,
+}
+
+
 def with_choices(scenario, doc, **choices):
     return dict(scenario, doc=doc, choices=choices)
 
@@ -211,10 +221,14 @@ SCENARIOS = {
     "install-all-world": INSTALL_ALL_WORLD,
     "deselected": with_choices(
         CYCLES, "cycles, with media/q unticked", exclude=["media/q"]),
+    "depclean": DEPCLEAN,
+    "depclean-chosen": with_choices(
+        DEPCLEAN, "depclean, and the user ticked lib/old", accept=["depclean:lib/old"]),
 }
 
 
-def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=(), steps=None):
+def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=(), steps=None,
+           unneeded=None):
     """What a scenario's plan should come to: its status, the versions it
     merges, the packages held back, the packages held by the user's
     choices, what it removes (kind:cpv) and what it unmerges outright;
@@ -223,6 +237,9 @@ def expect(status, merge=(), held=(), mine=(), removed=(), unmerge=(), steps=Non
               "mine": sorted(mine), "removed": sorted(removed), "unmerge": sorted(unmerge)}
     if steps is not None:
         wanted["steps"] = steps
+    if unneeded is not None:
+        # packages nothing needs, "(removing)" after the ones ticked
+        wanted["unneeded"] = unneeded
     return wanted
 
 
@@ -264,6 +281,10 @@ EXPECTED = {
         ["emerge --keep-going =app/b-1"],
         ["emerge --keep-going --oneshot @preserved-rebuild"]]),
     "deselected": expect("needs-approval", ["lib/x-2", "lib/y-2"], mine=["media/p", "media/q"]),
+    "depclean": expect("up-to-date", unneeded=["lib/old-1"], steps=[]),
+    "depclean-chosen": expect("ready", unneeded=["lib/old-1 (removing)"], steps=[
+        ["emerge --depclean =lib/old-1"],
+        ["emerge --keep-going --oneshot @preserved-rebuild"]]),
 }
 
 
@@ -276,7 +297,9 @@ def outcome(plan):
                   ["%s:%s" % (r["kind"], r["cpv"]) for r in plan.get("removed") or []],
                   [c[-1] for st in plan["stages"] for c in st["commands"] if "--unmerge" in c],
                   [[" ".join(a for a in c if not a.startswith(("--root=", "--sysroot=")))
-                    for c in st["commands"]] for st in plan["stages"]])
+                    for c in st["commands"]] for st in plan["stages"]],
+                  ["%s%s" % (p["cpv"], " (removing)" if p["remove"] else "")
+                   for p in (plan.get("unneeded") or {}).get("packages") or []])
 
 
 # -- building the fake system ------------------------------------------------
@@ -371,7 +394,7 @@ def run(name, keep=False, quiet=False):
             choices = ["--choices", os.path.join(work, "choices.json")]
         proc = subprocess.run(
             [sys.executable, "-m", "porthole.updater.analyze", "--json", out] + choices
-            + ["--config-root", config]
+            + ["--config-root", config] + (["--depclean"] if scenario.get("depclean") else [])
             + ([] if scenario.get("request") else
                ["--", "--update", "--deep", "--newuse", "@world"] + system),
             env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,

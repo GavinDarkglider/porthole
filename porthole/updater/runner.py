@@ -239,12 +239,18 @@ def submit_update(generated):
     count = len(plan.get("merge_list") or []) + len(
         (plan.get("preserved") or {}).get("merge_list") or [])
     lives = len((plan.get("live") or {}).get("changed") or [])
+    removing = sum(1 for p in (plan.get("unneeded") or {}).get("packages") or []
+                   if p["remove"])
+    parts = []
     if count:
-        title = "Update %d package%s" % (count, "s" if count != 1 else "")
-        if lives:
-            title += " and rebuild %d live" % lives
-    else:
-        title = "Rebuild %d live package%s" % (lives, "s" if lives != 1 else "")
+        parts.append("Update %d package%s" % (count, "s" if count != 1 else ""))
+    if lives:
+        parts.append("rebuild %d live" % lives if count else
+                     "Rebuild %d live package%s" % (lives, "s" if lives != 1 else ""))
+    if removing:
+        parts.append("remove %d unneeded" % removing)
+    title = " and ".join(parts)
+    title = title[:1].upper() + title[1:]
     job = new_job("update", title, steps, recheck=True, plan=generated)
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
@@ -334,7 +340,7 @@ def check_request(text):
             raise JobError("Not a package name: %s" % name)
     return {"targets": targets, "requested": requested, "choices": choices,
             "world": world, "review": review, "live": bool(request.get("live")),
-            "live_exclude": live_exclude,
+            "live_exclude": live_exclude, "depclean": bool(request.get("depclean")),
             # a world update the user approved: its choices become the
             # standing ones (for the weekly checks)
             "save_choices": bool(request.get("save_choices")) and "@world" in targets}
@@ -630,7 +636,8 @@ class Runner:
                         requested=request["requested"], log=log,
                         world=request.get("world") or (),
                         live=request.get("live", False),
-                        live_exclude=request.get("live_exclude") or ()).analyze()
+                        live_exclude=request.get("live_exclude") or (),
+                        depclean=request.get("depclean", False)).analyze()
         plan["request"] = request
         path = store_install_plan(plan)
         if plan.get("status") not in ("ready", "needs-approval"):
@@ -823,7 +830,7 @@ def submit_emerge(tokens):
 
 # -- choices -------------------------------------------------------------------
 
-_STAGE_KEY = re.compile(r"^(remove|replace):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
+_STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
 
 
 def set_choices(text):

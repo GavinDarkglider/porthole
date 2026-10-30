@@ -45,7 +45,10 @@ version table of the package's summary tab and choose <u>Unmerge this
 version</u>. &nbsp;<a href="advemerge.html">Advanced Emerge</a> can do the
 same: choose "unmerge" and the version.</p>
 <h2><a name="depclean">Removing what is no longer needed</a></h2>
-<p>To see which packages nothing needs any more, run the
+<p>The easy way: the <a href="update.html#depclean">Update Assistant</a>
+lists the packages nothing needs any more after each check (press
+<b>Check now</b> after removing something), and removes the ones you tick.</p>
+<p>By hand: to see which packages nothing needs any more, run the
 <a href="custcmd.html">custom command</a> "emerge --pretend --depclean".
 &nbsp;A pretend run changes nothing, so it runs as you, without a password,
 in the terminal. &nbsp;Read its list, and its warnings, carefully.</p>

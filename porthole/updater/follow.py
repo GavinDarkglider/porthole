@@ -94,8 +94,21 @@ def follow(job_id=None, out=None):
         out.write(b"*** What it didn't get to goes back in Porthole's install queue: "
                   b"process the queue to carry on (packages built meanwhile are "
                   b"left out), or remove it there.\n")
+    if job and status == "done" and _removes(job):
+        out.write(b"*** What the removed packages needed may not be needed any more: "
+                  b"the update assistant lists such packages after a check (Check now), "
+                  b"to remove the ones you tick.\n")
     out.flush()
     return 0 if status == "done" else 1
+
+
+def _removes(job):
+    """Whether a job unmerged packages (not a depclean, which cleans up itself)"""
+    for step in job.get("steps") or []:
+        argv = step.get("argv") or []
+        if "--unmerge" in argv or "-C" in argv or "--rage-clean" in argv:
+            return True
+    return False
 
 
 def command(job_id=None):

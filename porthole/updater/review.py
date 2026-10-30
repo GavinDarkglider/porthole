@@ -46,6 +46,15 @@ def _label(text, mono=False, bold=False, markup=None, selectable=False, **props)
     return label
 
 
+def _description(cpv):
+    """An installed package's DESCRIPTION, or None"""
+    try:
+        import portage
+        return portage.db[portage.root]["vartree"].dbapi.aux_get(cpv, ["DESCRIPTION"])[0]
+    except Exception:
+        return None
+
+
 def _section(title):
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
     box.pack_start(_label("", markup="<b>%s</b>" % GLib.markup_escape_text(title)),
@@ -209,6 +218,7 @@ class UpdateAssistant(Gtk.Window):
             self._stages(plan)
             self._notes(plan)
         self._held_by_you(plan)
+        self._unneeded(plan)
         self._packages(plan)
 
         stale = stale_reason(plan)
@@ -332,6 +342,40 @@ class UpdateAssistant(Gtk.Window):
                     "gcc-switch": "Stay on the current GCC"}.get(kind, key)
             inner.pack_start(self._choice(_label(text), "decline", key), False, False, 0)
         inner.pack_start(_label("Untick to offer the update again."), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+
+    def _unneeded(self, plan):
+        """Packages nothing needs any more, each with a box to remove it"""
+        unneeded = plan.get("unneeded") or {}
+        packages = unneeded.get("packages") or []
+        if not packages and not unneeded.get("error"):
+            return
+        box, inner = _section("No longer needed")
+        if unneeded.get("error"):
+            inner.pack_start(_label("Couldn't list them: " + unneeded["error"],
+                                    selectable=True), False, False, 0)
+        if packages:
+            inner.pack_start(_label(
+                "Nothing in your world set needs these any more (emerge --depclean). "
+                "Tick the ones to remove: they are removed after the update, and emerge "
+                "still keeps any that something needs by then. If you use one yourself, "
+                "add it to your world file instead (Emerge it, not one-shot)."),
+                False, False, 0)
+            boxes = []
+            for p in packages:
+                text = p["cpv"]
+                description = _description(p["cpv"])
+                if description:
+                    text += " — " + description
+                button = self._choice(_label(text), "accept", "depclean:" + p["cp"])
+                boxes.append(button)
+                inner.pack_start(button, False, False, 0)
+            row = Gtk.Box(spacing=6)
+            for label, state in (("Tick all", True), ("Untick all", False)):
+                button = Gtk.Button(label=label)
+                button.connect("clicked", lambda b, on=state: [c.set_active(on) for c in boxes])
+                row.pack_start(button, False, False, 0)
+            inner.pack_start(row, False, False, 0)
         self.content.pack_start(box, False, False, 0)
 
     # -- choices -------------------------------------------------------------

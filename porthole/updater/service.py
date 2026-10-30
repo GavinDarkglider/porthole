@@ -35,6 +35,9 @@
         live_rebuild = yes
         # live packages never to rebuild this way (cat/pkg, space separated)
         live_exclude =
+        # list packages nothing needs any more (emerge --depclean), so the
+        # update assistant can offer to remove them after the update
+        offer_depclean = yes
 
     Copyright (C) 2026 Porthole developers
 
@@ -90,7 +93,8 @@ def world_request(choices=None):
     config = load_config()
     return {"targets": list(WORLD_TARGETS), "requested": [],
             "choices": choices if choices is not None else read_json(CHOICES_FILE, {}) or {},
-            "live": config["live_rebuild"], "live_exclude": config["live_exclude"]}
+            "live": config["live_rebuild"], "live_exclude": config["live_exclude"],
+            "depclean": config["offer_depclean"]}
 LOG_FILE = "/var/log/porthole/updater.log"
 LOCK_FILE = "/run/lock/porthole-updater.lock"
 
@@ -104,6 +108,7 @@ DEFAULTS = {
     "skip_on_battery": "yes",
     "live_rebuild": "yes",
     "live_exclude": "",
+    "offer_depclean": "yes",
 }
 
 
@@ -123,6 +128,7 @@ def load_config(path=CONFIG_FILE):
         "skip_on_battery": section.getboolean("skip_on_battery", True),
         "live_rebuild": section.getboolean("live_rebuild", True),
         "live_exclude": section.get("live_exclude", "").split(),
+        "offer_depclean": section.getboolean("offer_depclean", True),
     }
 
 
@@ -313,7 +319,8 @@ class Service:
                 return 0 if (sync_info or {}).get("ok", True) else 1
             plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE),
                             live=self.config["live_rebuild"],
-                            live_exclude=self.config["live_exclude"]).analyze()
+                            live_exclude=self.config["live_exclude"],
+                            depclean=self.config["offer_depclean"]).analyze()
             plan["sync"] = sync_info
             plan["security"] = security_packages(self.log)
             write_json(PLAN_FILE, plan)

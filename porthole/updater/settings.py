@@ -95,6 +95,19 @@ class UpdaterSettingsPage(Gtk.Grid):
         self.attach(hint, 0, row, 2, 1)
         row += 1
 
+        heading = Gtk.Label(xalign=0, margin_top=8)
+        heading.set_markup("<b>Packages nothing needs</b>")
+        self.attach(heading, 0, row, 2, 1)
+        row += 1
+        self.depclean = Gtk.CheckButton(
+            label="List packages nothing needs any more, to remove them after an update")
+        self.depclean.set_tooltip_text(
+            "emerge --depclean, worked out with each check. The update assistant lists "
+            "them; only the ones you tick are removed.")
+        self.depclean.set_active(config["offer_depclean"])
+        self.attach(self.depclean, 0, row, 2, 1)
+        row += 1
+
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last sync: %s.  Last check: %s.\nThe schedule runs "
                           "from cron every hour and only does anything when due. Check "
@@ -108,7 +121,8 @@ class UpdaterSettingsPage(Gtk.Grid):
                 "check_updates": self.check.get_active(),
                 "skip_on_battery": self.battery.get_active(),
                 "live_rebuild": self.live.get_active(),
-                "live_exclude": self.live_exclude.get_text().split()}
+                "live_exclude": self.live_exclude.get_text().split(),
+                "offer_depclean": self.depclean.get_active()}
 
     def save(self, callback=None):
         """Save if anything changed; callback(ok, message) when done"""
@@ -121,7 +135,8 @@ class UpdaterSettingsPage(Gtk.Grid):
                     "check_updates=%s" % ("yes" if values["check_updates"] else "no"),
                     "skip_on_battery=%s" % ("yes" if values["skip_on_battery"] else "no"),
                     "live_rebuild=%s" % ("yes" if values["live_rebuild"] else "no"),
-                    "live_exclude=%s" % " ".join(values["live_exclude"])]
+                    "live_exclude=%s" % " ".join(values["live_exclude"]),
+                    "offer_depclean=%s" % ("yes" if values["offer_depclean"] else "no")]
 
         def done(ok, output):
             if ok:

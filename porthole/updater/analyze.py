@@ -314,7 +314,8 @@ def normalize_choices(choices):
         exclude       packages not to update ("cat/pkg")
         reject_fixes  config lines not to add
         decline       approval stages not to run (their "key")
-        accept        optional stages to run (their "key")"""
+        accept        optional stages to run (their "key"), and packages
+                      nothing needs that may be removed ("depclean:cat/pkg")"""
     choices = choices or {}
     return {key: sorted({str(v) for v in choices.get(key) or []})
             for key in ("exclude", "reject_fixes", "decline", "accept")}
@@ -342,7 +343,7 @@ def _is_exact_pin(atom):
 
 class Analyzer:
     def __init__(self, targets=None, config_root="/", log=None, choices=None,
-                 live=False, live_exclude=(), requested=(), world=()):
+                 live=False, live_exclude=(), requested=(), world=(), depclean=False):
         self.choices = normalize_choices(choices)
         # of the packages asked for --oneshot, the ones that still go in the
         # world file (a queue mixing one-shot and normal installs): they
@@ -354,6 +355,9 @@ class Analyzer:
         # check live (-9999) packages for new upstream commits
         self.live = live
         self.live_exclude = set(live_exclude)
+        # list what nothing needs any more (world updates), to remove the
+        # ones the user ticks
+        self.depclean = depclean
         # packages held at their version: unticked, or needing a rejected fix
         self.held = {cp: ("you chose not to update it", {"list": "exclude", "value": cp})
                      for cp in self.choices["exclude"]}
@@ -817,6 +821,59 @@ class Analyzer:
             "commands": [["emerge", "--oneshot", "--keep-going"] + self.root_options()
                          + ["=" + c["cpv"] for c in live["changed"]]],
             "verified": "after previous stage" if after_update else live["verified"],
+        }
+
+    # -- packages nothing needs ---------------------------------------------
+
+    def unneeded(self, merges):
+        """Installed packages nothing in the world set needs, from emerge
+        --pretend --depclean (it only reads, so it runs unprivileged), or
+        None when not checked. Each is offered for removal; those the user
+        ticks ("depclean:cat/pkg" in choices accept) are removed after the
+        update."""
+        if not self.depclean or "@world" not in self.base_targets:
+            return None
+        self.log("Looking for packages nothing needs any more...")
+        env = dict(os.environ)
+        if self.config_root != "/":
+            env["PORTAGE_CONFIGROOT"] = self.config_root
+        try:
+            proc = subprocess.run(["emerge", "--pretend", "--depclean", "--quiet", "--color=n"]
+                                  + self.root_options(), stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, timeout=900,
+                                  cwd="/", env=env)
+        except (OSError, subprocess.SubprocessError) as e:
+            return {"packages": [], "error": str(e)}
+        selected = None
+        for line in proc.stdout.splitlines():
+            if line.startswith("All selected packages:"):
+                selected = line.split(":", 1)[1].split()
+        if proc.returncode != 0 or (selected is None and "Number to remove" not in proc.stdout):
+            lines = [l for l in proc.stdout.splitlines() if l.strip()]
+            return {"packages": [], "error": "emerge --depclean couldn't work it out"
+                    + (": " + lines[-1].strip() if lines else "")}
+        # not what the update itself rebuilds or replaces
+        updating = {m["cp"] for m in merges}
+        packages = []
+        for atom in selected or []:
+            cpv = atom.lstrip("=")
+            cp = _cp(cpv)
+            if cp not in updating:
+                packages.append({"cpv": cpv, "cp": cp,
+                                 "remove": ("depclean:" + cp) in self.choices["accept"]})
+        if packages:
+            self.log("  nothing needs: " + ", ".join(p["cpv"] for p in packages))
+        return {"packages": packages, "error": None}
+
+    def depclean_stage(self, unneeded, after_update):
+        chosen = [p for p in unneeded["packages"] if p["remove"]]
+        return {
+            "title": "Remove packages nothing needs any more: "
+                     + ", ".join(p["cp"] for p in chosen),
+            # only these, and emerge still refuses any something needs by then
+            "commands": [["emerge", "--depclean"] + self.root_options()
+                         + ["=" + p["cpv"] for p in chosen]],
+            "verified": "after previous stage" if after_update else True,
         }
 
     # -- checks on the system itself ---------------------------------------
@@ -1376,6 +1433,12 @@ class Analyzer:
             stages.append(self.live_stage(live, bool(stages)))
             if verified and not live["verified"] and not stages[:-1]:
                 verified = False
+        unneeded = self.unneeded(plan["merge_list"])
+        plan["unneeded"] = unneeded
+        removing = [p for p in (unneeded or {}).get("packages") or [] if p["remove"]]
+        if removing:
+            # after the update: it may still need them while it builds
+            stages.append(self.depclean_stage(unneeded, bool(stages)))
         preserved = self.preserved(fixes, temp_use, system)
         rebuilds = (preserved or {}).get("merge_list") or []
         if stages or rebuilds:
@@ -1400,9 +1463,10 @@ class Analyzer:
             plan["remaining"] = remaining
             plan["verify_error"] = check.get("error")
 
-        if not plan["merge_list"] and not rebuilds and not lives and plan["held_back"]:
+        nothing = not (plan["merge_list"] or rebuilds or lives or removing)
+        if nothing and plan["held_back"]:
             plan["status"] = "needs-help"  # not up to date: updates are stuck
-        elif not plan["merge_list"] and not rebuilds and not lives:
+        elif nothing:
             plan["status"] = "up-to-date"
         elif not verified or blocked:
             plan["status"] = "needs-help"
@@ -1464,7 +1528,8 @@ def format_report(plan):
         "ready": "%d updates ready to install, no changes needed." % len(merges)
                  if merges else
                  "%d package(s) need rebuilding, no changes needed."
-                 % (len(rebuilds) + len(lives)),
+                 % (len(rebuilds) + len(lives)) if rebuilds or lives else
+                 "Ready to remove packages nothing needs any more.",
         "needs-approval": "%d updates; %d change(s) need your approval (verified to work)."
                           % (len(merges), len(plan["fixes"]) + len(plan.get("cycles_broken") or [])
                              + sum(1 for st in plan["stages"] if st.get("approval"))),
@@ -1548,6 +1613,14 @@ def format_report(plan):
             for command in stage["commands"]:
                 out.append("       $ " + " ".join(command))
 
+    unneeded = plan.get("unneeded") or {}
+    if unneeded.get("packages") or unneeded.get("error"):
+        out.append("\nNo longer needed (emerge --depclean):")
+        if unneeded.get("error"):
+            out.append("  couldn't list them: " + unneeded["error"])
+        for p in unneeded.get("packages") or []:
+            out.append("  %s%s" % (p["cpv"], "  (removing)" if p["remove"] else ""))
+
     for note in plan.get("notes") or []:
         out.append("\nNote: " + note)
     full = plan.get("full_rebuild")
@@ -1622,7 +1695,10 @@ def summarize(plan):
     changes = (len(plan.get("fixes") or []) + len(plan.get("cycles_broken") or [])
                + sum(1 for s in plan.get("stages") or [] if s.get("approval")))
     problems = [c for c in plan.get("checks") or [] if c["severity"] == "error"]
-    if status == "ready" and not merges:
+    if status == "ready" and not count:
+        title = "Remove packages nothing needs"
+        body = []
+    elif status == "ready" and not merges:
         title = "%d package%s need%s rebuilding" % (
             count, "s" if count != 1 else "", "" if count != 1 else "s")
         body = []
@@ -1659,10 +1735,10 @@ def summarize(plan):
         return "Update check failed", "Open the report for details."
     else:
         mine = len(plan.get("held_by_you") or [])
-        return "System is up to date", (
+        return "System is up to date", " ".join(([
             "%d package%s kept at %s version by your choices."
-            % (mine, "s" if mine != 1 else "", "their" if mine != 1 else "its")
-            if mine else "")
+            % (mine, "s" if mine != 1 else "", "their" if mine != 1 else "its")]
+            if mine else []) + _unneeded_note(plan))
     if lives and merges:
         body.append("Includes rebuilding %d live package%s."
                     % (len(lives), "s" if len(lives) != 1 else ""))
@@ -1675,7 +1751,21 @@ def summarize(plan):
     if plan.get("news_unread"):
         body.append("%d unread news item%s." % (plan["news_unread"],
                                                 "s" if plan["news_unread"] != 1 else ""))
+    body += _unneeded_note(plan)
     return title, " ".join(body)
+
+
+def _unneeded_note(plan):
+    """A sentence about packages nothing needs, if there are any"""
+    packages = (plan.get("unneeded") or {}).get("packages") or []
+    removing = sum(1 for p in packages if p["remove"])
+    if removing:
+        return ["Removes %d package%s nothing needs any more."
+                % (removing, "s" if removing != 1 else "")]
+    if packages:
+        return ["%d installed package%s no longer needed."
+                % (len(packages), "s are" if len(packages) != 1 else " is")]
+    return []
 
 
 def main(argv=None):
@@ -1687,6 +1777,8 @@ def main(argv=None):
                                           "requested settings, choices)")
     parser.add_argument("--live", action="store_true",
                         help="also check live packages for new upstream commits")
+    parser.add_argument("--depclean", action="store_true",
+                        help="also list packages nothing needs (emerge --depclean)")
     parser.add_argument("--config-root", default="/",
                         help="analyze against another PORTAGE_CONFIGROOT")
     parser.add_argument("targets", nargs="*",
@@ -1706,12 +1798,13 @@ def main(argv=None):
                         requested=request.get("requested") or (),
                         live=bool(request.get("live")),
                         live_exclude=request.get("live_exclude") or (),
-                        world=request.get("world") or ()).analyze()
+                        world=request.get("world") or (),
+                        depclean=bool(request.get("depclean"))).analyze()
         plan["request"] = request
         plan["signature"] = plan_signature(plan)
     else:
         plan = Analyzer(args.targets or None, args.config_root, choices=choices,
-                        live=args.live).analyze()
+                        live=args.live, depclean=args.depclean).analyze()
     if args.json:
         with open(args.json, "w") as f:
             json.dump(plan, f, indent=1)
