@@ -6,7 +6,9 @@
     and how to change it.
 
     What it accepts by itself (the planner verified each change works):
-      - USE and keyword changes the update needs
+      - USE changes the update needs
+      - keyword changes (testing versions) the update needs, if the user
+        allowed them (auto_testing in updater.conf)
       - temporary USE changes that break a circular dependency (made for
         one stage, then taken out again)
 
@@ -40,14 +42,15 @@ ACCEPTED_KINDS = ("use", "keywords")
 MAX_ROUNDS = 4
 
 
-def refusals(plan):
+def refusals(plan, allow_testing=False):
     """What in a plan the autopilot won't accept: ({choice list: [values]},
     {value: what it was, for the news})"""
+    accepted = ACCEPTED_KINDS if allow_testing else ("use",)
     found, seen = {"reject_fixes": [], "decline": []}, {}
     for fix in plan.get("fixes") or []:
         if fix.get("requested"):
             continue  # the user's own
-        if fix.get("unlocks") or fix["kind"] not in ACCEPTED_KINDS:
+        if fix.get("unlocks") or fix["kind"] not in accepted:
             found["reject_fixes"].append(fix["line"])
             seen[fix["line"]] = {"type": "fix", **fix}
     for stage in plan.get("stages") or []:
@@ -57,7 +60,7 @@ def refusals(plan):
     return found, seen
 
 
-def plan_by_itself(analyze, standing, log=lambda m: None):
+def plan_by_itself(analyze, standing, log=lambda m: None, allow_testing=False):
     """Plan with the autopilot's decisions: analyze(choices) -> plan.
     Returns (plan, refused) where refused maps each choice value it added
     to what it was."""
@@ -69,7 +72,7 @@ def plan_by_itself(analyze, standing, log=lambda m: None):
         for key, values in extra.items():
             choices[key] = sorted(set(choices[key]) | set(values))
         plan = analyze(choices)
-        found, seen = refusals(plan)
+        found, seen = refusals(plan, allow_testing)
         new = {k: [v for v in vs if v not in extra[k]] for k, vs in found.items()}
         if not any(new.values()):
             break
@@ -132,6 +135,8 @@ def _refused_text(item):
                 "Open Updates and click Check now: it is offered there for held-back "
                 "updates, for you to tick.")
     reason = {
+        "keywords": "This is a testing version, and automatic updates are set not to "
+                    "use testing versions (Settings, Updates).",
         "licenses": "Accepting a licence can be a legal agreement, so Porthole never "
                     "does it for you.",
         "unmask": "Masked versions are usually known to be broken or unsafe, so "

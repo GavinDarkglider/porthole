@@ -61,6 +61,8 @@
         # update in News).
         # Empty: not chosen yet, Porthole asks when it starts.
         automation =
+        # auto: may it accept testing (~arch) versions an update needs?
+        auto_testing = no
 
     Copyright (C) 2026 Porthole developers
 
@@ -141,6 +143,7 @@ DEFAULTS = {
     "live_exclude": "",
     "offer_depclean": "yes",
     "automation": "",
+    "auto_testing": "no",
     "build_window": "",
     "window_needs_ac": "yes",
     "idle_minutes": "15",
@@ -168,6 +171,7 @@ def load_config(path=CONFIG_FILE):
         "offer_depclean": section.getboolean("offer_depclean", True),
         "automation": (section.get("automation", "").strip()
                        if section.get("automation", "").strip() in AUTOMATION else None),
+        "auto_testing": section.getboolean("auto_testing", False),
         "build_window": _window(section.get("build_window", "")),
         "window_needs_ac": section.getboolean("window_needs_ac", True),
         "idle_minutes": _minutes(section.get("idle_minutes")),
@@ -495,7 +499,8 @@ class Service:
             refused = None
             if self.config["automation"] == "auto" and not from_runner:
                 from porthole.updater.autopilot import plan_by_itself
-                plan, refused = plan_by_itself(analyze, standing, self.log)
+                plan, refused = plan_by_itself(analyze, standing, self.log,
+                                               allow_testing=self.config["auto_testing"])
             else:
                 plan = analyze(standing)
             plan["sync"] = sync_info

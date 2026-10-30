@@ -192,7 +192,16 @@ LEVELS = (
      "window. Each update gets one news item: what it did, why, and how to change it."),
 )
 WINDOW_KEYS = ("build_window", "window_needs_ac", "idle_minutes", "pause_when_active",
-               "low_priority")
+               "low_priority", "auto_testing")
+
+
+def _testing_keyword():
+    """~amd64, or whatever this machine's testing keyword is"""
+    try:
+        import portage
+        return "~" + portage.settings["ARCH"]
+    except Exception:
+        return "~arch"
 
 
 def automation_settings(values):
@@ -220,6 +229,18 @@ class AutomationBox(Gtk.Grid):
             hint.set_markup("<small>%s</small>" % GLib.markup_escape_text(explanation))
             self.attach(hint, 0, row, 2, 1)
             row += 1
+            if value == "auto":
+                self.testing = Gtk.CheckButton(
+                    label="Allow testing (%s) versions when an update needs one"
+                    % _testing_keyword(), margin_start=26)
+                self.testing.set_tooltip_text(
+                    "Sometimes an update only works with a newer version that Gentoo "
+                    "still marks as testing. Ticked, the automatic update uses it (and "
+                    "says so in News); unticked, it holds back what needs it and leaves "
+                    "it for you.")
+                self.testing.set_active(config["auto_testing"])
+                self.attach(self.testing, 0, row, 2, 1)
+                row += 1
         self.levels.get(config["automation"] or "notify").set_active(True)
 
         self.window_label = Gtk.Label(label="Build window", xalign=0, margin_top=6)
@@ -271,6 +292,7 @@ class AutomationBox(Gtk.Grid):
         for widget in (self.window_label, self.window_from, self.window_to, self.window_ac,
                        self.idle_label, self.idle_minutes, self.pause):
             widget.set_sensitive(on)
+        self.testing.set_sensitive(self.level() == "auto")
 
     def values(self):
         """The settings as chosen; ValueError if the window isn't one"""
@@ -283,7 +305,8 @@ class AutomationBox(Gtk.Grid):
                 "window_needs_ac": self.window_ac.get_active(),
                 "idle_minutes": self.idle_minutes.get_value_as_int(),
                 "pause_when_active": self.pause.get_active(),
-                "low_priority": self.low_priority.get_active()}
+                "low_priority": self.low_priority.get_active(),
+                "auto_testing": self.testing.get_active()}
 
 
 def ask_automation(parent=None):
