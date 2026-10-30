@@ -1,161 +1,87 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
 <html>
 <head>
-
-
-
-
-  
-  
-  
-  
   <title>Porthole Help</title>
   <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
 </head>
-
-
 <body>
-
-
-
 <img style="float: left;" src="../pixmaps/porthole-about.png">
 <div class="toc">
 <iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
 </div>
-
-
-
-<br>
-
-
-
-<br>
-
-
-
-<br>
-
-
-
-<br>
-
-
+<br><br><br><br>
 
 <h1>Update Packages</h1>
 
+<h2>How updates work</h2>
+<p>Porthole keeps your system up to date in the background. Every few days
+(seven by default) it syncs the package tree and, if you ask it to, checks
+what an update of your whole system (<b>@world</b>, which includes the
+system set and your profile's packages) would do. The check is made the
+way emerge itself would make it, so slots, dependency pins and
+everything your installed packages pull in are taken into account.</p>
 
+<p>When updates are waiting, the Porthole icon in the system tray says so;
+hover over it for a summary. How often the tree is synced, and whether a
+check follows, are set on the Updates page of
+<a href="customize.html">Settings</a>.</p>
 
-<h2>Upgradable Packages</h2>
-
-
-<p>To view the packages that you are able to upgrade, select the
-"Upgradable Packages" view from the selector to the left of the search
-bar. This will bring up a list of the packages where Portage's
-recommended version differs from the currently installed version. Note
-that if you have not selected "Upgradeonly" in the "Settings" menu,
-this may also include packages that will be downgraded to a lower
-version if they are selected. &nbsp;Downgrade recommended packages are
-in red print while upgradeable packages are in blue print</p>
-<p><br>
-Upon completion of the upgradeables list search it will display four
-(4) categories of packages. &nbsp;They are Sets, Dependencies, World
-and System. &nbsp;If you have defined and package "Sets" in
-/etc/portage/sets/ &nbsp;then there will be an expander arrow next to
-its name. &nbsp;Expanding it will list all package set names.
-&nbsp;Also the number of packages detected as being upgradeable for
-each package listing is listed next to its category name.
-&nbsp;Currently, packages are listed in only one category. &nbsp;That
-category is chosen by the following order:</p>
-<ol>
-  <li>System. &nbsp;The package is a system package.</li>
-  <li>Sets. &nbsp;The package is listed in a /etc/portage/sets/ file.
-&nbsp;The order for selection is currently alphabetical. &nbsp;Sets are
-currently supported in porthole for portage versions that do not have
-built-in sets support. &nbsp;Built-in sets support is part of
-portage-2.2 and later versions. &nbsp;Any sets packages will be handled
-like any other package by portage for any emerge operations. &nbsp;The
-"sets" support is only handled by porthole itself. &nbsp;Pkgcore and
-Paludis have built-in "sets" support, but this version of porthole
-cannot be configured to use those package managers for installs.</li>
-  <li>World. &nbsp;The package was not chosen for inclusion in any of
-the previous categories nad is listed in the "world" file. &nbsp;Note
-that not all world file packages will be listed. &nbsp;Packages that
-fit in any of the previuos categories have been filtered out already
-and are listed in those categories.</li>
-  <li>Dependencies. &nbsp;Any upgradeable package that did not fit any
-of the previuos categories are listed here. &nbsp;Any upgrade
-selections here will have the --oneshot option added to their command
-to prevent them from being added to your world file.</li>
-</ol>
-
-
-<p>By default, none of the&nbsp;packages listed will&nbsp;be selected for you.&nbsp;If
-you wish to select all
-or none of the available packages, right-click somewhere in the package
-list and choose "Select All" or "De-Select All". &nbsp;Individual package
-selection is done by clicking on each pacgage and clicking on the
-checkbox to select or de-select that package for update.</p>
-
-
-<p>When you are happy with the selection of packages to upgrade, clicking
-the "Upgrade" button in the toolbar will add the selected
-packages&nbsp;to the <a href="termwindow.html">Terminal Window</a><span style="text-decoration: underline;">'s</span>
-emerge queue, with appropriate emerge options. &nbsp;The packages sent
-are only the packages selected in the packages listing being viewed.
-&nbsp;It will not add packages from any of the other categories.</p>
-
-<img style="width: 797px; height: 791px;" alt="&quot;Upgradeable Packages&quot; image" src="upgradeables.png"><br>
-
-<h2><br>
-</h2>
-<h2>Advanced Upgrades</h2>
-
-
-<p>If you just want to upgrade everything on your system, it is sometimes best to run a <a href="custcmd.html">custom command</a> instead. Some possibilities are:</p>
-
-
+<h2>The Update Assistant</h2>
+<p>Click the <b>Updates</b> toolbar button (or choose
+<b>Porthole &rarr; Update Assistant</b>, or the tray icon) to open the
+Update Assistant. It shows the plan: what will be updated, rebuilt or
+removed, and anything that needs your attention first, such as:</p>
 <ul>
-
-
-  <li><span style="font-weight: bold;">emerge --update world</span> - update all packages in your world file</li>
-
-
-  <li><span style="font-weight: bold;">emerge --update --deep world</span> - as above, but upgrade dependencies as well</li>
-
-
-  <li><span style="font-weight: bold;">emerge --update --deep --newuse world</span> - as above, but also recompile packages affected by any changes in use flag settings</li>
-
-
-  <li><span style="font-weight: bold;">emerge --update --deep --newuse --tree --pretend --verbose world</span>
-- show everything that could be updated and what it depends on in a
-nice organised tree, with details of use flags, versions and download
-sizes, then calculate the expected amount of time it will take :).</li>
-
-
-  <li><span style="font-weight: bold;">emerge --update system</span> - update your system files</li>
-
-
-  <li>etc.</li>
-
-
+  <li>configuration changes (USE flags, keywords or unmasks) the update
+needs. Porthole only suggests changes it has verified actually let the
+update through;</li>
+  <li>packages that are <b>held back</b>, with the choices for each (for
+example keeping the current version, or accepting the change that lets
+it update);</li>
+  <li>libraries still in use by programs that need rebuilding
+(@preserved-rebuild), and live (-9999) packages with new commits, if you
+turned live rebuilds on;</li>
+  <li>Gentoo news you haven't read.</li>
 </ul>
-&nbsp;&nbsp;&nbsp; Custom commands can be entered in the "Run Custom
-Command" dialog which is activated by the "Actions" menu option.
-&nbsp;Further information about running custom commands can be found <a href="custcmd.html" target="">here</a>.
+<p>You can untick packages you don't want updated this time, and make
+choices for held-back packages; the plan is worked out again with your
+choices before anything runs. <b>Check now</b> makes a fresh plan from
+the package tree you have, without waiting for the next background
+check.</p>
 
-<p>
+<p>Nothing needs a password until you press <b>Start</b>. The update then
+runs in Porthole's job runner, as root, in the background: you can close
+the assistant, the main window and the job window, and the update keeps
+going. Reopen the job window with <b>Show progress</b> in the tray icon's menu.</p>
 
+<h2>The Updates Available view</h2>
+<p>Choosing <b>Updates Available</b> in the view selector (to the left of
+the search box) lists the same packages as the plan, grouped as:</p>
+<ul>
+  <li><b>System</b> &ndash; packages in the system set;</li>
+  <li><b>Sets</b> &ndash; packages in one of your package sets;</li>
+  <li><b>World</b> &ndash; packages you installed yourself (in the world
+file);</li>
+  <li><b>Dependencies</b> &ndash; everything else the update pulls in;</li>
+  <li><b>Held back</b> &ndash; packages the plan can't update yet. The
+Update Assistant explains why and what you can do.</li>
+</ul>
+<p>The <b>Recommended</b> column shows the version the plan installs. For
+a held-back package it shows, in brackets, the version it is being kept
+from.</p>
 
-</p>
+<p>To update only some packages, tick them and choose
+<b>Package &rarr; Update Packages</b>. They are added to the
+<a href="install.html">install queue</a> together; packages that aren't
+in your world file are updated one-shot, so they aren't added to it.
+With nothing ticked, Update Packages opens the Update Assistant.</p>
 
-
-<hr>
-<a name="notes">Notes:</a>
-<br>
-
-
-
-
+<h2>Running emerge yourself</h2>
+<p>You can still run any emerge command line with
+<b>Porthole &rarr; Run Custom Command</b>
+(see <a href="custcmd.html">Custom Commands</a>), for example
+<b>emerge --update --deep --newuse @world</b>. Installs and removals run in
+the job runner like everything else.</p>
 
 </body>
 </html>

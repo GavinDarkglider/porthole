@@ -87,201 +87,70 @@ Main window</span>
 
 
 <h2>Menu Bar</h2>
+<p>The menu bar has three menus: Porthole, Package and Help. When
+plugins are installed, their menu appears before Help.</p>
 
+<h3>Porthole Menu</h3>
+<ul>
+  <li><u>Update Assistant</u> - Review the plan for updating your system
+and start it. See <a href="update.html">Update Packages</a>.</li>
+  <li><u>News</u> - Read Gentoo news and mark it read.</li>
+  <li><u>Settings</u> - Porthole's settings, including how often to sync
+and check for updates.</li>
+  <li><u>Plugin Settings</u> - Settings for installed plugins.</li>
+  <li><u>Open Log</u> - Open a saved emerge log.</li>
+  <li><u>Run Custom Command</u> - Run an emerge command line of your own.
+See <a href="custcmd.html">Custom Commands</a>.</li>
+  <li><u>Reload Database</u> - Read the package database again.</li>
+  <li><u>Re-initialize Portage</u> - Re-read portage's configuration
+(make.conf and /etc/portage) after you changed it.</li>
+  <li><u>Quit</u> - Close Porthole. Jobs that are running carry on.</li>
+</ul>
 
-<p>The menu bar has four sub-menues: Action, Settings, Help and
-Active Plugins.
-&nbsp;Each menu item has a hot key combo to select it from the
-keyboard.
-</p>
-
-
-<h3>Action Menu</h3>
-
-
+<h3>Package Menu</h3>
 <div class="warnright"><b>Warning</b>:
 advanced emerge is just what it says--advanced! &nbsp;Resist the
 temptation to use this until you understand how portage works.
-&nbsp;Using the standard emerge will warn you if problems exist and
-always install the best version.
 </div>
-
-
 <ul>
-
-
-  <li><u>Emerge Package</u> -
-Install/reinstall the
-selected package. </li>
-
-
-  <li><u>Advanced Emerge Package</u> -
-Install/reinstall the selected package, but gives you fine-grained
-control of emerge options, use flags<a href="#notes"><span class="note">1</span></a> and keywords<a href="#notes"><span class="note">1</span></a>.
-  </li>
-
-
-  <li><u>Unmerge Package</u> - Uninstall the
-selected package. </li>
-
-
-  <li><u>Sync Tree</u> - Sync the portage
-tree. </li>
-
-
-  <li><u>Upgrade Packages</u> - Display a
-list of all packages that can be upgraded. </li>
-
-
-  <li><u>Open Emerge Log</u> - Open an
-existing emerge log. </li>
-
-
-  <li><u>Run Custom Command</u> - Run custom
-command. </li>
-
-
-  <li><u>Reload Database</u> - Reload the
-package database </li>
-
-
-  <li><u>Re-Initialize Portage</u> -
-Re-Initializes Porthole's imported portage modules to see changes made
-to /etc/make.conf, etc. </li>
-
-
-  <li><u>Quit</u> - Exit the program. </li>
-
-
+  <li><u>Emerge Package</u> - Add the selected package to the
+<a href="install.html">install queue</a>.</li>
+  <li><u>Emerge one-shot</u> - The same, without adding the package to
+your world file.</li>
+  <li><u>Advanced Emerge</u> - Choose the version, USE flags<a href="#notes"><span class="note">1</span></a>,
+keywords<a href="#notes"><span class="note">1</span></a> and emerge options, then add it to the queue.</li>
+  <li><u>Unmerge Package</u> - Remove the selected package.</li>
+  <li><u>Update Packages</u> - Update the packages ticked in the Updates
+Available view, or with nothing ticked, open the Update Assistant.</li>
 </ul>
-
-
-<h3>Settings Menu</h3>
-
-
-<ul>
-
-
-  <li><u>Pretend</u> - If set, Emerge will
-output information about what would have been done in stead of doing
-anything. </li>
-
-
-  <li><u>Update</u> - Updates  packages to the best version available,
-which may not always be the highest version number<br>due to masking for 
-testing and development. </li>
-
-
-  <li><u>Only Fetch</u> - Just downloads the
-files needed to install, but
-does not actually install the package. </li>
-
-
-  <li><u>Verbose</u> - Asks Emerge to output
-extra information where possible. This is most useful in conjunction
-with "Pretend". </li>
-
-
-	<li><u>Noreplace</u> - Skips  the  packages
-specified  on the command-line that have already been installed. </li>
-
-
-  <li><u>Search Descriptions</u> - Look
-through descriptions as well as names when searching for a package.</li>
-
-
-  <li><span style="text-decoration: underline;">Plugin
-Settings</span>
-- Allows the user to modify settings for any Porthole plugins that are
-installed.</li>
-
-
-  <li><span style="text-decoration: underline;">Configure
-Porthole</span>
-- Opens Porthole's main configuration window.</li>
-
-
-</ul>
-
 
 <h3>Help Menu</h3>
-
-
 <ul>
-
-
-  <li><u>Contents</u> - Opens a browser with
-the local HELP index file </li>
-
-
-  <li><u>About</u> - Displays version,
-authors and links to home page and help system. </li>
-
-
+  <li><u>Contents</u> - Opens these help pages in your browser.</li>
+  <li><u>About</u> - Version, authors and links to the home page.</li>
 </ul>
 
-
-<h3>Active Plugins</h3>
-
-
-<p>This will be visible only if, and contain a list of active
-plugins installed</p>
-
-
 <h2>Tool Bar</h2>
-
-
 <div class="tipright"><b>TIP:</b> The toolbar
 has its short cut keys underlined--hold down the ALT key then press the
 short-cut key!
 </div>
-
-
-<p>The tool bar provides an alternative to the menu
-bar and can save you a
-click or two.
-</p>
-
-
 <ul>
-
-
-  <li><u>Emerge</u> - Same as
-Action menu Emerge Package. </li>
-
-
-  <li><u>Adv Emerge</u> - Same as Action
-menu Advanced Emerge Package. </li>
-
-
-  <li><u>Unmerge</u> - Same as Action menu
-Unmerge. </li>
-
-
-  <li><u>Sync</u> - Same as Action menu Sync
-Tree. The tooltip for this button also displays the date &amp; time
-of the last sync by hovering the mouse over it. </li>
-
-
-  <li><u>Upgrade</u> - Same as Action menu
-Upgrade Packages.</li>
-
-
-  <li><u>Queue</u> - Will give options to pause, run
-or set a timer for the terminal queue but is not yet coded in this
-window. Please use the buttons on the bottom left of the terminal
-window.</li>
-
-
+  <li><u>Emerge</u> - Same as Package menu Emerge Package. The arrow beside
+it offers Emerge one-shot.</li>
+  <li><u>Adv Emerge</u> - Same as Package menu Advanced Emerge.</li>
+  <li><u>Unmerge</u> - Same as Package menu Unmerge Package.</li>
+  <li><u>Updates</u> - Opens the Update Assistant. Its tooltip summarises
+the latest update check and shows when the tree was last synced.</li>
+  <li><u>Queue</u> - Shows the install queue, where you process it.</li>
 </ul>
 
+<p>Porthole runs as you. It asks for your password only when you
+approve a change: starting an update or install, removing a package,
+or marking news read.</p>
 
-<p>In addition, if porthole is run as a non-root user, there will
-be an icon on the right-hand side of the toolbar to remind the user.<br>
-
-
-</p>
-
+<p>Right-clicking a package in the package list offers the same actions,
+plus <u>Change USE flags</u> for installed packages.</p>
 
 <h2>View
 Selector</h2>
@@ -308,8 +177,9 @@ only the packages installed on your system. </li>
 packages meeting your search criteria, or review previous searches. </li>
 
 
-  <li><u>Upgradable Packages</u> - Display
-only the packages that portage recommends you upgrade (or downgrade). </li>
+  <li><u>Updates Available</u> - Display
+the packages the latest update plan updates or holds back. See
+<a href="update.html">Update Packages</a>. </li>
 
 
   <li><u>Deprecated Packages</u> - Display
@@ -324,7 +194,7 @@ similar to gnome-base/gnome. This works with current portage versions
 which do net yet have sets support. Please be advised that this is
 early code inclusion and may not always follow specific package
 versions specified. Please file any bugs in porthole bug tracker. The
-upgrades listing will also list any sets defined and will list those
+Updates Available listing will also list any sets defined and will list those
 packages only in their set and be removed from the "World" listing
 displayed. Portage will soon be able to wiht package sets and some code
 is now is testing. I will update porthole as needed to correctly work
@@ -371,16 +241,17 @@ with the individual packages.
 currently selected view. The columns indicate, from left to right: the
 name of the package, the installed version number (if any), the version
 that portage recommends installing, the size of files to be downloaded,
-and a short description of the package. In the "Upgradable Packages"
-view there will also be a column with checkboxes so you can indicate to
-Porthole which packages should be upgraded and which should not.</p>
+and a short description of the package. In the "Updates Available"
+view the recommended version is the one the update plan installs, and
+there is also a column of checkboxes for choosing packages to update
+with Package &rarr; Update Packages.</p>
 
 
 <p>In
-all views except the "Upgradable Packages" view, there will be an icon
+all views except the "Updates Available" view, there will be an icon
 beside the name of installed packages. Packages in your "world" file
 (those explicitly installed by you) will be <span style="font-weight: bold;">marked in bold type</span>,
-while packages that portage recommends upgrading will by default be <span style="color: rgb(0, 0, 255);">marked in blue</span>,
+while packages that portage recommends updating will by default be <span style="color: rgb(0, 0, 255);">marked in blue</span>,
 and those portage recommends downgrading <span style="color: rgb(250, 0, 0);">marked in red</span>. </p>
 
 
@@ -564,7 +435,7 @@ Figure 5. Change Log Tab
 
 <p>If available, the change log text <em>(figure 5)</em> is shown here.
 &nbsp;This is a good resource to use to help decide if you
-want to upgrade/install it or not. &nbsp;Look here for information on bug
+want to update/install it or not. &nbsp;Look here for information on bug
 fixes and new features.  The text is now custom highlighted to make it easier
 to find and identify the information you are seeking.  The bug #'s are
  also click-able to open you browser to the bugzilla bug at bugzilla.gentoo.org.

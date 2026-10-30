@@ -27,7 +27,7 @@ from gettext import gettext as _
 
 from porthole import config
 from porthole import db
-from porthole.utils import utils, debug
+from porthole.utils import debug
 from porthole.readers.search import SearchReader
 from porthole.views.packagebook.notebook import PackageNotebook
 from porthole.views.package import PackageView
@@ -210,44 +210,26 @@ class PackageHandler(MainBase):
         return False
 
     def send_pkg_list(self, action):
-        """prepares the action command string for the whole
-        self.packages_list and initiates them
-         """
-        if self.is_root or config.Prefs.emerge.pretend:
-            emerge_cmd = action
-        elif utils.can_sudo():
-            emerge_cmd = 'sudo -p "Password: " %s ' % action
-        else: # can't sudo, not root
-            # display not root dialog and return.
-            self.check_for_root()
+        """Send the ticked packages on as one request: installs and updates
+        go into the install queue together (one entry, one popup), removals
+        to the job runner as one job. Packages not in the world file are
+        installed --oneshot, so updating a dependency doesn't add it there."""
+        options = config.Prefs.emerge.get_string().split()
+        if action.split()[:2] == ["emerge", "--unmerge"]:
+            self.setup_command(_("Remove %d packages") % len(self.keyorder),
+                               " ".join([action.strip()] + options + self.keyorder))
             return
-        #debug.dprint(self.packages_list)
-        #debug.dprint(self.keyorder)
-        for key in self.keyorder:
-            if not self.packages_list[key].in_world:
-                debug.dprint("PackageHandler: upgrade_packages(); " +
-                    "dependancy selected: " + key)
-                options = config.Prefs.emerge.get_string()
-                # handle --unmerge as exact cat/pkg-ver?
-                if action in ["emerge --unmerge "]:
-                    opts = set(['--pretend', '--depclean']).intesection(
-                        set(options.split()))
-                    options = ' '.join(opts)
-                    #
-                    if self.last_view_setting == SHOW_DEPRECATED:
-                        # only unmerge exact deprecated version
-                        pass
-
-                elif "--oneshot" not in options:
-                    options = options + " --oneshot "
-                if not self.setup_command(key, emerge_cmd  +
-                        options + key[:]): #use the full name
-                    return
-            elif not self.setup_command(key,
-                    emerge_cmd + config.Prefs.emerge.get_string() +
-                    ' '+key[:]):
-                    #use the full name
-                return
+        world = [k for k in self.keyorder if self.packages_list[k].in_world]
+        others = [k for k in self.keyorder if k not in world]
+        if "--oneshot" in action.split():
+            world, others = [], world + others
+        base = action.split()[1:]
+        for keys, extra in ((world, []), (others, ["--oneshot"])):
+            if not keys:
+                continue
+            name = keys[0] if len(keys) == 1 else _("%d packages") % len(keys)
+            self.setup_command(name, " ".join(
+                ["emerge"] + base + [o for o in extra + options if o not in base] + keys))
 
     def is_group_selectable(self):
         return self.last_view_setting in GROUP_SELECTABLE
