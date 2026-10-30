@@ -828,6 +828,21 @@ def submit_emerge(tokens):
     return job
 
 
+def submit_command(line):
+    """Queue a custom command line from an unlocked Porthole, which showed
+    it to the user to confirm. It runs as root in bash, without input."""
+    line = line.strip()
+    if not line or "\n" in line or "\0" in line:
+        raise JobError("A custom command is one line")
+    title = "Run: " + (line if len(line) <= 60 else line[:57] + "...")
+    job = new_job("command", title, [{"kind": "shell", "title": title, "shell": line}],
+                  recheck=True)
+    with jobs_state() as state:
+        state["jobs"].append(job)
+        prune(state)
+    return job
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")

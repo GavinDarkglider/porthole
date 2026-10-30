@@ -20,6 +20,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk
 
 from porthole.updater.elevate import run_as_root, service
+from porthole.updater.session import TIMEOUTS, unlock_minutes
 from porthole.updater.service import STATE_FILE, last_repo_sync, load_config, read_json
 
 
@@ -108,11 +109,29 @@ class UpdaterSettingsPage(Gtk.Grid):
         self.attach(self.depclean, 0, row, 2, 1)
         row += 1
 
+        heading = Gtk.Label(xalign=0, margin_top=8)
+        heading.set_markup("<b>Unlocking</b>")
+        self.attach(heading, 0, row, 2, 1)
+        row += 1
+        self.attach(Gtk.Label(label="Unlock Porthole for", xalign=0), 0, row, 1, 1)
+        self.unlock_time = Gtk.ComboBoxText()
+        for minutes, label in TIMEOUTS:
+            self.unlock_time.append(str(minutes), label)
+        self.unlock_time.set_active_id(str(unlock_minutes()))
+        self.attach(self.unlock_time, 1, row, 1, 1)
+        row += 1
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        hint.set_markup("<small>Unlock (on the toolbar) asks for the password once; "
+                        "until this time is up changes need no password. It is "
+                        "your own setting, used from the next unlock.</small>")
+        self.attach(hint, 0, row, 2, 1)
+        row += 1
+
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last sync: %s.  Last check: %s.\nThe schedule runs "
                           "from cron every hour and only does anything when due. Check "
                           "now in the update assistant never needs a sync. Changing "
-                          "these asks for administrator rights.</small>"
+                          "the settings above asks for administrator rights.</small>"
                           % (_ago(last_repo_sync()), _ago(state.get("last_check"))))
         self.attach(status, 0, row, 2, 1)
 
@@ -126,6 +145,8 @@ class UpdaterSettingsPage(Gtk.Grid):
 
     def save(self, callback=None):
         """Save if anything changed; callback(ok, message) when done"""
+        from porthole import config
+        config.Prefs.globals.unlock_minutes = int(self.unlock_time.get_active_id())
         values = self.values()
         if values == self.saved_config:
             if callback:

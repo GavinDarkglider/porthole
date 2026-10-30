@@ -351,6 +351,8 @@ class PortholePreferences:
             ["archlist", ["alpha", "amd64", "arm", "hppa", "ia64", "mips",
                             "ppc", "ppc64", "s390", "sparc", "x86"]],
             ["Sync", "emerge --sync"],
+            # how long Unlock lasts, minutes; 0: until Porthole closes
+            ["unlock_minutes", 15],
             ["Sync_label", _("Sync")],
             #                use the form " [sync-command, sync-label],
             # note: this is now hard-coded below
@@ -486,6 +488,7 @@ class PortholePreferences:
         ##dom.additem('/globals/enable_all_keywords', self.globals.enable_all_keywords)
         dom.additem('/globals/archlist', self.globals.archlist)
         dom.additem('/globals/Sync', self.globals.Sync)
+        dom.additem('/globals/unlock_minutes', self.globals.unlock_minutes)
         dom.additem('/globals/Sync_label', self.globals.Sync_label)
         #dom.additem('/globals/Sync_methods', self.globals.Sync_methods)
         dom.additem('/plugins/active_list', self.plugins.active_list)

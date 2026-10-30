@@ -17,9 +17,13 @@
         submit emerge -- CMD...     queue an emerge from Porthole (checked)
         submit install --request J  plan an install; queue it unless it needs review
         submit install --plan F --generated T   queue a reviewed install plan
+        submit command -- LINE      queue a custom command (Porthole, unlocked)
         cancel [JOB]                cancel queued jobs, stop the running one
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
+        plan --request J            work out a plan as root, printed as JSON
+        sets NAME...                root-only sets (security, preserved-rebuild)
+        session [--minutes N]       Porthole's root helper (see session.py)
 
     Settings live in /etc/porthole/updater.conf:
 
@@ -229,6 +233,46 @@ def security_packages(log):
         return None
 
 
+# sets only root can work out (see readers/sets.py)
+ROOT_SETS = ("security", "preserved-rebuild")
+
+
+def preserved_rebuild_packages():
+    from porthole.updater.runner import preserved_rebuild_packages
+    return preserved_rebuild_packages(lambda m: print(m, file=sys.stderr))
+
+
+def plan_command(text):
+    """Work out a plan for a request as root (an unlocked Porthole's Check
+    now and install planning: root sees the old libraries still in use).
+    The plan goes to stdout as JSON; the analyzer's talk to stderr."""
+    from porthole.updater import runner
+    from porthole.updater.analyze import plan_signature
+    try:
+        runner.check_request(text)
+    except runner.JobError as e:
+        print(e, file=sys.stderr)
+        return 3
+    request = json.loads(text)
+    out = os.dup(1)
+    os.dup2(2, 1)  # whatever emerge prints mustn't land in the JSON
+    try:
+        plan = Analyzer(request["targets"], choices=request.get("choices"),
+                        requested=request.get("requested") or (),
+                        live=bool(request.get("live")),
+                        live_exclude=request.get("live_exclude") or (),
+                        world=request.get("world") or (),
+                        depclean=bool(request.get("depclean"))).analyze()
+    finally:
+        sys.stdout.flush()
+        os.dup2(out, 1)
+        os.close(out)
+    plan["request"] = request
+    plan["signature"] = plan_signature(plan)
+    json.dump(plan, sys.stdout, indent=1)
+    return 0
+
+
 def check_lock(wait=True):
     """Hold this while checking, so two checks never overlap. Returns
     the open lock file, or None if not waiting and it is taken."""
@@ -346,7 +390,7 @@ def main(argv=None):
     run.add_argument("--quiet", action="store_true", help="only write the log file")
     sub.add_parser("status", help="show the last plan")
     submit = sub.add_parser("submit", help="queue a job for the runner")
-    submit.add_argument("kind", choices=("update", "check", "emerge", "install"))
+    submit.add_argument("kind", choices=("update", "check", "emerge", "install", "command"))
     submit.add_argument("--plan", help="update: the 'generated' time of the plan reviewed; "
                                        "install: the reviewed plan file")
     submit.add_argument("--generated", help="install --plan: its 'generated' time")
@@ -359,7 +403,7 @@ def main(argv=None):
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
     # after "--", so its options aren't taken for submit's own
     submit.add_argument("cmdline", nargs="*", metavar="CMD",
-                        help="emerge: the command line, after --")
+                        help="emerge, command: the command line, after --")
     cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
     cancel.add_argument("job", nargs="?", help="only this job")
     cancel.add_argument("--drop", action="store_true",
@@ -371,6 +415,13 @@ def main(argv=None):
     news.add_argument("state", choices=("read", "unread"))
     news.add_argument("--repo", default="gentoo")
     news.add_argument("names", nargs="+", metavar="ITEM")
+    plan = sub.add_parser("plan", help="work out a plan as root (JSON on stdout)")
+    plan.add_argument("--request", required=True, help="what to plan (JSON)")
+    sets = sub.add_parser("sets", help="list root-only sets as JSON")
+    sets.add_argument("names", nargs="+", choices=sorted(ROOT_SETS))
+    session = sub.add_parser("session", help="root helper for an unlocked Porthole")
+    session.add_argument("--minutes", type=int, default=15,
+                         help="lock again after this long (0: when Porthole closes)")
     sub.add_parser("runner", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -401,6 +452,16 @@ def main(argv=None):
 
     if os.geteuid() != 0:
         parser.error("%s needs root" % args.command)
+    if args.command == "session":
+        from porthole.updater.session import serve
+        return serve(args.minutes)
+    if args.command == "plan":
+        return plan_command(args.request)
+    if args.command == "sets":
+        found = {"security": lambda: security_packages(lambda m: print(m, file=sys.stderr)),
+                 "preserved-rebuild": lambda: preserved_rebuild_packages()}
+        print(json.dumps({name: found[name]() for name in args.names}))
+        return 0
     if args.command != "run":
         return job_command(args, parser)
     lock = check_lock(wait=False)
@@ -442,9 +503,10 @@ def job_command(args, parser):
                 else:
                     print("review", what)
                 return 0
-            if args.kind == "emerge":
+            if args.kind in ("emerge", "command"):
                 tokens = args.cmdline[1:] if args.cmdline[:1] == ["--"] else args.cmdline
-                job = runner.submit_emerge(tokens)
+                job = (runner.submit_emerge(tokens) if args.kind == "emerge"
+                       else runner.submit_command(" ".join(tokens)))
             elif args.kind == "update":
                 if not args.plan:
                     parser.error("submit update needs --plan")

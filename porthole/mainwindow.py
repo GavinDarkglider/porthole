@@ -180,6 +180,17 @@ class MainWindow(PluginHandler):
         self.watch_jobs()
         self.setup_install_queue()
         self.setup_emerge_choices()
+        self.setup_lock_button()
+
+    def setup_lock_button(self):
+        """Unlock (one password for a while) / Lock, after Queue"""
+        from porthole.updater.session import lock_button
+        toolbar = self.wtree.get_object("toolbar")
+        queue = self.wtree.get_object("btn_queue")
+        button = lock_button(tool=True)
+        button.set_homogeneous(True)
+        toolbar.insert(button, toolbar.get_item_index(queue) + 1)
+        button.show()
 
     def setup_emerge_choices(self):
         """Emerge or Emerge one-shot, chosen when emerging (the arrow on

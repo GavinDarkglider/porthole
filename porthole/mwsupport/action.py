@@ -25,6 +25,8 @@
 
 from gettext import gettext as _
 
+from gi.repository import GLib, Gtk
+
 from porthole import config
 from porthole import db
 
@@ -262,19 +264,78 @@ class ActionHandler(CategoryHandler):
         if self.submit_to_runner(package_name, command):
             return True
         is_pretend = config.Prefs.emerge.pretend or utils.pretend_check(command)
-        if not (run_anyway or is_pretend or utils.help_check(command)
-                or utils.info_check(command)):
-            SingleButtonDialog(_("Porthole can't run this"), self.mainwindow,
-                               _("'%s' needs root, and the job runner only runs emerge "
-                                 "commands that install, update, remove or sync. Run it "
-                                 "in a root terminal instead.") % command, None, _("OK"))
+        harmless = is_pretend or utils.help_check(command) or utils.info_check(command)
+        from porthole.updater.session import SESSION
+        if not harmless and SESSION.unlocked():
+            # as root, if the user says so on seeing the exact command
+            return self.confirm_root_command(package_name, command, as_user=run_anyway)
+        if not (run_anyway or harmless):
+            if self.offer_unlock(_("Porthole can't run this"),
+                                 _("'%s' needs root, and the job runner only runs emerge "
+                                   "commands that install, update, remove or sync. Unlock "
+                                   "Porthole to run it as root.") % command):
+                SESSION.unlock(lambda ok, message: self.unlocked_for(
+                    ok, message, package_name, command, run_anyway))
             return False
-        if is_pretend or utils.help_check(command) or utils.info_check(command):
+        if harmless:
             callback = lambda: None  # changes nothing
         else:
             callback = self.reload_db  # a custom command may have
         self.process_manager.add(package_name, command, callback,
             _("Porthole Main Window"))
+        return True
+
+    def offer_unlock(self, title, text):
+        """A message about something needing root, with an Unlock button:
+        True if that was clicked"""
+        dialog = Gtk.MessageDialog(transient_for=self.mainwindow, modal=True,
+                                   message_type=Gtk.MessageType.INFO,
+                                   buttons=Gtk.ButtonsType.NONE, text=title)
+        dialog.set_title("Porthole")
+        dialog.format_secondary_text(text)
+        dialog.add_buttons(_("Close"), Gtk.ResponseType.CLOSE,
+                           _("Unlock..."), Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        return answer == Gtk.ResponseType.OK
+
+    def unlocked_for(self, ok, message, package_name, command, run_anyway):
+        if not ok:
+            from porthole.updater.session import unlock_failed
+            unlock_failed(self.mainwindow, message)
+            return
+        self.setup_command(package_name, command, run_anyway)
+
+    def confirm_root_command(self, package_name, command, as_user=False):
+        """While unlocked, a custom command (or one the runner won't take)
+        can run as root, as a runner job, once the user has seen it.
+        as_user: running it as the user is offered too."""
+        dialog = Gtk.MessageDialog(transient_for=self.mainwindow, modal=True,
+                                   message_type=Gtk.MessageType.WARNING,
+                                   buttons=Gtk.ButtonsType.NONE,
+                                   text=_("Run this command as root?"))
+        dialog.set_title("Porthole")
+        dialog.format_secondary_markup(
+            "<tt>%s</tt>\n\n%s" % (GLib.markup_escape_text(command), _(
+                "Porthole is unlocked, so this can run as root. It runs as a job "
+                "in the job window and can't ask you anything while it runs; "
+                "it is not checked the way installs are, so be sure of it.")))
+        dialog.add_button(_("Cancel"), Gtk.ResponseType.CANCEL)
+        if as_user:
+            dialog.add_button(_("Run as you"), 1)
+        dialog.add_button(_("Run as root"), Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer == 1:
+            self.process_manager.add(package_name, command, self.reload_db,
+                                     _("Porthole Main Window"))
+            return True
+        if answer != Gtk.ResponseType.OK:
+            return False
+        from porthole.updater.elevate import run_as_root, service
+        run_as_root(service("submit", "command", "--", command),
+                    lambda ok, out: self.runner_submitted(package_name, ok, out))
         return True
 
     def emerge_package(self, package, oneshot=False):

@@ -126,7 +126,9 @@ class UpdateAssistant(Gtk.Window):
         self.recheck_button = Gtk.Button(label="Check now")
         self.recheck_button.connect("clicked", self.on_recheck)
         self.recheck_button.set_tooltip_text(
-            "Work out the update again from the package tree you have (no password)")
+            "Work out the update again from the package tree you have (no password; "
+            "while Porthole is unlocked it is worked out as root, which also finds "
+            "programs still using old libraries)")
         self.sync_button = Gtk.Button(label="Sync now")
         self.sync_button.set_tooltip_text(
             "Sync the package tree, then check for updates (asks for your password)")
@@ -149,6 +151,8 @@ class UpdateAssistant(Gtk.Window):
         buttons.pack_start(self.progress_button, False, False, 0)
         buttons.pack_start(self.cancel_button, False, False, 0)
         buttons.pack_start(settings, False, False, 0)
+        from porthole.updater.session import lock_button
+        buttons.pack_start(lock_button(), False, False, 0)
         buttons.pack_end(self.start_button, False, False, 0)
         buttons.pack_end(close, False, False, 0)
         outer.pack_start(buttons, False, False, 0)

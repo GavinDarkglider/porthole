@@ -56,7 +56,12 @@ def category(group, name):
 def set_packages(config, name):
     """The package names in a set (nested sets included)"""
     if name in FROM_ROOT_CHECK:
-        # root's own plan (the user's can't see these)
+        # as they are now, if Porthole is unlocked
+        from porthole.updater.session import root_sets
+        live = root_sets([name])
+        if live is not None:
+            return set(live.get(name) or ())
+        # else root's own plan (the user can't see these)
         from porthole.updater.service import PLAN_FILE, read_json
         plan = read_json(PLAN_FILE) or {}
         if name == "security":

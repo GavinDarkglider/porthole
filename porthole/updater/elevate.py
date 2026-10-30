@@ -41,7 +41,11 @@ def service(*args):
 
 
 def run_as_root(argv, callback):
-    """Run argv as root without blocking; callback(ok, output) when done"""
+    """Run argv as root without blocking; callback(ok, output) when done.
+    While Porthole is unlocked its root helper runs it (no password)."""
+    from porthole.updater.session import SESSION
+    if SESSION.run(argv, callback):
+        return
     if os.geteuid() == 0:
         _spawn(argv, callback)
     elif shutil.which("sudo"):
@@ -56,10 +60,13 @@ def run_as_root(argv, callback):
 def plan_as_user(request, callback, out=None):
     """Work out an install as the user (resolving needs no root):
     callback(plan_file, error). The plan is only for review; the runner
-    plans again as root and installs only if it arrives at the same plan."""
+    plans again as root and installs only if it arrives at the same plan.
+    While Porthole is unlocked it is worked out as root, which also sees
+    the old libraries still in use (so @preserved-rebuild is in it)."""
     import json
     import tempfile
     from porthole.updater.commands import LOCAL, SRC
+    from porthole.updater.session import SESSION
     cache = os.path.join(os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
                          "porthole", "plans")
     os.makedirs(cache, exist_ok=True)
@@ -68,6 +75,21 @@ def plan_as_user(request, callback, out=None):
             os.unlink(os.path.join(cache, old))
         except OSError:
             pass
+
+    def planned_as_root(reply):
+        if not reply["ok"]:
+            callback(None, reply["error"].strip() or "The planner didn't produce a plan.")
+            return
+        path = out
+        if not path:
+            fd, path = tempfile.mkstemp(prefix="plan-", suffix=".json", dir=cache)
+            os.close(fd)
+        with open(path + ".new", "w") as f:
+            f.write(reply["output"])
+        os.replace(path + ".new", path)
+        callback(path, None)
+    if SESSION.service(["plan", "--request", json.dumps(request)], planned_as_root):
+        return
     fd, request_file = tempfile.mkstemp(prefix="request-", suffix=".json", dir=cache)
     with os.fdopen(fd, "w") as f:
         json.dump(request, f)
