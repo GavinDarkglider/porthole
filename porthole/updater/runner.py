@@ -264,7 +264,9 @@ def submit_update(generated, later=False, auto=None):
     title = title[:1].upper() + title[1:]
     extra = later_extra(later)
     if auto is not None:
-        extra.update(auto=True, cpvs=auto, by="automatic (nothing to decide)")
+        decided = plan.get("status") == "needs-approval" or plan.get("auto")
+        extra.update(auto=True, cpvs=auto, by="automatic (%s)" % (
+            "Porthole decided; see News" if decided else "nothing to decide"))
     job = new_job("update", title, steps, recheck=True, plan=generated, **extra)
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
@@ -654,6 +656,16 @@ class Runner:
         if status != "done":
             extra["preserved_rebuild"] = preserved_rebuild_packages(log)
         self.update(job_id, status=status, finished=time.time(), **extra)
+        with jobs_state(write=False) as state:
+            news_item = find_job(state, job_id).get("news")  # added after queuing
+        if news_item:
+            # the automatic update's news item gets its outcome
+            try:
+                from porthole.updater import autopilot, news
+                news.append_porthole_item(news_item, autopilot.result_text(
+                    dict(job, status=status)))
+            except Exception as e:
+                log("!! couldn't add the result to the news item: %s" % e)
         if job.get("recheck"):
             log("\n== Checking what is left to update")
             try:
@@ -1007,7 +1019,7 @@ def set_config(changes, path=CONFIG_FILE):
     current = load_config(path)
     level = clean.get("automation", current["automation"])
     window = (clean["build_window"] if "build_window" in clean else current["build_window"])
-    if level in ("approve", "safe") and not window:
+    if level in ("approve", "safe", "auto") and not window:
         raise JobError("Building in the build window needs a build window")
     try:
         with open(path) as f:

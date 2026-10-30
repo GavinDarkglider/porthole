@@ -225,6 +225,7 @@ class UpdateAssistant(Gtk.Window):
             self._stages(plan)
             self._notes(plan)
         self._held_by_you(plan)
+        self._left_by_auto(plan)
         self._unneeded(plan)
         self._packages(plan)
 
@@ -323,6 +324,21 @@ class UpdateAssistant(Gtk.Window):
             inner.pack_start(_label("In your world file but no repository has them any "
                                     "more: " + ", ".join(plan["missing_world"]),
                                     selectable=True), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+
+    def _left_by_auto(self, plan):
+        """What the automatic update left for the user to decide"""
+        auto = plan.get("auto")
+        if not auto or not (auto.get("held") or auto.get("refused")):
+            return
+        box, inner = _section("Left for you by the automatic update")
+        inner.pack_start(_label(
+            "Porthole planned this update by itself and left these for you (News has "
+            "the details). Click Check now to see them offered for you to decide."),
+            False, False, 0)
+        for h in auto.get("held") or []:
+            inner.pack_start(_label("%s: %s" % (h["cp"], h["why"]), margin_start=12),
+                             False, False, 0)
         self.content.pack_start(box, False, False, 0)
 
     def _held_by_you(self, plan):

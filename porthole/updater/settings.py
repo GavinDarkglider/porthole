@@ -186,6 +186,10 @@ LEVELS = (
      "If an update needs no decision from you (no settings to change), it is "
      "queued for the build window without asking. Anything needing a decision "
      "waits for you."),
+    ("auto", "Fully automatic: Porthole decides, and tells you what it did in News",
+     "Porthole makes the safe decisions itself (only changes it has checked; never "
+     "licences, unmasking, compiler switches or removals) and builds in the build "
+     "window. Each update gets one news item: what it did, why, and how to change it."),
 )
 WINDOW_KEYS = ("build_window", "window_needs_ac", "idle_minutes", "pause_when_active",
                "low_priority")

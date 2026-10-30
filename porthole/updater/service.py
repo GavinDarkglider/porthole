@@ -55,8 +55,10 @@
         # build at the lowest CPU and disk priority
         low_priority = yes
         # how much happens by itself: notify (tell only), approve (approved
-        # updates are built in the build window) or safe (updates with
-        # nothing to decide are queued for the build window unasked).
+        # updates are built in the build window), safe (updates with
+        # nothing to decide are queued for the build window unasked) or
+        # auto (Porthole makes the safe decisions itself, and reports each
+        # update in News).
         # Empty: not chosen yet, Porthole asks when it starts.
         automation =
 
@@ -125,9 +127,11 @@ SLACK = 3600
 
 # how much the update service does by itself (see settings.LEVELS):
 # notify: tell only; approve: approved updates are built in the build
-# window; safe: plans with nothing to decide are queued for it unasked.
+# window; safe: plans with nothing to decide are queued for it unasked;
+# auto: the planner makes the safe decisions itself and queues the update,
+# writing one news item per update (autopilot.py).
 # Unset until someone answers Porthole's first-start question.
-AUTOMATION = ("notify", "approve", "safe")
+AUTOMATION = ("notify", "approve", "safe", "auto")
 
 DEFAULTS = {
     "interval_days": "7",
@@ -401,27 +405,58 @@ class Service:
         return {"ran": True, "ok": ok, "last": now if ok else recent,
                 "error": None if ok else output[-2000:]}
 
-    def queue_safe(self, plan):
+    def queue_auto(self, plan, refused):
+        """automation = auto: queue what the autopilot planned, and report
+        it (or why it can't) in one news item"""
+        from porthole.updater import autopilot, news
+        from porthole.updater.window import format_window
+        status = plan.get("status")
+        if status == "up-to-date" and not refused:
+            return
+        window = format_window(self.config["build_window"])
+        job = None
+        if status in ("ready", "needs-approval"):
+            job = self.queue_safe(plan, statuses=("ready", "needs-approval"))
+            if job is None:
+                return  # already queued, or the same failed: nothing new to say
+            self.save_state(auto_news_about=None)
+        else:
+            # nothing it can build: say so once, not at every check
+            said = [status, sorted(refused), sorted(h["cpv"] for h in plan.get("held_back")
+                                                    or [])]
+            if self.state.get("auto_news_about") == said:
+                return
+            self.save_state(auto_news_about=said)
+        title, body = autopilot.news_text(plan, refused, window, job and job["id"])
+        name = news.write_porthole_item(title, body)
+        self.log("News item %s: %s" % (name, title))
+        if job:
+            from porthole.updater import runner
+            with runner.jobs_state() as state:
+                runner.find_job(state, job["id"])["news"] = name
+
+    def queue_safe(self, plan, statuses=("ready",)):
         """automation = safe: a plan with nothing to decide (verified, no
         settings to change, no approval stages) is queued for the build
         window without asking. Not again if the same one failed before."""
         from porthole.updater import runner
-        if plan.get("status") != "ready":
-            return
+        if plan.get("status") not in statuses:
+            return None
         cpvs = sorted(m["cpv"] for m in plan.get("merge_list") or [])
         jobs = (read_json(runner.JOBS_FILE, {}) or {}).get("jobs", [])
         last = next((j for j in reversed(jobs) if j.get("auto")), None)
         if last and last["status"] == "failed" and last.get("cpvs") == cpvs:
             self.log("Not queuing the update by itself again: the same one failed "
                      "last time (see the job log); it waits for you")
-            return
+            return None
         try:
             job = runner.submit_update(plan["generated"], later=True, auto=cpvs)
         except runner.JobError as e:
             self.log("Couldn't queue the update by itself: %s" % e)
-            return
-        self.log("Nothing to decide: queued %s for the build window" % job["id"])
+            return None
+        self.log("Queued %s for the build window by itself" % job["id"])
         runner.start_runner()
+        return job
 
     def run(self, force=False, sync=True, from_runner=False):
         if not from_runner:
@@ -450,10 +485,19 @@ class Service:
             if not force and not self.config["check_updates"]:
                 self.log("Synced; checking for updates is turned off")
                 return 0 if (sync_info or {}).get("ok", True) else 1
-            plan = Analyzer(log=self.log, choices=read_json(CHOICES_FILE),
-                            live=self.config["live_rebuild"],
-                            live_exclude=self.config["live_exclude"],
-                            depclean=self.config["offer_depclean"]).analyze()
+
+            def analyze(choices):
+                return Analyzer(log=self.log, choices=choices,
+                                live=self.config["live_rebuild"],
+                                live_exclude=self.config["live_exclude"],
+                                depclean=self.config["offer_depclean"]).analyze()
+            standing = read_json(CHOICES_FILE)
+            refused = None
+            if self.config["automation"] == "auto" and not from_runner:
+                from porthole.updater.autopilot import plan_by_itself
+                plan, refused = plan_by_itself(analyze, standing, self.log)
+            else:
+                plan = analyze(standing)
             plan["sync"] = sync_info
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds, "
@@ -462,7 +506,9 @@ class Service:
                         len((plan.get("preserved") or {}).get("merge_list") or []),
                         len((plan.get("live") or {}).get("changed") or [])))
             self.save_state(last_check=time.time(), last_status=plan.get("status"))
-            if self.config["automation"] == "safe" and not from_runner:
+            if refused is not None:
+                self.queue_auto(plan, refused)
+            elif self.config["automation"] == "safe" and not from_runner:
                 self.queue_safe(plan)
             return 0 if plan.get("status") != "error" else 1
         finally:

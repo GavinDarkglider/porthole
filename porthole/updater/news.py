@@ -20,6 +20,12 @@ import os
 import re
 
 NEWS_STATE = "/var/lib/gentoo/news"
+# Porthole's own items (what an automatic update decided), in the same
+# format, with their own unread list; shown as repository "porthole"
+PORTHOLE = "porthole"
+PORTHOLE_NEWS = "/var/lib/porthole/news"
+PORTHOLE_UNREAD = os.path.join(PORTHOLE_NEWS, "unread")
+KEEP_ITEMS = 50
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$")
 
 
@@ -76,15 +82,27 @@ def parse(path):
     return headers, body.strip()
 
 
+def _sources():
+    """(repo, news directory, unread names, relevant names) for each source"""
+    for repo, directory in repositories().items():
+        unread = _lines(os.path.join(NEWS_STATE, "news-%s.unread" % repo))
+        # .skip lists every relevant item portage has seen; .unread those not read
+        relevant = _lines(os.path.join(NEWS_STATE, "news-%s.skip" % repo))
+        yield repo, directory, unread, relevant + [n for n in unread if n not in relevant]
+    yield PORTHOLE, PORTHOLE_NEWS, _lines(PORTHOLE_UNREAD), _porthole_items()
+
+
+def _porthole_items():
+    return sorted(n for n in _listdir(PORTHOLE_NEWS)
+                  if _NAME.match(n) and os.path.isdir(os.path.join(PORTHOLE_NEWS, n)))
+
+
 def items():
     """Relevant news items, newest first: [{repo, name, title, posted,
     author, unread, path}]"""
     found = []
-    for repo, directory in repositories().items():
-        unread = set(_lines(os.path.join(NEWS_STATE, "news-%s.unread" % repo)))
-        # .skip lists every relevant item portage has seen; .unread those not read
-        relevant = _lines(os.path.join(NEWS_STATE, "news-%s.skip" % repo))
-        relevant += [n for n in unread if n not in relevant]
+    for repo, directory, unread, relevant in _sources():
+        unread = set(unread)
         for name in relevant:
             path = _item_file(directory, name)
             if not path:
@@ -100,8 +118,8 @@ def items():
 
 def unread_count():
     return sum(len(_lines(path)) for path in
-               (os.path.join(NEWS_STATE, f) for f in _listdir(NEWS_STATE))
-               if path.endswith(".unread"))
+               [os.path.join(NEWS_STATE, f) for f in _listdir(NEWS_STATE)
+                if f.endswith(".unread")] + [PORTHOLE_UNREAD])
 
 
 def _listdir(path):
@@ -116,8 +134,12 @@ def set_read(repo, names, read=True):
     lists as relevant for that repository"""
     if not _NAME.match(repo or ""):
         raise ValueError("Not a repository name: %s" % repo)
-    unread_file = os.path.join(NEWS_STATE, "news-%s.unread" % repo)
-    relevant = set(_lines(os.path.join(NEWS_STATE, "news-%s.skip" % repo)))
+    if repo == PORTHOLE:
+        unread_file = PORTHOLE_UNREAD
+        relevant = set(_porthole_items())
+    else:
+        unread_file = os.path.join(NEWS_STATE, "news-%s.unread" % repo)
+        relevant = set(_lines(os.path.join(NEWS_STATE, "news-%s.skip" % repo)))
     unread = _lines(unread_file)
     relevant |= set(unread)
     for name in names:
@@ -136,6 +158,50 @@ def set_read(repo, names, read=True):
         os.chmod(tmp, stat.st_mode & 0o7777)
     os.replace(tmp, unread_file)
     return len(unread)
+
+
+def write_porthole_item(title, body, name=None):
+    """Add (or with name, replace) one of Porthole's own news items, as
+    root, unread. Returns its name."""
+    import time
+    if not name:
+        base = name = time.strftime("%Y-%m-%d-update-%H%M%S")
+        n = 1
+        while os.path.exists(os.path.join(PORTHOLE_NEWS, name)):
+            n += 1
+            name = "%s-%d" % (base, n)
+    folder = os.path.join(PORTHOLE_NEWS, name)
+    os.makedirs(folder, mode=0o755, exist_ok=True)
+    path = os.path.join(folder, "%s.en.txt" % name)
+    text = ("Title: %s\nAuthor: Porthole\nContent-Type: text/plain\nPosted: %s\n"
+            "Revision: 1\nNews-Item-Format: 2.0\n\n%s"
+            % (title, name[:10], body))
+    with open(path + ".new", "w") as f:
+        f.write(text)
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    unread = _lines(PORTHOLE_UNREAD)
+    if name not in unread:
+        with open(PORTHOLE_UNREAD + ".new", "w") as f:
+            f.write("".join(n + "\n" for n in unread + [name]))
+        os.chmod(PORTHOLE_UNREAD + ".new", 0o644)
+        os.replace(PORTHOLE_UNREAD + ".new", PORTHOLE_UNREAD)
+    import shutil
+    for old in _porthole_items()[:-KEEP_ITEMS]:
+        shutil.rmtree(os.path.join(PORTHOLE_NEWS, old), ignore_errors=True)
+    return name
+
+
+def append_porthole_item(name, text):
+    """Add to one of Porthole's items (the result of its build), as root,
+    and mark it unread again"""
+    if not _NAME.match(name or ""):
+        return
+    path = os.path.join(PORTHOLE_NEWS, name, "%s.en.txt" % name)
+    headers, body = parse(path)
+    if not headers:
+        return
+    write_porthole_item(headers.get("Title", name), body + "\n" + text, name)
 
 
 # -- the window ------------------------------------------------------------------
@@ -162,7 +228,7 @@ except (ImportError, ValueError):  # the service imports this module too
 if Gtk is not None:
     class NewsWindow(Gtk.Window):
         def __init__(self):
-            super().__init__(title="Porthole: Gentoo news")
+            super().__init__(title="Porthole: News")
             from porthole.updater.commands import icon_path
             if icon_path():
                 self.set_icon_from_file(icon_path())
