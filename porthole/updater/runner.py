@@ -264,7 +264,8 @@ def submit_update(generated, later=False, auto=None):
     title = title[:1].upper() + title[1:]
     extra = later_extra(later)
     if auto is not None:
-        decided = plan.get("status") == "needs-approval" or plan.get("auto")
+        decided = (plan.get("status") == "needs-approval"
+                   or (plan.get("auto") or {}).get("refused"))
         extra.update(auto=True, cpvs=auto, by="automatic (%s)" % (
             "Porthole decided; see News" if decided else "nothing to decide"))
     job = new_job("update", title, steps, recheck=True, plan=generated, **extra)
