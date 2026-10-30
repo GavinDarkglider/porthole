@@ -76,7 +76,7 @@ def set_packages(config, name):
 
 def packages_of(name, config=None):
     """{name: Package} for a set, for the package view"""
-    if config is None:
+    if config is None and name not in FROM_ROOT_CHECK:
         import portage
         from portage._sets import load_default_config
         config = load_default_config(portage.settings, portage.db[portage.root])

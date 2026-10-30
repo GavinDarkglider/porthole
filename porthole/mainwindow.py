@@ -184,13 +184,28 @@ class MainWindow(PluginHandler):
 
     def setup_lock_button(self):
         """Unlock (one password for a while) / Lock, after Queue"""
-        from porthole.updater.session import lock_button
+        from porthole.updater.session import SESSION, lock_button
         toolbar = self.wtree.get_object("toolbar")
         queue = self.wtree.get_object("btn_queue")
         button = lock_button(tool=True)
         button.set_homogeneous(True)
         toolbar.insert(button, toolbar.get_item_index(queue) + 1)
         button.show()
+        self.was_unlocked = False
+        SESSION.listeners.append(self.lock_changed)
+
+    def lock_changed(self):
+        """On unlocking, the Sets view's root-only sets (@security,
+        @preserved-rebuild) are worked out again, as they are now"""
+        from porthole.updater.session import SESSION
+        was, self.was_unlocked = self.was_unlocked, SESSION.unlocked()
+        if was or not self.was_unlocked or not self.loaded.get("Sets"):
+            return
+        from porthole.readers.sets import FROM_ROOT_CHECK, NB_HYPHEN
+        for category in list(self.pkg_list.get("Sets") or {}):
+            name = category.partition("-@")[2].replace(NB_HYPHEN, "-")
+            if name in FROM_ROOT_CHECK:
+                self.work_out_set(category, name)
 
     def setup_emerge_choices(self):
         """Emerge or Emerge one-shot, chosen when emerging (the arrow on
