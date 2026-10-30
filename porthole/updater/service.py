@@ -54,6 +54,11 @@
         pause_when_active = yes
         # build at the lowest CPU and disk priority
         low_priority = yes
+        # how much happens by itself: notify (tell only), approve (approved
+        # updates are built in the build window) or safe (updates with
+        # nothing to decide are queued for the build window unasked).
+        # Empty: not chosen yet, Porthole asks when it starts.
+        automation =
 
     Copyright (C) 2026 Porthole developers
 
@@ -118,6 +123,12 @@ DAY = 24 * 3600
 # cron fires on the hour; don't skip a day because the last run ended late
 SLACK = 3600
 
+# how much the update service does by itself (see settings.LEVELS):
+# notify: tell only; approve: approved updates are built in the build
+# window; safe: plans with nothing to decide are queued for it unasked.
+# Unset until someone answers Porthole's first-start question.
+AUTOMATION = ("notify", "approve", "safe")
+
 DEFAULTS = {
     "interval_days": "7",
     "check_updates": "yes",
@@ -125,6 +136,7 @@ DEFAULTS = {
     "live_rebuild": "yes",
     "live_exclude": "",
     "offer_depclean": "yes",
+    "automation": "",
     "build_window": "",
     "window_needs_ac": "yes",
     "idle_minutes": "15",
@@ -150,6 +162,8 @@ def load_config(path=CONFIG_FILE):
         "live_rebuild": section.getboolean("live_rebuild", True),
         "live_exclude": section.get("live_exclude", "").split(),
         "offer_depclean": section.getboolean("offer_depclean", True),
+        "automation": (section.get("automation", "").strip()
+                       if section.get("automation", "").strip() in AUTOMATION else None),
         "build_window": _window(section.get("build_window", "")),
         "window_needs_ac": section.getboolean("window_needs_ac", True),
         "idle_minutes": _minutes(section.get("idle_minutes")),
@@ -160,6 +174,8 @@ def load_config(path=CONFIG_FILE):
 
 def setting_text(key, value):
     """A loaded setting as updater.conf writes it"""
+    if value is None:
+        return ""
     if key == "build_window":
         from porthole.updater.window import format_window
         return format_window(value) if value else ""
@@ -385,6 +401,28 @@ class Service:
         return {"ran": True, "ok": ok, "last": now if ok else recent,
                 "error": None if ok else output[-2000:]}
 
+    def queue_safe(self, plan):
+        """automation = safe: a plan with nothing to decide (verified, no
+        settings to change, no approval stages) is queued for the build
+        window without asking. Not again if the same one failed before."""
+        from porthole.updater import runner
+        if plan.get("status") != "ready":
+            return
+        cpvs = sorted(m["cpv"] for m in plan.get("merge_list") or [])
+        jobs = (read_json(runner.JOBS_FILE, {}) or {}).get("jobs", [])
+        last = next((j for j in reversed(jobs) if j.get("auto")), None)
+        if last and last["status"] == "failed" and last.get("cpvs") == cpvs:
+            self.log("Not queuing the update by itself again: the same one failed "
+                     "last time (see the job log); it waits for you")
+            return
+        try:
+            job = runner.submit_update(plan["generated"], later=True, auto=cpvs)
+        except runner.JobError as e:
+            self.log("Couldn't queue the update by itself: %s" % e)
+            return
+        self.log("Nothing to decide: queued %s for the build window" % job["id"])
+        runner.start_runner()
+
     def run(self, force=False, sync=True, from_runner=False):
         if not from_runner:
             from porthole.updater.runner import runner_active
@@ -424,6 +462,8 @@ class Service:
                         len((plan.get("preserved") or {}).get("merge_list") or []),
                         len((plan.get("live") or {}).get("changed") or [])))
             self.save_state(last_check=time.time(), last_status=plan.get("status"))
+            if self.config["automation"] == "safe" and not from_runner:
+                self.queue_safe(plan)
             return 0 if plan.get("status") != "error" else 1
         finally:
             self.save_state(running=False)

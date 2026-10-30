@@ -231,9 +231,10 @@ def later_extra(later):
     return {"when": "window"}
 
 
-def submit_update(generated, later=False):
+def submit_update(generated, later=False, auto=None):
     """Queue the reviewed plan; `generated` names the plan the user saw.
-    later: wait for the build window"""
+    later: wait for the build window. auto: queued by the service itself
+    (automation = safe), with the package versions it updates"""
     plan = read_json(PLAN_FILE)
     if not plan:
         raise JobError("There is no update plan. Check for updates first.")
@@ -261,8 +262,10 @@ def submit_update(generated, later=False):
         parts.append("remove %d unneeded" % removing)
     title = " and ".join(parts)
     title = title[:1].upper() + title[1:]
-    job = new_job("update", title, steps, recheck=True, plan=generated,
-                  **later_extra(later))
+    extra = later_extra(later)
+    if auto is not None:
+        extra.update(auto=True, cpvs=auto, by="automatic (nothing to decide)")
+    job = new_job("update", title, steps, recheck=True, plan=generated, **extra)
     with jobs_state() as state:
         if any(j["kind"] == "update" for j in active_jobs(state)):
             raise JobError("An update is already queued or running.")
@@ -973,6 +976,11 @@ def set_config(changes, path=CONFIG_FILE):
             except ValueError as e:
                 raise JobError(str(e))
             clean[key] = format_window(window) if window else ""
+        elif key == "automation":
+            from porthole.updater.service import AUTOMATION
+            if value not in AUTOMATION:
+                raise JobError("automation must be one of: " + ", ".join(AUTOMATION))
+            clean[key] = value
         elif key == "idle_minutes":
             try:
                 minutes = int(value)
@@ -996,6 +1004,11 @@ def set_config(changes, path=CONFIG_FILE):
             if value.lower() not in ("yes", "no", "true", "false", "on", "off", "1", "0"):
                 raise JobError("%s must be yes or no" % key)
             clean[key] = "yes" if value.lower() in ("yes", "true", "on", "1") else "no"
+    current = load_config(path)
+    level = clean.get("automation", current["automation"])
+    window = (clean["build_window"] if "build_window" in clean else current["build_window"])
+    if level in ("approve", "safe") and not window:
+        raise JobError("Building in the build window needs a build window")
     try:
         with open(path) as f:
             lines = f.read().splitlines()

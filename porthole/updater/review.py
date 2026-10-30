@@ -641,6 +641,9 @@ class UpdateAssistant(Gtk.Window):
             dialog.add_button("Build %s" % format_window(build_window), LATER)
         dialog.add_button("Start %s now" % what if build_window else "Start " + what,
                           Gtk.ResponseType.OK)
+        if build_window:
+            # the way the admin chose for updates to run
+            dialog.set_default_response(LATER)
         response = dialog.run()
         dialog.destroy()
         if response not in (Gtk.ResponseType.OK, LATER):

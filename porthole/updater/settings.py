@@ -17,7 +17,7 @@ import time
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import GLib, Gtk
 
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.window import format_window, parse_window
@@ -110,59 +110,18 @@ class UpdaterSettingsPage(Gtk.Grid):
         row += 1
 
         heading = Gtk.Label(xalign=0, margin_top=8)
-        heading.set_markup("<b>Build window</b>")
+        heading.set_markup("<b>How updates are run</b>")
         self.attach(heading, 0, row, 2, 1)
         row += 1
-        window = config["build_window"]
-        self.use_window = Gtk.CheckButton(label="Offer to build approved updates between")
-        self.use_window.set_tooltip_text(
-            "Approve an update now and have it built while nobody is working, "
-            "e.g. overnight. Starting one straight away is still up to you.")
-        self.use_window.set_active(window is not None)
-        times = Gtk.Box(spacing=6)
-        text = format_window(window or (60, 360)).split("-")
-        self.window_from = Gtk.Entry(text=text[0], width_chars=5, max_length=5)
-        self.window_to = Gtk.Entry(text=text[1], width_chars=5, max_length=5)
-        times.pack_start(self.window_from, False, False, 0)
-        times.pack_start(Gtk.Label(label="and"), False, False, 0)
-        times.pack_start(self.window_to, False, False, 0)
-        self.attach(self.use_window, 0, row, 1, 1)
-        self.attach(times, 1, row, 1, 1)
+        if config["automation"] is None:
+            note = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+            note.set_markup("<small><i>Not chosen yet: Porthole asks when it starts. "
+                            "Choose here and save to answer it now.</i></small>")
+            self.attach(note, 0, row, 2, 1)
+            row += 1
+        self.automation = AutomationBox(config)
+        self.attach(self.automation, 0, row, 2, 1)
         row += 1
-        self.window_ac = Gtk.CheckButton(label="Only on mains power")
-        self.window_ac.set_active(config["window_needs_ac"])
-        self.attach(self.window_ac, 0, row, 2, 1)
-        row += 1
-        self.attach(Gtk.Label(label="Wait until nobody has used it for", xalign=0),
-                    0, row, 1, 1)
-        idle = Gtk.Box(spacing=6)
-        self.idle_minutes = Gtk.SpinButton.new_with_range(0, 240, 5)
-        self.idle_minutes.set_value(config["idle_minutes"])
-        idle.pack_start(self.idle_minutes, False, False, 0)
-        idle.pack_start(Gtk.Label(label="minutes"), False, False, 0)
-        self.attach(idle, 1, row, 1, 1)
-        row += 1
-        self.pause = Gtk.CheckButton(
-            label="Pause the build while someone uses the computer")
-        self.pause.set_active(config["pause_when_active"])
-        self.attach(self.pause, 0, row, 2, 1)
-        row += 1
-        self.low_priority = Gtk.CheckButton(
-            label="Build at low priority (also updates you start yourself)")
-        self.low_priority.set_tooltip_text(
-            "Builds give way to everything else you run: slower to finish, but the "
-            "computer stays responsive")
-        self.low_priority.set_active(config["low_priority"])
-        self.attach(self.low_priority, 0, row, 2, 1)
-        row += 1
-
-        def sensitive(*args):
-            on = self.use_window.get_active()
-            for widget in (self.window_from, self.window_to, self.window_ac,
-                           self.idle_minutes, self.pause):
-                widget.set_sensitive(on)
-        self.use_window.connect("toggled", sensitive)
-        sensitive()
 
         status = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         status.set_markup("<small>Last sync: %s.  Last check: %s.\nThe schedule runs "
@@ -179,19 +138,7 @@ class UpdaterSettingsPage(Gtk.Grid):
                 "live_rebuild": self.live.get_active(),
                 "live_exclude": self.live_exclude.get_text().split(),
                 "offer_depclean": self.depclean.get_active(),
-                "build_window": self.window_value(),
-                "window_needs_ac": self.window_ac.get_active(),
-                "idle_minutes": self.idle_minutes.get_value_as_int(),
-                "pause_when_active": self.pause.get_active(),
-                "low_priority": self.low_priority.get_active()}
-
-    def window_value(self):
-        """The build window as entered, None if off; ValueError if not a
-        window"""
-        if not self.use_window.get_active():
-            return None
-        return parse_window("%s-%s" % (self.window_from.get_text().strip(),
-                                       self.window_to.get_text().strip()))
+                **self.automation.values()}
 
     def save(self, callback=None):
         """Save if anything changed; callback(ok, message) when done"""
@@ -201,7 +148,13 @@ class UpdaterSettingsPage(Gtk.Grid):
             if callback:
                 callback(False, str(e))
             return
-        if values == self.saved_config:
+        saved = dict(self.saved_config)
+        if saved["automation"] is None and values["automation"] == "notify":
+            # not chosen yet, and left as shown: still the first-start question's
+            values["automation"] = None
+            if values == saved:
+                values["build_window"] = saved["build_window"]
+        if values == saved:
             if callback:
                 callback(True, "")
             return
@@ -211,9 +164,7 @@ class UpdaterSettingsPage(Gtk.Grid):
                     "live_rebuild=%s" % ("yes" if values["live_rebuild"] else "no"),
                     "live_exclude=%s" % " ".join(values["live_exclude"]),
                     "offer_depclean=%s" % ("yes" if values["offer_depclean"] else "no")]
-        settings += ["%s=%s" % (key, setting_text(key, values[key])) for key in
-                     ("build_window", "window_needs_ac", "idle_minutes",
-                      "pause_when_active", "low_priority")]
+        settings += automation_settings(values)
 
         def done(ok, output):
             if ok:
@@ -221,3 +172,174 @@ class UpdaterSettingsPage(Gtk.Grid):
             if callback:
                 callback(ok, output)
         run_as_root(service("config", *settings), done)
+
+
+# the automation levels offered, in order: (value, title, explanation)
+LEVELS = (
+    ("notify", "Tell me, I start updates myself",
+     "Porthole checks for updates and the tray tells you. Nothing is built until "
+     "you start it."),
+    ("approve", "I approve updates, they are built in the build window",
+     "You review and approve each update; it is built at a time nobody is "
+     "working. You can still start one straight away."),
+    ("safe", "Updates with nothing to decide are built in the build window by themselves",
+     "If an update needs no decision from you (no settings to change), it is "
+     "queued for the build window without asking. Anything needing a decision "
+     "waits for you."),
+)
+WINDOW_KEYS = ("build_window", "window_needs_ac", "idle_minutes", "pause_when_active",
+               "low_priority")
+
+
+def automation_settings(values):
+    """KEY=VALUE arguments for `service config` from AutomationBox values"""
+    keys = (("automation",) if values["automation"] else ()) + WINDOW_KEYS
+    return ["%s=%s" % (key, setting_text(key, values[key])) for key in keys]
+
+
+class AutomationBox(Gtk.Grid):
+    """How updates are run: the automation level and the build window.
+    The same in Settings and in the question on Porthole's first start."""
+
+    def __init__(self, config):
+        super().__init__(row_spacing=8, column_spacing=12)
+        row = 0
+        self.levels = {}
+        group = None
+        for value, title, explanation in LEVELS:
+            button = Gtk.RadioButton.new_with_label_from_widget(group, title)
+            group = group or button
+            self.levels[value] = button
+            self.attach(button, 0, row, 2, 1)
+            row += 1
+            hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60, margin_start=26)
+            hint.set_markup("<small>%s</small>" % GLib.markup_escape_text(explanation))
+            self.attach(hint, 0, row, 2, 1)
+            row += 1
+        self.levels.get(config["automation"] or "notify").set_active(True)
+
+        self.window_label = Gtk.Label(label="Build window", xalign=0, margin_top=6)
+        self.attach(self.window_label, 0, row, 1, 1)
+        times = Gtk.Box(spacing=6, margin_top=6)
+        text = format_window(config["build_window"] or (60, 360)).split("-")
+        self.window_from = Gtk.Entry(text=text[0], width_chars=5, max_length=5)
+        self.window_to = Gtk.Entry(text=text[1], width_chars=5, max_length=5)
+        times.pack_start(self.window_from, False, False, 0)
+        times.pack_start(Gtk.Label(label="to"), False, False, 0)
+        times.pack_start(self.window_to, False, False, 0)
+        self.attach(times, 1, row, 1, 1)
+        row += 1
+        self.window_ac = Gtk.CheckButton(label="Only on mains power")
+        self.window_ac.set_active(config["window_needs_ac"])
+        self.attach(self.window_ac, 0, row, 2, 1)
+        row += 1
+        self.idle_label = Gtk.Label(label="Wait until nobody has used the computer for",
+                                    xalign=0)
+        self.attach(self.idle_label, 0, row, 1, 1)
+        idle = Gtk.Box(spacing=6)
+        self.idle_minutes = Gtk.SpinButton.new_with_range(0, 240, 5)
+        self.idle_minutes.set_value(config["idle_minutes"])
+        idle.pack_start(self.idle_minutes, False, False, 0)
+        idle.pack_start(Gtk.Label(label="minutes"), False, False, 0)
+        self.attach(idle, 1, row, 1, 1)
+        row += 1
+        self.pause = Gtk.CheckButton(label="Pause the build while someone uses the computer")
+        self.pause.set_active(config["pause_when_active"])
+        self.attach(self.pause, 0, row, 2, 1)
+        row += 1
+        self.low_priority = Gtk.CheckButton(
+            label="Build at low priority (also updates started straight away)")
+        self.low_priority.set_tooltip_text(
+            "Builds give way to everything else you run: slower to finish, but the "
+            "computer stays responsive")
+        self.low_priority.set_active(config["low_priority"])
+        self.attach(self.low_priority, 0, row, 2, 1)
+
+        for button in self.levels.values():
+            button.connect("toggled", self.sensitive)
+        self.sensitive()
+
+    def level(self):
+        return next(v for v, b in self.levels.items() if b.get_active())
+
+    def sensitive(self, *args):
+        on = self.level() != "notify"
+        for widget in (self.window_label, self.window_from, self.window_to, self.window_ac,
+                       self.idle_label, self.idle_minutes, self.pause):
+            widget.set_sensitive(on)
+
+    def values(self):
+        """The settings as chosen; ValueError if the window isn't one"""
+        level = self.level()
+        window = None
+        if level != "notify":
+            window = parse_window("%s-%s" % (self.window_from.get_text().strip(),
+                                             self.window_to.get_text().strip()))
+        return {"automation": level, "build_window": window,
+                "window_needs_ac": self.window_ac.get_active(),
+                "idle_minutes": self.idle_minutes.get_value_as_int(),
+                "pause_when_active": self.pause.get_active(),
+                "low_priority": self.low_priority.get_active()}
+
+
+def ask_automation(parent=None):
+    """Porthole's first-start question: how updates should be run. Asked
+    until answered (it is system-wide, so saving it needs root)."""
+    from porthole.updater.elevate import run_as_root, service
+    config = load_config()
+    if config["automation"] is not None:
+        return False
+    dialog = Gtk.Dialog(title="Porthole: how should updates work?", transient_for=parent,
+                        modal=True)
+    dialog.add_buttons("Not now", Gtk.ResponseType.CANCEL, "Save", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+    area = dialog.get_content_area()
+    area.set_border_width(12)
+    area.set_spacing(10)
+    intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+    intro.set_markup(
+        "<b>How should Porthole keep this computer up to date?</b>\n\n"
+        "Porthole checks for updates on a schedule and works out any problems "
+        "before anything is built. Choose how much it may do by itself. Building "
+        "can take hours, so updates can wait for a time nobody is working.\n\n"
+        "<small>This is for the whole computer, so saving asks for the administrator "
+        "password. You can change it later in Settings, Updates.</small>")
+    area.pack_start(intro, False, False, 0)
+    box = AutomationBox(config)
+    area.pack_start(box, False, False, 0)
+    dialog.show_all()
+    state = {"busy": False}
+
+    def response(widget, answer):
+        if state["busy"]:
+            return
+        if answer != Gtk.ResponseType.OK:
+            dialog.destroy()  # asked again next time Porthole starts
+            return
+        try:
+            values = box.values()
+        except ValueError as e:
+            _error(dialog, "That isn't a build window", str(e))
+            return
+        state["busy"] = True
+        dialog.set_sensitive(False)
+
+        def saved(ok, output):
+            state["busy"] = False
+            dialog.set_sensitive(True)
+            if ok:
+                dialog.destroy()
+            else:
+                _error(dialog, "The choice wasn't saved", output or "Cancelled.")
+        run_as_root(service("config", *automation_settings(values)), saved)
+    dialog.connect("response", response)
+    return False
+
+
+def _error(parent, title, text):
+    dialog = Gtk.MessageDialog(transient_for=parent, modal=True,
+                               message_type=Gtk.MessageType.ERROR,
+                               buttons=Gtk.ButtonsType.CLOSE, text=title)
+    dialog.format_secondary_text(text)
+    dialog.run()
+    dialog.destroy()

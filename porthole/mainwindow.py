@@ -181,6 +181,9 @@ class MainWindow(PluginHandler):
         self.setup_install_queue()
         self.setup_emerge_choices()
         self.setup_lock_button()
+        # first start: how should updates be run? (until someone answers)
+        from porthole.updater.settings import ask_automation
+        GLib.timeout_add_seconds(2, ask_automation, self.mainwindow)
 
     def setup_lock_button(self):
         """Unlock (one password for a while) / Lock, after Queue"""
