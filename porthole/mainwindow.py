@@ -179,10 +179,6 @@ class MainWindow(PluginHandler):
         self.search_dispatcher = Dispatcher(self.search_done)
         debug.dprint("MAINWINDOW: Showing main window")
         self.mainwindow.show_all()
-        if self.is_root:
-            # hide warning toolbar widget
-            debug.dprint("MAINWINDOW: __init__(); hiding btn_root_warning")
-            self.wtree.get_object("btn_root_warning").hide()
         self.update_assistant = None
         self.add_update_assistant_menu()
         self.watch_jobs()

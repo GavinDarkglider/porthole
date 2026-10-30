@@ -59,7 +59,6 @@ class ConfigDialog:
             "on_color_set" : self.on_color_set,
             "on_color_clicked" : self.on_color_clicked,
             "on_enable_archlist_toggled" : self.toggle_archlist,
-            "on_globals_use_custom_browser_toggled" : self.toggle_browser_table,
         }
         self.builder.connect_signals(callbacks)
 
@@ -183,17 +182,10 @@ class ConfigDialog:
             'label_custom_editor',
             'custom_editor_command',
             'main_font_box',
-            'lang_box',
             'sample_scrolled_window_1',
             'sample_label_1',
             'sample_scrolled_window_2',
             'sample_label_2',
-            # placeholders with no setting behind them
-            'summary_showdl_size',
-            'checkbutton35',
-            'emerge_blank1',
-            # syncing is the update service's job now
-            'sync_box',
         ]
         for name in hidelist:
             widget = self.builder.get_object(name)
@@ -201,10 +193,6 @@ class ConfigDialog:
                 # show_all() later must not bring it back
                 widget.set_no_show_all(True)
                 widget.hide()
-        # root is asked for through sudo or polkit now, not a su program
-        su_row = self.builder.get_object('su_client').get_parent()
-        su_row.set_no_show_all(True)
-        su_row.hide()
         # hide unimplemented notebook tabs
         # removelist = [ # [notebook, tab to remove]
         #     ['terminal_notebook', 'filter_tab'],
@@ -234,20 +222,15 @@ class ConfigDialog:
             ['summary', 'showuseflags'],
             ['summary', 'showlicense'],
             ['summary', 'showurl'],
-            ['emerge', 'pretend'],
             ['emerge', 'verbose'],
             ['emerge', 'nospinner'],
-            ['emerge', 'fetch'],
-            ['emerge', 'upgradeonly'],
             ['globals', 'enable_archlist'],
             ##['globals', 'enable_all_keywords'],
-            ['globals', 'use_custom_browser'],
             ['advemerge', 'show_make_conf_button'],
             ['views', 'show_installed'],
             ['views', 'show_dl'],
             ['views', 'show_recommended'],
         ]
-        self.syncmethods = config.Prefs.globals.Sync_methods
 
     def set_widget_values(self):
         """ Set widget attributes based on prefs """
@@ -333,46 +316,12 @@ class ConfigDialog:
             else:
                 debug.dprint("CONFIGDIALOG: set_widget_values(); Checkboxes: widget = %s not found!" %('_'.join([category, name])))
 
-        # Sync combobox
-        store = Gtk.ListStore(str)
-        widget = self.builder.get_object('sync_combobox')
-        tempiter = None
-        if widget:
-            for command, label in self.syncmethods:
-                if not command.startswith('#'):
-                    tempiter = store.append([command])
-                    if command == config.Prefs.globals.Sync:
-                        _iter = tempiter
-            widget.set_model(store)
-            cell = Gtk.CellRendererText()
-            widget.pack_start(cell, True)
-            widget.add_attribute(cell, 'text', 0)
-            if tempiter:
-                widget.set_active_iter(_iter)
-
         # Custom Command History
         for x in [1, 2, 3, 4, 5]:
             widget = self.builder.get_object('history' + str(x))
             if widget:
                 pref = config.Prefs.run_dialog.history[x]
                 widget.set_text(pref)
-
-        # custom browser command
-        widget = self.builder.get_object('custom_browser_command')
-        if widget:
-            command = config.Prefs.globals.custom_browser_command
-            if command:
-                widget.set_text(command)
-            # fixme needs porting
-            #if not config.Prefs.globals.use_custom_browser:
-            #    self.builder.get_object('custom_browser_table').set_sensitive(False)
-
-        # gui su client command
-        widget = self.builder.get_object('su_client')
-        if widget:
-            command = config.Prefs.globals.su
-            if command:
-                widget.set_text(command)
 
         # build the arch list widget
         self.build_archlist_widget()
@@ -456,18 +405,6 @@ class ConfigDialog:
                     config.Prefs.globals.archlist = archlist[:]
 
 
-        # Sync combobox
-        widget = self.builder.get_object('sync_combobox')
-        if widget:
-            model = widget.get_model()
-            _iter = widget.get_active_iter()
-            sync_command = model.get_value(_iter, 0)
-            for command, label in self.syncmethods:
-                if command == sync_command:
-                    config.Prefs.globals.Sync = command
-                    config.Prefs.globals.Sync_label = label
-                    break
-
         # Custom Command History
         for x in [1, 2, 3, 4, 5]:
             widget = self.builder.get_object('history' + str(x))
@@ -475,21 +412,6 @@ class ConfigDialog:
                 text = widget.get_text()
                 if text != config.Prefs.run_dialog.history[x]:
                     config.Prefs.run_dialog.history[x] = text
-
-        # custom browser command
-        widget = self.builder.get_object('custom_browser_command')
-        if widget:
-            text = widget.get_text()
-            if text:
-                config.Prefs.globals.custom_browser_command = text
-
-        # gui su client command
-        widget = self.builder.get_object('su_client')
-        if widget:
-            text = widget.get_text()
-            if text:
-                config.Prefs.globals.su = text
-
 
     def get_color_spec(self, color):
         red = hex(color.red)[2:].zfill(4)
@@ -556,11 +478,4 @@ class ConfigDialog:
         debug.dprint("CONFIGDIALOG: toggle_archlist(); signal caught")
         self.KeywordsFrame.set_sensitive(widget.get_active())
         config.Prefs.globals.enable_archlist = widget.get_active()
-
-    def toggle_browser_table(self, widget):
-        """Toggles custom browser command sensitivity
-        """
-        debug.dprint("CONFIGDIALOG: toggle_browser_table()")
-        self.builder.get_object('custom_browser_table').set_sensitive(widget.get_active())
-
 

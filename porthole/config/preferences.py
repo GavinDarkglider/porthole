@@ -142,15 +142,17 @@ class OptionsClass(object):
 
 
 class EmergeOptions(OptionsClass):
-    """ Holds common emerge options """
+    """ Holds common emerge options: only how emerge's output looks. What
+    gets installed is chosen when installing (the Emerge arrow menu,
+    Advanced Emerge) and worked out by the planner, not set as hidden
+    defaults; pretend etc. stay as attributes for code that asks. """
     def __init__(self):
-        # let's get some saved values in here!
+        self.verbose = False
+        self.nospinner = True
         self.pretend = False
         self.fetch = False
-        self.verbose = False
         self.update = False
-        self.nospinner = True # currently hidden
-        self.noreplace = True
+        self.noreplace = False
         self.oneshot = False
         # not really used for emerge options
         # we use our own internal seach, just here for convienience
@@ -159,13 +161,8 @@ class EmergeOptions(OptionsClass):
     def get_string(self):
         """ Return currently set options in a string """
         opt_string = ' '
-        if self.pretend:   opt_string += '--pretend '
-        if self.fetch:     opt_string += '--fetchonly '
         if self.verbose:   opt_string += '--verbose '
-        if self.update: opt_string += '--update '
         if self.nospinner: opt_string += '--nospinner '
-        if self.noreplace: opt_string += '--noreplace '
-        if self.oneshot: opt_string += '--oneshot '
         return opt_string
 
 
@@ -270,7 +267,9 @@ class PortholePreferences:
                     current[i] = value
             self.TAG_DICT[tag_name] = current
 
-        emergeoptions = ['pretend', 'fetch', 'verbose', 'update', 'nospinner', 'noreplace', 'oneshot'] # 'search_descriptions']
+        # older settings also had pretend, fetch, update, noreplace and
+        # oneshot here; they are ignored
+        emergeoptions = ['verbose', 'nospinner']
         self.emerge = EmergeOptions()
         for option in emergeoptions:
             try:
@@ -279,8 +278,6 @@ class PortholePreferences:
                 pass # defaults set in EmergeOptions class
 
         advemergeoptions = [
-            ['showuseflags', True],
-            ['showkeywords', True],
             ['show_make_conf_button', False],
         ]
         self.advemerge = OptionsClass()
@@ -360,9 +357,6 @@ class PortholePreferences:
             #["Sync_methods", [['emerge sync', _('Sync')],
             #                  ['emerge-webrsync', _('WebRsync')],
             #                  ['#user defined', _('Unknown Sync')]]],
-            ['custom_browser_command', 'firefox %s'],
-            ['use_custom_browser', False],
-            ['su', 'gksudo -g'] # -g tells gksu not to steal mouse / keyboard focus. Panics sometimes otherwise.
         ]
 
         self.globals = OptionsClass()
@@ -463,16 +457,9 @@ class PortholePreferences:
         dom.additem('/window/run_dialog/history', self.run_dialog.history)
         dom.additem('/window/run_dialog/default_history', self.run_dialog.default_history)
         dom.additem('/window/run_dialog/history_length', self.run_dialog.history_length)
-        dom.additem('/emerge/options/pretend', self.emerge.pretend)
-        dom.additem('/emerge/options/fetch', self.emerge.fetch)
         dom.additem('/emerge/options/verbose', self.emerge.verbose)
-        dom.additem('/emerge/options/update', self.emerge.update)
         dom.additem('/emerge/options/nospinner', self.emerge.nospinner)
-        dom.additem('/emerge/options/noreplace', self.emerge.noreplace)
-        dom.additem('/emerge/options/oneshot', self.emerge.oneshot)
         #dom.additem('/emerge/options/search_descriptions1', self.emerge.search_descriptions1)
-        dom.additem('/advemerge/showuseflags', self.advemerge.showuseflags)
-        dom.additem('/advemerge/showkeywords', self.advemerge.showkeywords)
         dom.additem('/advemerge/show_make_conf_button', self.advemerge.show_make_conf_button)
         dom.additem('/views/upgradable_fg', self.views.upgradable_fg)
         dom.additem('/views/downgradable_fg', self.views.downgradable_fg)
@@ -501,9 +488,6 @@ class PortholePreferences:
         dom.additem('/globals/Sync', self.globals.Sync)
         dom.additem('/globals/Sync_label', self.globals.Sync_label)
         #dom.additem('/globals/Sync_methods', self.globals.Sync_methods)
-        dom.additem('/globals/custom_browser_command', self.globals.custom_browser_command)
-        dom.additem('/globals/use_custom_browser', self.globals.use_custom_browser)
-        dom.additem('/globals/su', self.globals.su)
         dom.additem('/plugins/active_list', self.plugins.active_list)
         dom.save(self.__PFILE)
         del dom   # no longer needed, release memory

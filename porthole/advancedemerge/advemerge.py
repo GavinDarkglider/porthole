@@ -96,7 +96,6 @@ class AdvancedEmergeDialog:
                      "on_btnPkgKeywords_clicked" : self.on_package_keywords_commit,
                      "on_cbColorY_clicked": (self.set_one_of, 'cbColorY', 'cbColorN'),
                      "on_cbColorN_clicked": (self.set_one_of, 'cbColorN', 'cbColorY'),
-                     "on_cbColumns_clicked": (self.set_all, 'cbColumns','cbPretend'),
                      'on_cbWithBDepsY_clicked': (self.set_one_of, 'cbWithBDepsY', 'cbWithBDepsN'),
                      'on_cbWithBDepsN_clicked': (self.set_one_of, 'cbWithBDepsN', 'cbWithBDepsY'),
                      'on_cbGetBinPkg_clicked': (self.set_one_of, 'cbGetBinPkg', 'cbGetBinPkgOnly'),
@@ -145,10 +144,6 @@ class AdvancedEmergeDialog:
             #    debug.dprint("ADVEMERGE: table2 has child not of type Gtk.CheckButton")
             #    debug.dprint(checkbutton)
 
-        if not config.Prefs.advemerge.showuseflags:
-            self.use_flags_frame.hide()
-        if not config.Prefs.advemerge.showkeywords:
-            self.keywords_frame.hide()
 
         # Make tool tips available
         #self.tooltips = Gtk.Tooltips()
@@ -221,8 +216,6 @@ class AdvancedEmergeDialog:
         self.emerge_combobox.set_active_iter(_iter)
 
         # Set any emerge options the user wants defaulted
-        if config.Prefs.emerge.pretend:
-            self.wtree.get_object("cbPretend").set_active(True)
         if config.Prefs.emerge.verbose:
             self.wtree.get_object("cbVerbose").set_active(True)
         ## this now just references --update, which is probably not the desired behaviour.
@@ -283,9 +276,8 @@ class AdvancedEmergeDialog:
 
     def get_request(self):
         """(targets, requested settings) for installing the chosen version,
-        or None to run the command as it is (unmerge, pretend)"""
-        if (not self.install or self.emerge_unmerge != "emerge"
-                or self.wtree.get_object("cbPretend").get_active()):
+        or None to run the command as it is (unmerge)"""
+        if not self.install or self.emerge_unmerge != "emerge":
             return None
         _iter = self.combobox.get_active_iter()
         if _iter is None:
@@ -562,7 +554,6 @@ class AdvancedEmergeDialog:
     def get_options(self):
         """ Create keyword list from option checkboxes """
         List = [('cbAlphabetical', '--alphabetical ', '--alphabetical '),
-                ('cbAsk', '-a ', '--ask '),
                 ('cbBuildPkg', '-b ', '--buildpkg '),
                 ('cbBuildPkgOnly', '-B ', '--buildpkgonly '),
                 ('cbColorY', '--color=y ', '--color=y ' ),
@@ -582,8 +573,6 @@ class AdvancedEmergeDialog:
                 ('cbNoSpinner', '--nospinner ', '--nospinner '),
                 ('cbOneShot', '--oneshot ', '--oneshot '),
                 ('cbOnlyDeps', '-o ', '--onlydeps '),
-                ('cbPretend','-p ', '--pretend '),
-                ('cbColumns', '--columns ', '--columns '),
                 ('cbQuiet', '-q ', '--quiet '),
                 ('cbTree', '-t ', '--tree '),
                 ('cbUpdate','-u ', '--update '),
@@ -629,7 +618,7 @@ class AdvancedEmergeDialog:
             self.btnPkgKeywords.set_sensitive(False)
 
         # Build emerge or unmerge base command
-        if (self.is_root or self.wtree.get_object("cbPretend").get_active()):
+        if self.is_root:
             emerge_unmerge = ''
         else:
             emerge_unmerge = 'sudo -p "Password: " '

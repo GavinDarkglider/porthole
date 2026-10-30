@@ -203,28 +203,17 @@ class web_page(threading.Thread):
         debug.dprint("LOADERS: web_page.run()")
         if self.name == '' or self.name == None:
             return
-        if config.Prefs.globals.use_custom_browser:
-            command = config.Prefs.globals.custom_browser_command
+        # the desktop's default handler, like everything else on the desktop
+        try:
+            from gi.repository import Gio
+            Gio.AppInfo.launch_default_for_uri(self.name, None)
+        except Exception as e:
+            debug.dprint("LOADERS: no default handler for %s (%s); trying webbrowser"
+                         % (self.name, e))
             try:
-                browser = webbrowser.get(command)
-            except: # probably python-2.4 and failed to get a registered browser or
-                if '%s' not in command:  # '%s' probably wasn't in, so add it to get a generic browser
-                    command += ' %s'
-                browser = webbrowser.get(command)
-            try:
-                browser.open(self.name)
-            except:
-                debug.dprint("LOADERS: failed to open '%s' with browser command '%s'" % (self.name, command))
-        else:
-            try:
-                gnome.url_show(self.name)
-            except:
-                debug.dprint("LOADERS: Gnome failed trying to open: %s" %self.name)
-                try:
-                    webbrowser.open(self.name)
-                except:
-                    debug.dprint("LOADERS: webbrowser failed trying to open: %s  -- giving up" %self.name)
-                    pass
+                webbrowser.open(self.name)
+            except Exception:
+                debug.dprint("LOADERS: webbrowser failed trying to open: %s  -- giving up" %self.name)
         debug.dprint("LOADERS: Browser call_completed for: %s" %self.name)
 
 
