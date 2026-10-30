@@ -64,6 +64,7 @@ DATA_PATH = EPREFIX + "/usr/share/porthole/"
 i18n_DIR = DATA_PATH + 'i18n'
 REVIEW = False
 FOLLOW_JOB = False
+JOB_LOGS = False
 RUN_LOCAL = False
 DIR_LIST = [LOG_FILE_DIR, DB_FILE_DIR]
 
@@ -160,6 +161,12 @@ def set_follow_job():
     FOLLOW_JOB = True
 
 
+def set_job_logs(job_id=None):
+    """Only open the job logs window (or one job's log)"""
+    global JOB_LOGS
+    JOB_LOGS = job_id or True
+
+
 def set_debug(arg):
     from porthole.utils import debug
     debug.set_debug(True)
@@ -247,6 +254,13 @@ def main():
         # only the job window; if one is open, it comes up instead
         from porthole.updater.follow import run_window
         if not run_window(on_close=Gtk.main_quit):
+            sys.exit(0)
+        Gtk.main()
+        config.Prefs.save()
+        sys.exit(0)
+    if JOB_LOGS:
+        from porthole.updater.joblogs import run_window as job_logs
+        if not job_logs(Gtk.main_quit, JOB_LOGS if JOB_LOGS is not True else None):
             sys.exit(0)
         Gtk.main()
         config.Prefs.save()

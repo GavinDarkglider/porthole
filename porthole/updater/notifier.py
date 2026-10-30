@@ -175,6 +175,7 @@ class Notifier(Gtk.Application):
             ("Show report", self.show_report),
             ("Check now", self.check_now),
             ("Sync now", self.sync_now),
+            ("Job logs...", self.job_logs),
             ("Cancel update", self.cancel_update),
         ):
             item = Gtk.MenuItem(label=label)
@@ -349,13 +350,19 @@ class Notifier(Gtk.Application):
             run_as_root(service("cancel"), lambda ok, out: self.reload())
 
     def show_progress(self):
-        # Porthole's terminal: colours, warnings and cautions tabs, summary
-        self.spawn(script_command("porthole") + ["--follow-job"])
+        # Porthole's terminal: colours, warnings and cautions tabs, summary;
+        # what failed is shown in a log viewer
         job = current_job()
         if job and job["status"] == "failed":
+            self.spawn(script_command("porthole") + ["--job-log", job["id"]])
             self.seen["failed_seen"] = job["id"]
             self.save_seen()
             self.reload()
+        else:
+            self.spawn(script_command("porthole") + ["--follow-job"])
+
+    def job_logs(self):
+        self.spawn(script_command("porthole") + ["--job-logs"])
 
     def show_report(self):
         if self.report is None:

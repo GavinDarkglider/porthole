@@ -304,10 +304,9 @@ class ActionHandler(CategoryHandler):
         sync_now(self.mainwindow, show_in_terminal)
 
     def open_log(self, widget):
-        """ Open a log of a previous emerge in a new terminal window """
-        newterm = ProcessManager(utils.environment(), True)
-        newterm.do_open(widget, None)
-        return
+        """The logs of the job runner's jobs (and of saved logs)"""
+        from porthole.updater.joblogs import JobLogsWindow
+        JobLogsWindow(self.mainwindow)
 
     def custom_run(self, *widget):
         """ Run a custom command in the terminal window """

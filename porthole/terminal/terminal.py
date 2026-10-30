@@ -141,6 +141,9 @@ class ProcessManager: #dbus.service.Object):
         self.window_visible = False
         # following runner jobs (see job_window)
         self.job_mode = False
+        # only viewing logs (see apply_log_window); on_close(self) when closed
+        self.viewer = log_mode
+        self.on_close = None
         self.task_completed = True
         self.confirm = False
         self.status_text = ''
@@ -304,6 +307,8 @@ class ProcessManager: #dbus.service.Object):
                                 config.Prefs.terminal.width_verbose or
                                 config.Prefs.terminal.width),
                                 config.Prefs.terminal.height)
+        if self.viewer:
+            self.apply_log_window()
         # MUST! do this command last, or nothing else will _init__
         # after it until emerge is finished.
         # Also causes runaway recursion.
@@ -428,6 +433,8 @@ class ProcessManager: #dbus.service.Object):
          # the window is no longer showing
         self.window_visible = False
         self.wtree = None
+        if self.on_close:
+            self.on_close(self)
         if __name__ == "__main__":
             # if running standalone, quit
             try:
@@ -461,6 +468,20 @@ class ProcessManager: #dbus.service.Object):
             if widget is not None:
                 widget.set_no_show_all(True)
                 widget.hide()
+
+    def apply_log_window(self):
+        """A log viewer: nothing runs here, so no queue and no Kill"""
+        for name in ("pause_button", "play_queue_button", "timer_button", "kill", "queue1",
+                     "resume", "kill_process1"):
+            widget = self.wtree.get_object(name)
+            if widget is not None:
+                widget.set_no_show_all(True)
+                widget.hide()
+        self.term.hide_tab(TAB_QUEUE)
+        # room for build output, whatever size the last terminal was
+        width = (config.Prefs.emerge.verbose and config.Prefs.terminal.width_verbose
+                 or config.Prefs.terminal.width)
+        self.window.resize(max(width, 800), max(config.Prefs.terminal.height, 500))
 
     def followed_job(self):
         """The runner job the current queue entry follows, or None"""
@@ -618,10 +639,11 @@ class ProcessManager: #dbus.service.Object):
 
 
     def confirm_delete(self, widget = None, *event):
-        if self.job_mode:
+        if self.job_mode or self.viewer:
             # the job runs on in the runner: closing only stops following
             # it, and ends this window's process (porthole --follow-job), so
-            # the next one starts afresh (with any updated Porthole)
+            # the next one starts afresh (with any updated Porthole); a log
+            # viewer has nothing to keep
             if self.reader.process_running:
                 self.kill_process()
             self.window_visible = False

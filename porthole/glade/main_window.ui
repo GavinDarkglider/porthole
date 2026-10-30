@@ -131,7 +131,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="visible">True</property>
-                                <property name="label" translatable="yes">_Open Log</property>
+                                <property name="label" translatable="yes">_Job Logs...</property>
                                 <property name="use-underline">True</property>
                               </object>
                             </child>

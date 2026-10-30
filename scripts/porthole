@@ -63,6 +63,8 @@ def usage():
     print("             " + tabs + "print only those texts containing 'string'")
     print("  -r, --review" + tabs + "Open the update assistant on startup")
     print("  --follow-job" + tabs + "Only show the running update job in a terminal window")
+    print("  --job-logs" + tabs + "Only show the logs of past update jobs")
+    print("  --job-log ID" + tabs + "Only show that job's log")
     print("  -b, --backend [portage, pkgcore]  select one of the backends")
     print("           NOTE: the pkgcore backend is not complete and out of date.")
     print("                 It is still enabled as an option for development")
@@ -78,7 +80,7 @@ if __name__ == "__main__":
         #                                      "backend=", "help", "no-priveledges", "user=", "path="])
         opts, args = getopt(sys.argv[1:], 'lvd:b:hr', ["local", "version", "debug=",
                                               "backend=", "help", "path=", "review",
-                                              "follow-job"])
+                                              "follow-job", "job-logs", "job-log="])
         #print(opts
         #print(args
     except GetoptError as e:
@@ -127,6 +129,7 @@ if __name__ == "__main__":
                 set_backend,
                 set_debug,
                 set_follow_job,
+                set_job_logs,
                 set_review,
             )
             RUN_LOCAL = True
@@ -143,6 +146,7 @@ if __name__ == "__main__":
             set_backend,
             set_debug,
             set_follow_job,
+            set_job_logs,
             set_review,
         )
         #print("inserting path to modules")
@@ -164,6 +168,10 @@ if __name__ == "__main__":
             set_review()
         elif opt == "--follow-job":
             set_follow_job()
+        elif opt == "--job-logs":
+            set_job_logs()
+        elif opt == "--job-log":
+            set_job_logs(arg)
         # elif opt in ("-u", "--user"):
             # print("Porthole: --user = " + str(arg))
             # set_user(arg)
