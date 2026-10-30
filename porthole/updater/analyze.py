@@ -855,7 +855,9 @@ class Analyzer:
         # not what the update itself rebuilds or replaces
         updating = {m["cp"] for m in merges}
         packages = []
-        for atom in selected or []:
+        # sorted: emerge lists them in no fixed order, and the removal
+        # command is part of the plan's fingerprint (plan_signature)
+        for atom in sorted(selected or []):
             cpv = atom.lstrip("=")
             cp = _cp(cpv)
             if cp not in updating:
