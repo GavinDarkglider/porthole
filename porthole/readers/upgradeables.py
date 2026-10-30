@@ -75,20 +75,33 @@ class UpgradableListReader(CommonReader):
         for key in self.cat_order:
             self.pkg_dict[key] = {}
             self.pkg_count[key] = 0
-        ##upgradeflag = self.upgrade_only and True or False
-        # find upgradable packages
-        for cat, packages in self.installed_items:
-            for name, package in list(packages.items()):
-                self.count += 1
-                if self.cancelled: self.done = True; return
-                upgradable = package.is_upgradable()
-                # if upgradable: # is_upgradable() = 1 for upgrade, -1 for downgrade
-                if upgradable == 1 or upgradable == -1:
-                    for key in self.cat_order:
-                        if package.in_list(self.categories[key]):
-                            self.pkg_dict[key][package.full_name] = package
-                            self.pkg_count[key] += 1
-                            break
+        # what the update check's plan merges (portage's own answer: slots,
+        # dependency pins and the world graph included), not a comparison
+        # with the newest version of any slot
+        from porthole.updater.service import latest_plan
+        plan, _path = latest_plan()
+        plan = plan or {}
+        wanted = [m["cp"] for m in plan.get("merge_list") or []]
+        wanted += [m["cp"] for m in (plan.get("preserved") or {}).get("merge_list") or []]
+        wanted += [c["cp"] for c in (plan.get("live") or {}).get("changed") or []]
+        held = [h.get("cp") or h["cpv"].rsplit("-", 1)[0] for h in plan.get("held_back") or []]
+        if held:
+            key = _("Held back")
+            self.cat_order.append(key)
+            self.pkg_dict[key] = {}
+            self.pkg_count[key] = 0
+        for cp, key in [(cp, None) for cp in wanted] + [(cp, _("Held back")) for cp in held]:
+            if self.cancelled: self.done = True; return
+            self.count += 1
+            package = db.db.get_package(cp)
+            if package is None:
+                continue
+            if key is None:
+                key = next(k for k in self.cat_order
+                           if k == _("Dependencies") or package.in_list(self.categories[k]))
+            if package.full_name not in self.pkg_dict[key]:
+                self.pkg_dict[key][package.full_name] = package
+                self.pkg_count[key] += 1
         self.pkg_dict_total = 0
         for key in self.pkg_count:
             self.pkg_dict_total += self.pkg_count[key]
