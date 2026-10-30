@@ -202,7 +202,7 @@ def set_user_config(filename, name='', ebuild='', comment = '',
             dprint("SET_CONFIG: removed line '%s'" % ' '.join(line))
             done = True
     if not done: # it did not find a matching line to modify
-        if "package.use" in filename or "package.keywords" in filename:
+        if "package.use" in filename or "keywords" in filename:
             if add:
                 config.append([name] + add)
                 dprint("SET_CONFIG: added line '%s'" % ' '.join(config[-1]))

@@ -129,3 +129,50 @@ def _spawn(argv, callback, env=None):
             return
         callback(proc.get_successful(), (out or "").strip())
     proc.communicate_utf8_async(None, None, done)
+
+
+def sync_now(parent=None, on_queued=None):
+    """Sync the repositories and check for updates now, as a runner job.
+    The mirrors ask for a sync at most once a day, so a sync within the
+    last day is pointed out first. on_queued(job_id) runs once queued."""
+    import time
+    from gi.repository import Gtk
+    from porthole.updater.service import last_repo_sync
+    try:
+        last = last_repo_sync()
+    except Exception:
+        last = None
+    if last and time.time() - last < 24 * 3600:
+        hours = (time.time() - last) / 3600
+        dialog = Gtk.MessageDialog(transient_for=parent, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE,
+                                   text="Sync again?")
+        dialog.set_title("Porthole")
+        dialog.format_secondary_text(
+            "The package tree was synced %s ago. Gentoo's mirrors ask that you "
+            "sync at most once a day; syncing more often can get you "
+            "temporarily refused." % ("%d minutes" % (hours * 60) if hours < 1
+                                      else "%.0f hours" % hours))
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL,
+                           "Sync anyway", Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+
+    def queued(ok, output):
+        if not ok:
+            dialog = Gtk.MessageDialog(transient_for=parent, modal=True,
+                                       message_type=Gtk.MessageType.ERROR,
+                                       buttons=Gtk.ButtonsType.CLOSE,
+                                       text="Couldn't start the sync")
+            dialog.set_title("Porthole")
+            dialog.format_secondary_text(output or "Cancelled.")
+            dialog.run()
+            dialog.destroy()
+            return
+        if on_queued:
+            on_queued(output.strip().splitlines()[-1])
+    run_as_root(service("submit", "check", "--sync-now"), queued)

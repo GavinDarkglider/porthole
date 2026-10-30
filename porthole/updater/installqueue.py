@@ -75,18 +75,33 @@ class InstallQueue:
         self.changed()
 
     def combined(self):
-        """(targets, requested) for installing everything in one go"""
+        """(targets, requested, world) for installing everything in one go.
+
+        --oneshot applies to a whole emerge, so when only some entries are
+        one-shot, targets has --oneshot and world lists the packages of the
+        other entries: all are planned together, then the one-shot packages
+        are emerged first and the world ones after (Analyzer.install_commands)"""
         options, atoms, requested, lines = [], [], [], set()
+        oneshot, world = [], []
         for item in self.items:
+            mine = [t for t in item["targets"] if not t.startswith("-")]
+            one = "--oneshot" in item["targets"] or "-1" in item["targets"]
             for t in item["targets"]:
+                if t in ("--oneshot", "-1"):
+                    continue
                 bucket = options if t.startswith("-") else atoms
                 if t not in bucket:
                     bucket.append(t)
+            (oneshot if one else world).extend(a for a in mine if a not in world)
             for r in item["requested"]:
                 if r["line"] not in lines:
                     lines.add(r["line"])
                     requested.append(r)
-        return options + atoms, requested
+        if oneshot:
+            options.append("--oneshot")
+        else:
+            world = []  # emerge adds them itself
+        return options + atoms, requested, [a for a in world if a not in oneshot]
 
 
 def added_popup(parent, name, count, open_queue):
@@ -122,8 +137,8 @@ def added_popup(parent, name, count, open_queue):
 
 class InstallQueueWindow(Gtk.Window):
     def __init__(self, queue, install):
-        """install(name, targets, requested, on_queued) plans and starts
-        the queue; on_queued empties it"""
+        """install(name, targets, requested, on_queued, world) plans and
+        starts the queue; on_queued empties it"""
         super().__init__(title="Porthole: install queue")
         if icon_path():
             self.set_icon_from_file(icon_path())
@@ -192,7 +207,7 @@ class InstallQueueWindow(Gtk.Window):
             self.queue.remove(model.get_path(_iter).get_indices()[0])
 
     def on_install(self, button):
-        targets, requested = self.queue.combined()
+        targets, requested, world = self.queue.combined()
         names = ", ".join(item["name"] for item in self.queue.items)
         self.hide()
-        self.install(names, targets, requested, self.queue.clear)
+        self.install(names, targets, requested, self.queue.clear, world)

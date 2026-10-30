@@ -26,12 +26,18 @@ battery.</p>
 last synced, along with a summary of the latest update check.</p>
 
 <h2>Syncing now</h2>
-<p><b>Check now</b> in the Update Assistant (or the tray icon's menu)
-makes a fresh update plan straight away, without a password, but it
-uses the package tree you already have; it doesn't sync. New versions
-show up after the next background sync. Syncs use whatever your
-repositories are set up for in /etc/portage/repos.conf (rsync, git or
-emerge-webrsync).</p>
+<p>To sync straight away, press <b>Sync now</b> in the Update Assistant,
+or choose it from the tray icon's menu. It asks for your password, then
+syncs and checks for updates in the background; the job window shows
+how it goes, and the assistant shows the new plan when it is done.
+Gentoo's mirrors ask that you sync at most once a day, so if the tree
+was synced within the last day Porthole says so and asks first.</p>
+
+<p><b>Check now</b> is different: it makes a fresh update plan straight
+away, without a password, from the package tree you already have.</p>
+
+<p>Syncs use whatever your repositories are set up for in
+/etc/portage/repos.conf (rsync, git or emerge-webrsync).</p>
 
 </body>
 </html>

@@ -104,15 +104,18 @@ class ActionHandler(CategoryHandler):
                                                            self.plan_install)
         self.install_queue_window.present()
 
-    def plan_install(self, package_name, targets, requested, on_queued=None):
+    def plan_install(self, package_name, targets, requested, on_queued=None, world=()):
         """Work out the queue as the user (no password) and show the plan
         for review; only Install there asks for root. on_queued() runs once
-        its job is queued."""
+        its job is queued. world: of the --oneshot targets, the packages
+        still meant for the world file (see InstallQueue.combined)."""
         from porthole.updater.elevate import plan_as_user
         from porthole.updater.review import working
         busy = working(self.mainwindow, _("Working out what installing %s needs...")
                        % package_name)
         request = {"targets": list(targets), "requested": list(requested), "choices": {}}
+        if world:
+            request["world"] = list(world)
 
         def planned(plan_file, error):
             busy.destroy()
@@ -207,7 +210,7 @@ class ActionHandler(CategoryHandler):
                     "expected arg variable for 'adv_emerge' action arg = " +
                     str(arg))
             return False
-        self.adv_emerge_package( package)
+        self.adv_emerge_package(package, arg.get('ebuild'))
         return True
 
     def _action_set_path_(self, arg):
@@ -329,12 +332,12 @@ class ActionHandler(CategoryHandler):
         else:
             self.setup_command(package.get_name(), "emerge" + options + package.full_name)
 
-    def adv_emerge_package(self, package):
-        """Advanced emerge of the package."""
+    def adv_emerge_package(self, package, ebuild=None):
+        """Advanced emerge of the package (starting at version ebuild)."""
         # Activate the advanced emerge dialog window
         # re_init_portage callback is for when package.use etc. are modified
         return AdvancedEmergeDialog(package, self.setup_command,
-                self.re_init_portage, install=self.request_install)
+                self.re_init_portage, install=self.request_install, ebuild=ebuild)
 
 
     def unmerge_package(self, package, sudo=False, ebuild=None):

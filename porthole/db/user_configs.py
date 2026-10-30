@@ -43,13 +43,18 @@ from porthole.privilege import controller as privileges
 
 CONFIG_TYPES = ['USE', 'KEYWORDS', 'MASK', 'UNMASK', 'SETS', 'PROVIDED']
 CONFIG_FILES = ['package.use', 'package.keywords', 'package.mask', 'package.unmask', 'sets', 'package.provided']
+# package.keywords' current name; both are read, new lines go here
+ACCEPT_KEYWORDS = 'package.accept_keywords'
 
  # 'all' being a special atom to be replaced with no leading atom and no version info
 CONFIG_MASK_ATOMS = ['=',  '<', '>', '<=', '>=', 'all']
 
 def get_type(file):
     if file:
-        mytype = set(file.split("/")).intersection(CONFIG_FILES)
+        parts = set(file.split("/"))
+        if ACCEPT_KEYWORDS in parts:
+            return 'KEYWORDS'
+        mytype = parts.intersection(CONFIG_FILES)
         if len(mytype) == 0:
             debug.dprint("USER_CONFIGS: get_type(); failed to determine config type for: " + file)
             return "Uknown"
@@ -141,7 +146,7 @@ class UserConfigs:
         for mytype in CONFIG_TYPES:
             self.db[mytype] = {}
             self.sources[mytype] = {}
-        for file in CONFIG_FILES:
+        for file in CONFIG_FILES + [ACCEPT_KEYWORDS]:
             debug.dprint("USER_CONFIGS: __init__(); file = " + file)
             self.load(os.path.join(backends.portage_lib.settings.config_root, backends.portage_lib.settings.user_config_dir,file))
 
@@ -303,7 +308,7 @@ class UserConfigs:
         return dict
 
     def set_user_config( self, mytype, name='', ebuild='', add='', remove='',
-        callback=None, parent_window = None, *comment):
+        callback=None, parent_window = None, *comment, default_file=None):
         """
         Adds <name> or '=' + <ebuild> to <file> with flags <add>.
         If an existing entry is found, items in <remove>
@@ -312,6 +317,9 @@ class UserConfigs:
         If <name> and <ebuild> are not given then lines starting with
         something in remove are removed, and items in <add> are added
         as new lines.
+
+        A new entry goes in default_file, if given, when the config is a
+        directory (instead of asking which file).
         """
         #debug.dprint("USER_CONFIGS: set_user_config()")
         self.set_callback = callback
@@ -332,10 +340,15 @@ class UserConfigs:
                 # an existing entry if it existed.
                 return True
             file = target = CONFIG_FILES[CONFIG_TYPES.index(mytype)]
+            if mytype == 'KEYWORDS' and (os.path.exists(os.path.join(config_path, ACCEPT_KEYWORDS))
+                                         or not os.path.exists(os.path.join(config_path, target))):
+                file = target = ACCEPT_KEYWORDS
             target_path = os.path.join(config_path, target)
             debug.dprint("USER_CONFIGS: set_user_config(): target_path = " +
                 target_path)
-            if os.path.isdir(target_path): # Then bring up a file selector dialog
+            if os.path.isdir(target_path) and default_file:
+                file = os.path.join(target_path, default_file)
+            elif os.path.isdir(target_path): # Then bring up a file selector dialog
                 #if parent_window == None:
                 #    parent_window = config.Mainwindow
                 file_picker = FileSelector2(parent_window,

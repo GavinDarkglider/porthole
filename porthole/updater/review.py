@@ -116,6 +116,12 @@ class UpdateAssistant(Gtk.Window):
         self.news_button.connect("clicked", self.on_news)
         self.recheck_button = Gtk.Button(label="Check now")
         self.recheck_button.connect("clicked", self.on_recheck)
+        self.recheck_button.set_tooltip_text(
+            "Work out the update again from the package tree you have (no password)")
+        self.sync_button = Gtk.Button(label="Sync now")
+        self.sync_button.set_tooltip_text(
+            "Sync the package tree, then check for updates (asks for your password)")
+        self.sync_button.connect("clicked", self.on_sync)
         self.progress_button = Gtk.Button(label="Show progress")
         self.progress_button.connect("clicked", lambda b: self.show_progress())
         self.cancel_button = Gtk.Button(label="Cancel update")
@@ -130,6 +136,7 @@ class UpdateAssistant(Gtk.Window):
         self.start_button.connect("clicked", self.on_start)
         buttons.pack_start(self.news_button, False, False, 0)
         buttons.pack_start(self.recheck_button, False, False, 0)
+        buttons.pack_start(self.sync_button, False, False, 0)
         buttons.pack_start(self.progress_button, False, False, 0)
         buttons.pack_start(self.cancel_button, False, False, 0)
         buttons.pack_start(settings, False, False, 0)
@@ -139,7 +146,8 @@ class UpdateAssistant(Gtk.Window):
         self.add(outer)
         if self.install:
             # an install plan: checks, news and settings belong to updates
-            for widget in (self.news_button, self.recheck_button, settings):
+            for widget in (self.news_button, self.recheck_button, self.sync_button,
+                           settings):
                 widget.set_no_show_all(True)
                 widget.hide()
 
@@ -496,6 +504,7 @@ class UpdateAssistant(Gtk.Window):
         changed = self.choices_changed()
         self.start_button.set_sensitive(can_start and not stale and not busy and not changed)
         self.recheck_button.set_sensitive(not busy)
+        self.sync_button.set_sensitive(not busy)
         if self.install:
             # only this install's job, once it has one
             jobs = [j for j in jobs if j.get("plan_file") == self.plan_file]
@@ -540,6 +549,13 @@ class UpdateAssistant(Gtk.Window):
             self.plan = None
             self.load()
         plan_as_user(world_request(choices), done, out=USER_PLAN_FILE)
+
+    def on_sync(self, button):
+        """Sync and check as a runner job; the plan here reloads when its
+        new plan lands"""
+        from porthole.updater.elevate import sync_now
+        from porthole.updater.follow import show_in_terminal
+        sync_now(self, show_in_terminal)
 
     def on_start(self, button):
         plan = self.plan

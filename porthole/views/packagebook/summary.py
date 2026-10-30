@@ -32,15 +32,20 @@ from gi.repository import Pango
 from gettext import gettext as _
 
 from porthole.utils import debug
-from porthole.utils import utils
 from porthole import backends
 from porthole import db
-from porthole.db.user_configs import CONFIG_MASK_ATOMS
+from porthole.updater.analyze import OWNED_NAME
 from porthole import config
 from porthole.backends.version_sort import ver_sort
 from porthole.backends.utilities import (reduce_flags, get_reduced_flags,
     abs_flag, abs_list, filter_flags)
 from porthole.loaders.loaders import load_web_page
+
+# the mask and unmask submenus: (atom prefix, label); 'all' is the package
+MASK_CHOICES = [('=', _("This version")), ('>=', _("This version and newer")),
+                ('>', _("Newer versions")), ('<=', _("This version and older")),
+                ('<', _("Older versions")), ('all', _("All versions"))]
+
 
 class Summary(Gtk.TextView):
     """ Class to manage display and contents of package info tab """
@@ -86,96 +91,52 @@ class Summary(Gtk.TextView):
         self.connect("button_press_event", self.on_button_press)
 
     def createmenu(self):
-        menuitems = {}
-        menuitems["emerge"] = Gtk.MenuItem(_("Emerge this ebuild"))
-        menuitems["emerge"].connect("activate", self.emerge)
-        menuitems["pretend-emerge"] = Gtk.MenuItem(_("Pretend Emerge this ebuild"))
-        menuitems["pretend-emerge"].connect("activate", self.emerge, True, None)
-        menuitems["sudo-emerge"] = Gtk.MenuItem(_("Sudo Emerge this ebuild"))
-        menuitems["sudo-emerge"].connect("activate", self.emerge, None, True)
-        menuitems["unmerge"] = Gtk.MenuItem(_("Unmerge this ebuild"))
-        menuitems["unmerge"].connect("activate", self.unmerge)
-        menuitems["sudo-unmerge"] = Gtk.MenuItem(_("Sudo Unmerge this ebuild"))
-        menuitems["sudo-unmerge"].connect("activate", self.unmerge, True)
-        menuitems["Advanced emerge dialog"] = Gtk.MenuItem(_("Advanced Emerge"))
-        menuitems["Advanced emerge dialog"].connect("activate", self.adv_emerge)
-        menuitems["remove-keyword"] = Gtk.MenuItem(_("Remove this arch from package.keywords") )
-        menuitems["remove-keyword"].connect("activate", self.remove_keyword)
-        menuitems["remove-keyword-ebuild"] = Gtk.MenuItem(_("Remove ebuild keyword from package.keywords") )
-        menuitems["remove-keyword-ebuild"].connect("activate", self.remove_keyword_ebuild)
-        menuitems["un-package-unmask"] = Gtk.MenuItem(_("Remask this ebuild"))
-        menuitems["un-package-unmask"].connect("activate", self.un_package_unmask)
-        menuitems["show_props"] = Gtk.MenuItem(_("Show the properties for this ebuild"))
-        menuitems["show_props"].connect("activate", self.show_version)
-
-        # create keyword submenus
-        if not config.Prefs.globals.enable_archlist:
-            menuitems["add-ebuild-keyword"] = Gtk.MenuItem(_("Add %s to package.keywords (for this ebuild only)" ) % self.myarch)
-            menuitems["add-ebuild-keyword"].connect("activate", self.add_keyword_ebuild, self.myarch)
-            menuitems["add-keyword"] = Gtk.MenuItem(_("Add this arch to package.keywords") )
-            menuitems["add-keyword"].connect("activate", self.add_keyword, self.myarch)
-            self.keyword_menuitems = None
-        else:
-            menuitems["add-ebuild-keyword"] = Gtk.MenuItem(_("Add to package.keywords (for this ebuild only)" ) )
-            menuitems["add-keyword"] = Gtk.MenuItem(_("Add to package.keywords") )
-            archlist = config.Prefs.globals.archlist
-            keywordmenu = {}
-            keywordmenuitems = {}
-            key = '~'
-            entries =  [["add-ebuild-keyword", self.add_keyword_ebuild], ["add-keyword", self.add_keyword]]
-            self.create_submenu(entries, archlist, key, keywordmenu, keywordmenuitems, menuitems)
-            self.keyword_menu = keywordmenu
-            self.keyword_menuitems = keywordmenuitems
-
-        # create mask/unmask submenus
-        menuitems["package-mask"] = Gtk.MenuItem(_("Mask this ebuild or package"))
-        menuitems["package-unmask"] = Gtk.MenuItem(_("Unmask this ebuild or package"))
-        key = ''
-        submenu = {}
-        submenuitems = {}
-        entries = [["package-mask", self.package_mask], ["package-unmask", self.package_unmask]]
-        self.create_submenu(entries, CONFIG_MASK_ATOMS, key, submenu, submenuitems, menuitems)
-        self.mask_menu = submenu
-        self.mask_menuitems = submenuitems
-
-        # create popup menu for rmb-click
+        """The version table's right-click menu. Installs go into the
+        install queue and removals to the job runner, like the toolbar;
+        config edits apply when chosen, asking for your password."""
+        arch = "~" + self.myarch
+        items = {}
         menu = Gtk.Menu()
 
-        for item in menuitems.values():
+        def add(key, label, callback, *args):
+            item = items[key] = Gtk.MenuItem.new_with_mnemonic(label)
+            if callback:
+                item.connect("activate", callback, *args)
             menu.append(item)
-            item.show()
+            return item
 
+        def separator():
+            menu.append(Gtk.SeparatorMenuItem())
+
+        add("emerge", _("_Emerge this version"), self.emerge, False)
+        add("emerge-oneshot", _("Emerge this version _one-shot (not added to the world file)"),
+            self.emerge, True)
+        add("reinstall", _("_Reinstall this version"), self.emerge, True)
+        add("adv-emerge", _("_Advanced Emerge with this version..."), self.adv_emerge)
+        add("unmerge", _("_Unmerge this version"), self.unmerge)
+        separator()
+        add("keep", _("_Keep this version (no updates past it)"), self.keep_version, True)
+        add("unkeep", _("Stop _keeping this version"), self.keep_version, False)
+        add("add-ebuild-keyword", _("Accept %s for this version") % arch,
+            self.add_keyword_ebuild, self.myarch)
+        add("add-keyword", _("Accept %s for all versions") % arch, self.add_keyword, self.myarch)
+        add("remove-keyword-ebuild", _("Remove this version's keyword entry"),
+            self.remove_keyword_ebuild)
+        add("remove-keyword", _("Remove %s for all versions") % arch, self.remove_keyword)
+        for key, label, callback in (("package-unmask", _("Un_mask"), self.package_unmask),
+                                     ("package-mask", _("_Mask"), self.package_mask)):
+            submenu = Gtk.Menu()
+            for atom, text in MASK_CHOICES:
+                sub = Gtk.MenuItem(label=text)
+                sub.connect("activate", callback, atom)
+                submenu.append(sub)
+            add(key, label, None).set_submenu(submenu)
+        add("un-package-unmask", _("Remove this version's unmask entry"), self.un_package_unmask)
+        separator()
+        add("show_props", _("_Show details for this version"), self.show_version)
+        menu.show_all()
         self.popup_menu = menu
-        self.popup_menuitems = menuitems
-
-        return
-
-    def create_submenu(self, menulist, sublist, key, mysubmenu= None,
-                                            mymenuitems = None, myparentmenuitems = None):
-        """create a submenu and attach to
-        pointers
-            @mysubmenu
-            @mymenuitems
-            @myparentmenuitems
-        input parameters
-            @menulist = nested lists [[menu-entry-name1, callback1], [[menu-entry-name2, callback2]]
-            @sublist = list of submenu entry values to display
-            @key = the key to prepend to the sublist values to create, eg:
-                        '~' for keywords,
-                        '' (null string) for mask/unmask atoms
-        """
-        for item_name, callback in menulist:
-            myitems = {}
-            for x in sublist:
-                myitems[x] = Gtk.MenuItem(key + x)
-                myitems[x].connect("activate", callback, x)
-            mymenuitems[item_name] = myitems
-
-            mysubmenu[item_name] = Gtk.Menu()
-            for item in myitems.values():
-                mysubmenu[item_name].append(item)
-                item.show()
-            myparentmenuitems[item_name].set_submenu(mysubmenu[item_name])
+        self.popup_menuitems = items
 
     def arch(self, keyword = False):
         if keyword:
@@ -751,119 +712,36 @@ class Summary(Gtk.TextView):
             self.do_table_popup(eventbox, event)
         return True
 
-    def do_keyword_menuitems(self, ebuild):
-        """handle keywords submenu arch availability"""
-        if not self.keyword_menuitems:
-            return
-        keys = self.package.get_properties(ebuild).get_keywords()
-        hide_list = list(set(config.Prefs.globals.keyworded_archlist).difference(set(keys)))
-        debug.dprint("SUMMARY: do_keyword_menuitems(); keys = %s, hide_list = %s" %(str(keys),str(hide_list)))
-        for arch in config.Prefs.globals.archlist:
-            if '~'+arch in hide_list:
-                for menu in ["add-ebuild-keyword", "add-keyword"]:
-                    debug.dprint("SUMMARY: do_keyword_menuitems(); hiding %s, %s" %(menu, arch))
-                    self.keyword_menuitems[menu][arch].hide()
-            else:
-                for menu in ["add-ebuild-keyword", "add-keyword"]:
-                    debug.dprint("SUMMARY: do_keyword_menuitems(); showing %s, %s" %(menu, arch))
-                    self.keyword_menuitems[menu][arch].show()
-                    if arch == self.myarch:
-                        self.keyword_menuitems[menu][arch].select()
-        return
-
     def do_table_popup(self, eventbox, event):
-        self.selected_ebuild = eventbox.ebuild
+        self.selected_ebuild = ebuild = eventbox.ebuild
         self.selected_arch = eventbox.arch
-
-        # inteligently show/hide keywords submenu archs
-        self.do_keyword_menuitems(eventbox.ebuild)
-
-        # moved these from is_root bit as we can sudo them now
-        if utils.is_root() or utils.can_gksu():
-            if '~' in eventbox.text:
-                self.popup_menuitems["add-keyword"].show()
-                self.popup_menuitems["add-ebuild-keyword"].show()
-            else:
-                self.popup_menuitems["add-keyword"].hide()
-                self.popup_menuitems["add-ebuild-keyword"].hide()
-            if '(+)' in eventbox.text:
-                self.popup_menuitems["remove-keyword"].show()
-                # get the config entry and convert it to string for easier searching
-                config_entry = str(db.userconfigs.get_atom('KEYWORDS', None, eventbox.ebuild))
-                debug.dprint("SUMMARY: do_table_popup(); ebuild = %s, in config_entry = %s : %s" \
-                                    %(eventbox.ebuild, config_entry, str(eventbox.ebuild in config_entry)))
-                if eventbox.ebuild in config_entry:
-                    self.popup_menuitems["remove-keyword-ebuild"].show()
-                else:
-                    self.popup_menuitems["remove-keyword-ebuild"].hide()
-            else:
-                self.popup_menuitems["remove-keyword"].hide()
-                self.popup_menuitems["remove-keyword-ebuild"].hide()
-            if 'M' in eventbox.text:
-                self.popup_menuitems["package-unmask"].show()
-            else:
-                self.popup_menuitems["package-unmask"].hide()
-            if '[' in eventbox.text:
-                self.popup_menuitems["un-package-unmask"].show()
-                self.popup_menuitems["package-mask"].hide()
-            else:
-                self.popup_menuitems["un-package-unmask"].hide()
-                self.popup_menuitems["package-mask"].show()
-        else:
-            self.popup_menuitems["add-keyword"].hide()
-            self.popup_menuitems["add-ebuild-keyword"].hide()
-            self.popup_menuitems["remove-keyword"].hide()
-            self.popup_menuitems["remove-keyword-ebuild"].hide()
-            self.popup_menuitems["package-unmask"].hide()
-            self.popup_menuitems["un-package-unmask"].hide()
-        if utils.is_root():
-            #if '~' in eventbox.text:
-            #    self.popup_menuitems["add-keyword"].show()
-            #else: self.popup_menuitems["add-keyword"].hide()
-            #if '(+)' in eventbox.text:
-            #    self.popup_menuitems["remove-keyword"].show()
-            #else: self.popup_menuitems["remove-keyword"].hide()
-            #if 'M' in eventbox.text:
-            #    self.popup_menuitems["package-unmask"].show()
-            #else: self.popup_menuitems["package-unmask"].hide()
-            #if '[' in eventbox.text:
-            #    self.popup_menuitems["un-package-unmask"].show()
-            #else: self.popup_menuitems["un-package-unmask"].hide()
-            if eventbox.ebuild in self.installed:
-                self.popup_menuitems["unmerge"].show()
-                self.popup_menuitems["emerge"].hide()
-                self.popup_menuitems["pretend-emerge"].hide()
-            else:
-                self.popup_menuitems["unmerge"].hide()
-                self.popup_menuitems["emerge"].show()
-                self.popup_menuitems["pretend-emerge"].show()
-            self.popup_menuitems["sudo-emerge"].hide()
-            self.popup_menuitems["sudo-unmerge"].hide()
-        else:
-            self.popup_menuitems["emerge"].hide()
-            self.popup_menuitems["unmerge"].hide()
-            #self.popup_menuitems["add-keyword"].hide()
-            #self.popup_menuitems["remove-keyword"].hide()
-            #self.popup_menuitems["package-unmask"].hide()
-            #self.popup_menuitems["un-package-unmask"].hide()
-            if eventbox.ebuild in self.installed:
-                if utils.can_sudo():
-                    self.popup_menuitems["sudo-unmerge"].show()
-                else:
-                    self.popup_menuitems["sudo-unmerge"].hide()
-                self.popup_menuitems["sudo-emerge"].hide()
-                self.popup_menuitems["pretend-emerge"].hide()
-            else:
-                self.popup_menuitems["sudo-unmerge"].hide()
-                if utils.can_sudo():
-                    self.popup_menuitems["sudo-emerge"].show()
-                else:
-                    self.popup_menuitems["sudo-emerge"].hide()
-                self.popup_menuitems["pretend-emerge"].show()
-        self.popup_menu.popup(None, None, None, event.button, event.time)
+        installed = ebuild in self.installed
+        kept = self.kept()
+        text = eventbox.text
+        keyword_entry = str(db.userconfigs.get_atom('KEYWORDS', None, ebuild))
+        shown = {
+            "emerge": not installed,
+            "emerge-oneshot": not installed,
+            "reinstall": installed,
+            "adv-emerge": True,
+            "unmerge": installed,
+            "keep": installed and not kept,
+            "unkeep": kept,
+            "add-ebuild-keyword": '~' in text,
+            "add-keyword": '~' in text,
+            "remove-keyword-ebuild": '(+)' in text and ebuild in keyword_entry,
+            "remove-keyword": '(+)' in text,
+            "package-unmask": 'M' in text,
+            "un-package-unmask": '[' in text,
+            "package-mask": '[' not in text,
+            "show_props": True,
+        }
+        for key, visible in shown.items():
+            self.popup_menuitems[key].set_visible(visible)
+        self.popup_menu.popup_at_pointer(event)
         # de-select the table cell. Would be nice to leave it selected,
         # but it doesn't get de-selected when the menu is closed.
-        eventbox.emit("leave-notify-event", Gdk.Event(Gdk.LEAVE_NOTIFY))
+        eventbox.emit("leave-notify-event", Gdk.Event.new(Gdk.EventType.LEAVE_NOTIFY))
         return True
 
     def on_table_mouse(self, eventbox, event):
@@ -902,19 +780,30 @@ class Summary(Gtk.TextView):
             eventbox.override_background_color(Gtk.StateFlags.NORMAL, gdk_color)
         return False
 
-    def emerge(self, menuitem_widget, pretend=None, sudo=None):
-        emergestring = ['emerge']
-        if pretend:
-            emergestring.append('pretend')
-        if sudo:
-            emergestring.append('sudo')
-        self.dispatch(emergestring, {'ebuild': self.selected_ebuild, 'caller': 'SUMMARY: emerge()'})
+    def emerge(self, menuitem_widget, oneshot):
+        """Into the install queue, at this version"""
+        self.dispatch(["emerge", "oneshot"] if oneshot else ["emerge"],
+                      {'ebuild': self.selected_ebuild, 'caller': 'SUMMARY: emerge()'})
 
-    def unmerge(self, menuitem_widget, sudo=None):
-        if sudo:
-            self.dispatch(["unmerge", "sudo"], {'ebuild': self.selected_ebuild, 'caller': 'SUMMARY: unmerge()'})
+    def unmerge(self, menuitem_widget):
+        """A removal job for the runner"""
+        self.dispatch(["unmerge"], {'ebuild': self.selected_ebuild, 'caller': 'SUMMARY: unmerge()'})
+
+    def kept(self):
+        """Whether a 'keep this version' mask (>cat/pkg-version) is set"""
+        line = ">" + self.selected_ebuild
+        return any(atom.acpv() == line for atom in
+                   db.userconfigs.get_atom('MASK', self.package.full_name))
+
+    def keep_version(self, menuitem_widget, keep):
+        """Mask what is newer than this version, or stop doing so"""
+        line = ">" + self.selected_ebuild
+        if keep:
+            db.userconfigs.set_user_config('MASK', add=line, callback=self.update_callback,
+                                           default_file=OWNED_NAME)
         else:
-            self.dispatch(["unmerge"], {'ebuild': self.selected_ebuild, 'caller': 'SUMMARY: unmerge()'})
+            db.userconfigs.set_user_config('MASK', name=self.package.full_name, remove=line,
+                                           callback=self.update_callback)
 
     def update_callback(self):
         # reset package info
@@ -927,20 +816,22 @@ class Summary(Gtk.TextView):
     def add_keyword_ebuild(self, menuitem_widget, arch):
         #arch = self.arch(True)
         ebuild = "=" + self.selected_ebuild
-        db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, add="~"+arch, callback=self.update_callback)
+        db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, add="~"+arch, callback=self.update_callback,
+                                       default_file=OWNED_NAME)
 
     def add_keyword(self, widget, arch):
         name = self.package.full_name
         string = name + " " + arch + "\n"
         debug.dprint("Summary: Package view add_keyword(); %s" %string)
-        db.userconfigs.set_user_config('KEYWORDS', name=name, add="~"+arch, callback=self.update_callback)
+        db.userconfigs.set_user_config('KEYWORDS', name=name, add="~"+arch, callback=self.update_callback,
+                                       default_file=OWNED_NAME)
 
     def remove_keyword_ebuild(self, menuitem_widget):
         ebuild = "=" + self.selected_ebuild
         db.userconfigs.set_user_config('KEYWORDS', ebuild=ebuild, remove=ebuild, callback=self.update_callback)
 
     def remove_keyword(self, menuitem_widget):
-        arch = self.arch(True)
+        arch = "~" + self.myarch  # as the menu item says
         name = self.package.full_name
         string = name + " " + arch + "\n"
         debug.dprint("Summary: Package view remove_keyword(); %s" %string)
@@ -953,7 +844,8 @@ class Summary(Gtk.TextView):
             ebuild = atoms + self.selected_ebuild
         # TODO add reasons info to entry
         debug.dprint("Summary: Package view  package_mask(); %s" %ebuild)
-        db.userconfigs.set_user_config('MASK', add=ebuild, callback=self.update_callback)
+        db.userconfigs.set_user_config('MASK', add=ebuild, callback=self.update_callback,
+                                       default_file=OWNED_NAME)
 
     def package_unmask(self, widget, atoms):
         if atoms == 'all':
@@ -961,7 +853,8 @@ class Summary(Gtk.TextView):
         else:
             ebuild = atoms + self.selected_ebuild
         debug.dprint("Summary: Package view  package_unmask(); %s" %ebuild)
-        db.userconfigs.set_user_config('UNMASK', add=ebuild, callback=self.update_callback)
+        db.userconfigs.set_user_config('UNMASK', add=ebuild, callback=self.update_callback,
+                                       default_file=OWNED_NAME)
 
     def un_package_unmask(self, widget):
         ebuild = "=" + self.selected_ebuild
@@ -972,5 +865,6 @@ class Summary(Gtk.TextView):
         self.update_package_info(self.package, ebuild)
 
     def adv_emerge(self, widget):
-        self.dispatch("adv_emerge", {'package': self.package, 'caller': 'SUMMARY: adv_emerge()'})
+        self.dispatch("adv_emerge", {'package': self.package, 'ebuild': self.selected_ebuild,
+                                     'caller': 'SUMMARY: adv_emerge()'})
 

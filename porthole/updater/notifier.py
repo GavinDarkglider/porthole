@@ -174,6 +174,7 @@ class Notifier(Gtk.Application):
             ("Show progress", self.show_progress),
             ("Show report", self.show_report),
             ("Check now", self.check_now),
+            ("Sync now", self.sync_now),
             ("Cancel update", self.cancel_update),
         ):
             item = Gtk.MenuItem(label=label)
@@ -231,6 +232,7 @@ class Notifier(Gtk.Application):
         failed = (bool(job) and job["status"] == "failed"
                   and self.seen.get("failed_seen") != job["id"])
         self.check_item.set_sensitive(not running and not active)
+        self.items["Sync now"].set_sensitive(not running and not active)
         self.items["Show progress"].set_visible(bool(jobs))
         self.items["Cancel update"].set_visible(active and job["kind"] == "update")
         # while a job runs, refresh often: the tooltip shows its progress
@@ -377,6 +379,11 @@ class Notifier(Gtk.Application):
         self.check_item.set_sensitive(False)
         self.tray.set_tooltip("Checking for updates...")
         plan_as_user(world_request(), self.check_done, out=USER_PLAN_FILE)
+
+    def sync_now(self):
+        """Sync and check as a runner job, shown in the job window"""
+        from porthole.updater.elevate import sync_now
+        sync_now(None, lambda job_id: self.show_progress())
 
     def check_done(self, plan_file, error):
         self.check_item.set_sensitive(True)

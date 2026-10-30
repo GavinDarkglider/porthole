@@ -53,11 +53,12 @@ class AdvancedEmergeDialog:
     """Class to perform advanced emerge dialog functionality."""
 
     def __init__(self, package, setup_command, re_init_portage, install=None,
-                 rebuild=False):
+                 rebuild=False, ebuild=None):
         """ Initialize Advanced Emerge Dialog window; install(name, targets,
         requested) adds an install with the chosen settings to the queue.
         rebuild: change the USE flags of the installed version (rebuilt
-        with --oneshot, so the world file is left alone) """
+        with --oneshot, so the world file is left alone). ebuild: the
+        version to start with (from the summary's version table) """
         # Preserve passed parameters
         self.package = package
         self.setup_command = setup_command
@@ -188,6 +189,9 @@ class AdvancedEmergeDialog:
             for x, ver in enumerate(self.verList):
                 if ver["installed"]:
                     index = x
+        for x, ver in enumerate(self.verList):
+            if ebuild and ver["name"] == ebuild:
+                index = x
         self.combobox.set_active(index) # select "recommended" ebuild by default
         # installing a version doesn't stop later updates, unless asked to
         self.keep_version = Gtk.CheckButton(label=_("Keep this version"))

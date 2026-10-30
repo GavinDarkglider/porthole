@@ -25,6 +25,10 @@ which installs the package without adding it to your world file. Use it
 for packages you only need for now, or that something else will
 depend on.</p>
 
+<p>Queue one-shot and normal installs together as you like: they are
+planned together, then the one-shot packages are emerged first and the
+others after them, so only the others are added to your world file.</p>
+
 <h2>Processing the queue</h2>
 <p>Click <b>Queue</b> in the toolbar to see what is queued; remove
 anything you changed your mind about, then press <b>Process
@@ -49,6 +53,15 @@ version</b>.</p>
 select the package and click <b>Adv Emerge</b>. Your choices go into
 the queue with the package and are part of the plan you review. See
 <a href="advemerge.html">Advanced Emerge</a>.</p>
+
+<h2>A particular version</h2>
+<p>Right-click a version in the package's version table (in the Summary
+tab) to emerge that version (or one-shot), reinstall it, open Advanced
+Emerge with it chosen, or unmerge it. The same menu can keep an
+installed version (no updates past it), mask or unmask versions, and
+accept testing keywords. Those changes are made to /etc/portage when you
+choose them and ask for your password; new lines go in the
+<i>zz-porthole</i> file of each package.* directory.</p>
 
 <h2>Changing USE flags</h2>
 <p>For an installed package, right-click it in the package list and

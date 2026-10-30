@@ -13,7 +13,7 @@
     Updates the user approved run through the job runner (runner.py):
 
         submit update --plan TIME   queue the reviewed plan
-        submit check                queue a sync and check
+        submit check [--sync-now]   queue a sync and check
         submit emerge -- CMD...     queue an emerge from Porthole (checked)
         submit install --request J  plan an install; queue it unless it needs review
         submit install --plan F --generated T   queue a reviewed install plan
@@ -240,11 +240,12 @@ class Service:
             return True
         return time.time() - last >= self.config["interval_days"] * DAY - SLACK
 
-    def sync(self):
-        """Sync unless any repository was synced within the last day"""
+    def sync(self, now=False):
+        """Sync unless any repository was synced within the last day, or
+        now (the user asked for it, having been told when it last was)"""
         recent = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
                      default=None)
-        if recent and time.time() - recent < DAY - SLACK:
+        if recent and time.time() - recent < DAY - SLACK and not now:
             self.log("Repositories synced %.1f hours ago; not syncing again yet"
                      % ((time.time() - recent) / 3600))
             return {"ran": False, "ok": True, "last": recent}
@@ -290,7 +291,7 @@ class Service:
         try:
             sync_info = None
             if sync:
-                sync_info = self.sync()
+                sync_info = self.sync(now=sync == "now")
             # a scheduled sync checks for updates only if asked to; a
             # check someone asked for (force) always does
             if not force and not self.config["check_updates"]:
@@ -331,6 +332,8 @@ def main(argv=None):
     submit.add_argument("--expect", help="install --request: fingerprint of the plan "
                                          "the user approved; install only that")
     submit.add_argument("--no-sync", action="store_true", help="check: don't sync first")
+    submit.add_argument("--sync-now", action="store_true",
+                        help="check: sync even if synced within the last day")
     submit.add_argument("--choices", help="check: replace the standing choices (JSON)")
     # after "--", so its options aren't taken for submit's own
     submit.add_argument("cmdline", nargs="*", metavar="CMD",
@@ -425,7 +428,7 @@ def job_command(args, parser):
             else:
                 if args.choices is not None:
                     runner.set_choices(args.choices)
-                job = runner.submit_check(sync=not args.no_sync)
+                job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
         elif args.command == "cancel":

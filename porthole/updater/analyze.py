@@ -342,8 +342,12 @@ def _is_exact_pin(atom):
 
 class Analyzer:
     def __init__(self, targets=None, config_root="/", log=None, choices=None,
-                 live=False, live_exclude=(), requested=()):
+                 live=False, live_exclude=(), requested=(), world=()):
         self.choices = normalize_choices(choices)
+        # of the packages asked for --oneshot, the ones that still go in the
+        # world file (a queue mixing one-shot and normal installs): they
+        # are planned together but emerged separately, see install_commands
+        self.world = list(world)
         # config lines the user chose (e.g. in Advanced Emerge):
         # [{"kind": "use"|"keywords", "line": "cat/pkg flag -flag"}]
         self.requested = [dict(r) for r in requested]
@@ -569,20 +573,40 @@ class Analyzer:
             broken.append({"cycle": circ["cycle"], "temp_use": line, "package": pkg})
         return temp_use, broken, check
 
+    def install_commands(self):
+        """[(title, emerge command)] installing the targets: one emerge,
+        or for a queue mixing one-shot and normal installs, the one-shot
+        packages first, then the rest without --oneshot, so emerge adds
+        those to the world file itself"""
+        atoms = [t for t in self.base_targets if not t.startswith("-")]
+        oneshot = [a for a in atoms if a not in self.world]
+        if not self.world or not oneshot or "--oneshot" not in self.targets:
+            return [(self.stage_title(), ["emerge", "--keep-going"] + self.targets)]
+        options = [t for t in self.targets if t.startswith("-")]
+        return [
+            ("Install %s (one-shot)" % ", ".join(oneshot),
+             ["emerge", "--keep-going"] + options + oneshot),
+            ("Install " + ", ".join(self.world),
+             ["emerge", "--keep-going"] + [o for o in options if o != "--oneshot"]
+             + self.world),
+        ]
+
     def stages(self, temp_use, broken, verified):
+        installs = self.install_commands()
         if not temp_use:
             return [{
-                "title": self.stage_title(),
-                "commands": [["emerge", "--keep-going"] + self.targets],
-                "verified": verified,
-            }]
+                "title": title,
+                "commands": [command],
+                # planned together; the second emerge sees the first's result
+                "verified": verified if i == 0 else "after previous stage",
+            } for i, (title, command) in enumerate(installs)]
         rebuild = sorted({"=" + b["package"] for b in broken})
         rebuilt_names = ", ".join(sorted({b["package"] for b in broken}))
         return [
             {
                 "title": "Build with %d temporary USE change(s) to break the cycle(s)"
                          % len(temp_use),
-                "commands": [["emerge", "--keep-going"] + self.targets],
+                "commands": [command for _title, command in installs],
                 "verified": verified,
             },
             {
@@ -1677,7 +1701,8 @@ def main(argv=None):
                         choices=request.get("choices"),
                         requested=request.get("requested") or (),
                         live=bool(request.get("live")),
-                        live_exclude=request.get("live_exclude") or ()).analyze()
+                        live_exclude=request.get("live_exclude") or (),
+                        world=request.get("world") or ()).analyze()
         plan["request"] = request
         plan["signature"] = plan_signature(plan)
     else:

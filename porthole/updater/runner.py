@@ -312,6 +312,14 @@ def check_request(text):
         if not all(check.match(w) for w in words[1:]):
             raise JobError("Not a valid %s setting: %s" % (kind, line[:60]))
         requested.append({"kind": kind, "line": " ".join(words)})
+    # planned with the --oneshot packages, then emerged after them without it
+    atoms = [t for t in targets if not t.startswith("-")]
+    world = [str(w) for w in request.get("world") or []]
+    if world and "--oneshot" not in targets:
+        raise JobError("Packages for the world file go with a --oneshot install")
+    for name in world:
+        if name not in atoms:
+            raise JobError("Not one of the packages being installed: %s" % name[:60])
     choices = validate_choices(request.get("choices") or {})
     # True: always return the plan for review, even if nothing needs approving
     review = bool(request.get("review"))
@@ -324,7 +332,7 @@ def check_request(text):
         if not ok:
             raise JobError("Not a package name: %s" % name)
     return {"targets": targets, "requested": requested, "choices": choices,
-            "review": review, "live": bool(request.get("live")),
+            "world": world, "review": review, "live": bool(request.get("live")),
             "live_exclude": live_exclude,
             # a world update the user approved: its choices become the
             # standing ones (for the weekly checks)
@@ -370,7 +378,7 @@ def submit_install(text, expect=None, log=None):
             prune(state)
         return "queued", job
     plan = Analyzer(request["targets"], choices=request["choices"],
-                    requested=request["requested"],
+                    requested=request["requested"], world=request["world"],
                     log=log or (lambda m: None)).analyze()
     plan["request"] = request
     path = store_install_plan(plan)
@@ -407,7 +415,8 @@ def queue_install(plan, path):
 
 
 def submit_check(sync=True):
-    """Queue an update check (syncing first, at most once a day)"""
+    """Queue an update check (syncing first, at most once a day; with
+    sync="now", whenever asked)"""
     job = new_job("check", "Check for updates",
                   [{"kind": "check", "title": "Sync and work out an update plan"
                     if sync else "Work out an update plan", "sync": sync}],
@@ -597,6 +606,7 @@ class Runner:
         log("Working out the install as root, to compare with the plan you approved...")
         plan = Analyzer(request["targets"], choices=request["choices"],
                         requested=request["requested"], log=log,
+                        world=request.get("world") or (),
                         live=request.get("live", False),
                         live_exclude=request.get("live_exclude") or ()).analyze()
         plan["request"] = request
