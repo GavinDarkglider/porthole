@@ -38,6 +38,9 @@ CASES = [
       "--generated", "2026-10-29T17:00:00-0700"],
      {"kind": "install", "plan": "/var/lib/porthole/installs/x.json",
       "generated": "2026-10-29T17:00:00-0700"}),
+    (["cancel", "20261030-090718-install-a3f2", "--drop"],
+     {"job": "20261030-090718-install-a3f2", "drop": True}),
+    (["cancel"], {"job": None, "drop": False}),
     (["news", "read", "--repo", "gentoo", "2026-05-03-binpkg-changes"],
      {"state": "read", "repo": "gentoo", "names": ["2026-05-03-binpkg-changes"]}),
 ]

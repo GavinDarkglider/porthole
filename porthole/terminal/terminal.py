@@ -469,19 +469,71 @@ class ProcessManager: #dbus.service.Object):
 
     def cancel_followed_job(self, job_id):
         """Kill on a followed job stops the job itself, through the runner"""
+        from porthole.updater.follow import find
+        job = find(job_id) or {}
+        install = job.get("kind") == "install"
         dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
-                                   buttons=Gtk.ButtonsType.YES_NO,
+                                   buttons=Gtk.ButtonsType.NONE,
                                    text=_("Stop this job?"))
-        dialog.format_secondary_text(_(
-            "The package being built is stopped; packages already installed stay "
-            "installed. Use Resume to carry on later."))
+        dialog.set_title(_("Porthole: stop job"))
+        dialog.format_secondary_text(
+            _("%s\n\nThe package being built is stopped; packages already installed "
+              "stay installed.") % job.get("title", job_id)
+            + (_(" \"Finish later\" puts what it didn't get to back in the install "
+                 "queue; \"Drop the rest\" doesn't.") if install else ""))
+        dialog.add_button(_("_Keep running"), Gtk.ResponseType.CANCEL)
+        if install:
+            dialog.add_button(_("Stop, _drop the rest"), Gtk.ResponseType.NO)
+            dialog.add_button(_("Stop, _finish later"), Gtk.ResponseType.YES)
+        else:
+            dialog.add_button(_("_Stop"), Gtk.ResponseType.YES)
+        dialog.set_default_response(Gtk.ResponseType.CANCEL)
+        response = dialog.run()
+        dialog.destroy()
+        if response in (Gtk.ResponseType.YES, Gtk.ResponseType.NO):
+            from porthole.updater.elevate import run_as_root, service
+            argv = ["cancel", job_id] + (["--drop"] if response == Gtk.ResponseType.NO else [])
+            run_as_root(service(*argv), lambda ok, out: None)
+        return True
+
+    def after_followed_job(self, job_id):
+        """A followed job is over: if it was stopped with the rest dropped
+        and left programs using old libraries, offer to rebuild them"""
+        from porthole.updater.follow import find
+        job = find(job_id) or {}
+        packages = job.get("preserved_rebuild") or []
+        if job.get("status") not in ("cancelled", "failed") or job.get("keep_rest", True) \
+                or not packages:
+            return False
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE,
+                                   text=_("Rebuild programs using old libraries?"))
+        dialog.set_title(_("Porthole: old libraries"))
+        dialog.format_secondary_text(
+            _("The job replaced libraries that %(n)d installed package(s) still use: "
+              "%(names)s. Rebuilding them (emerge @preserved-rebuild) lets the old "
+              "libraries go.") % {"n": len(packages), "names": ", ".join(packages[:8])
+                                  + (" ..." if len(packages) > 8 else "")})
+        dialog.add_button(_("_Not now"), Gtk.ResponseType.NO)
+        dialog.add_button(_("_Rebuild them"), Gtk.ResponseType.YES)
+        dialog.set_default_response(Gtk.ResponseType.YES)
         response = dialog.run()
         dialog.destroy()
         if response == Gtk.ResponseType.YES:
             from porthole.updater.elevate import run_as_root, service
-            run_as_root(service("cancel", job_id), lambda ok, out: None)
-        return True
+            run_as_root(service("submit", "emerge", "--", "emerge", "--oneshot",
+                                "@preserved-rebuild"), self.rebuild_queued)
+        return False
+
+    def rebuild_queued(self, ok, output):
+        """Follow the @preserved-rebuild job here"""
+        if not ok:
+            return
+        from porthole.updater.follow import command
+        self.add(_("Rebuild programs using old libraries"),
+                 command(output.strip().splitlines()[-1]), lambda: None, _("Job runner"))
 
     def kill_process(self, widget = None, confirm = False):
         """ Kill currently running process """
@@ -1055,6 +1107,9 @@ class ProcessManager: #dbus.service.Object):
         self.callback_armed = False
         # set queue icon according to success or failure (a followed install
         # that stopped part way goes back in the install queue instead)
+        followed = self.followed_job()
+        if followed:
+            GLib.idle_add(self.after_followed_job, followed)
         if self.Failed:
             self.process_queue.done(FAILED)
         else:

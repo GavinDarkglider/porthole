@@ -355,6 +355,8 @@ def main(argv=None):
                         help="emerge: the command line, after --")
     cancel = sub.add_parser("cancel", help="cancel queued jobs and stop the running one")
     cancel.add_argument("job", nargs="?", help="only this job")
+    cancel.add_argument("--drop", action="store_true",
+                        help="don't offer what an install didn't get to again")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -447,7 +449,7 @@ def job_command(args, parser):
             runner.start_runner()
             print(job["id"])
         elif args.command == "cancel":
-            stopped = runner.cancel(args.job)
+            stopped = runner.cancel(args.job, keep_rest=not args.drop)
             print("\n".join(stopped) if stopped else "Nothing to cancel.")
         elif args.command == "config":
             changes = {}

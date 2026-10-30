@@ -58,6 +58,8 @@ def entry(job):
     None if it left nothing to do (or has no plan to go by)"""
     if job.get("kind") != "install" or job.get("status") not in STOPPED:
         return None
+    if not job.get("keep_rest", True):
+        return None  # stopped with "drop the rest"
     plan = read_json(job.get("plan_file") or "")
     if not plan or not plan.get("merge_list"):
         return None

@@ -430,13 +430,16 @@ def submit_check(sync=True):
     return job
 
 
-def cancel(job_id=None):
-    """Cancel queued jobs and stop the running one (or just job_id)"""
+def cancel(job_id=None, keep_rest=True):
+    """Cancel queued jobs and stop the running one (or just job_id).
+    keep_rest False: the user doesn't want what an install didn't get to
+    back in their install queue (see resume.py)"""
     stopped = []
     with jobs_state() as state:
         for job in active_jobs(state):
             if job_id and job["id"] != job_id:
                 continue
+            job["keep_rest"] = keep_rest
             if job["status"] == "queued":
                 job["status"] = "cancelled"
                 job["finished"] = time.time()
@@ -452,6 +455,19 @@ def cancel(job_id=None):
                         pass
             stopped.append(job["id"])
     return stopped
+
+
+def preserved_rebuild_packages(log=lambda m: None):
+    """What 'emerge @preserved-rebuild' would rebuild now (package names)"""
+    try:
+        import portage
+        from portage._sets import load_default_config
+        portage.db[portage.root]["vartree"].dbapi._plib_registry.load()
+        config = load_default_config(portage.settings, portage.db[portage.root])
+        return sorted({atom.cp for atom in config.getSetAtoms("preserved-rebuild")})
+    except Exception as e:
+        log("!! couldn't check for old libraries: %s" % e)
+        return []
 
 
 def start_runner():
@@ -586,8 +602,13 @@ class Runner:
         log("\n== %s" % {"done": "Finished", "failed": "Failed",
                          "cancelled": "Cancelled"}[status])
         # the job is over now: the job window stops following it here, and
-        # the re-check below shows in the tray as a check
-        self.update(job_id, status=status, finished=time.time())
+        # the re-check below shows in the tray as a check. One that stopped
+        # part way may leave programs using old libraries: only root can
+        # tell, so it is noted for the job window to offer a rebuild
+        extra = {}
+        if status != "done":
+            extra["preserved_rebuild"] = preserved_rebuild_packages(log)
+        self.update(job_id, status=status, finished=time.time(), **extra)
         if job.get("recheck"):
             log("\n== Checking what is left to update")
             try:
