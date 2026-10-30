@@ -58,7 +58,7 @@ class TrayIcon:
                 gi.require_version("AyatanaAppIndicator3", "0.1")
                 from gi.repository import AyatanaAppIndicator3 as AppIndicator
                 self.indicator = AppIndicator.Indicator.new(
-                    APP_ID, "software-update-available",
+                    APP_ID, icon_path() or "software-update-available",
                     AppIndicator.IndicatorCategory.SYSTEM_SERVICES)
                 self.indicator.set_menu(menu)
                 self._ai = AppIndicator
@@ -84,14 +84,16 @@ class TrayIcon:
             return False
 
     def _set_icon(self):
+        # Porthole's own icon, like its windows; a theme icon only without it
+        path = icon_path()
+        if path:
+            self.status_icon.set_from_file(path)
+            return
         theme = Gtk.IconTheme.get_default()
         for name in ("software-update-available", "system-software-update"):
             if theme.has_icon(name):
                 self.status_icon.set_from_icon_name(name)
                 return
-        path = icon_path()
-        if path:
-            self.status_icon.set_from_file(path)
 
     def _popup(self, icon, button, activate_time):
         self.menu.popup(None, None, Gtk.StatusIcon.position_menu, icon, button, activate_time)

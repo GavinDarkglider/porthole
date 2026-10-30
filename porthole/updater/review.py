@@ -558,13 +558,13 @@ class UpdateAssistant(Gtk.Window):
             self.load()
             return
         if show:
-            # "JOB" from submit update/check, "queued JOB" from submit install
+            # an update or install started: the job window takes over
+            # ("JOB" from submit update, "queued JOB" from submit install)
             from porthole.updater.follow import show_in_terminal
             show_in_terminal(output.strip().splitlines()[-1].split()[-1])
-        if self.install:
             self.hide()
             return
-        self.load()
+        self.load()  # a check: the new plan shows here when it's done
 
     def show_progress(self):
         """Follow the job in Porthole's job terminal (tabs, colours,
