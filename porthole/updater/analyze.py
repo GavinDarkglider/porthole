@@ -68,6 +68,8 @@ CONFIG_DIRS = {
     "use": "package.use",
     "unmask": "package.unmask",
     "licenses": "package.license",
+    # only from the user: "keep this version" in Advanced Emerge
+    "mask": "package.mask",
 }
 
 _PKG_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -373,13 +375,18 @@ class Analyzer:
     def build_fixes(self, needed, user_keywords):
         """Turn portage's needed changes into porthole-file lines"""
         fixes = []
+        # installing: accept testing versions of the package from now on,
+        # rather than this one version, which would block its updates
+        install = "@world" not in self.base_targets
         for pkg in needed.get("keywords", []):
+            exact = "=%s %s" % (pkg["cpv"], pkg["keyword"])
+            whole = "%s %s" % (pkg["cp"], pkg["keyword"])
             fixes.append({
                 "kind": "keywords",
                 "cpv": pkg["cpv"],
-                "line": "=%s %s" % (pkg["cpv"], pkg["keyword"]),
+                "line": whole if install else exact,
                 # a package pinned to a keyworded sibling should follow it
-                "alt_line": "%s %s" % (pkg["cp"], pkg["keyword"]),
+                "alt_line": exact if install else whole,
             })
         for pkg in needed.get("use", []):
             flags = " ".join(

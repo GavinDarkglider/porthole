@@ -183,6 +183,13 @@ class AdvancedEmergeDialog:
         self.combobox.pack_start(cell, True)
         self.combobox.add_attribute(cell, 'text', 0)
         self.combobox.set_active(index) # select "recommended" ebuild by default
+        # installing a version doesn't stop later updates, unless asked to
+        self.keep_version = Gtk.CheckButton(label=_("Keep this version"))
+        self.keep_version.set_tooltip_text(_(
+            "Don't update past this version (adds a package.mask line); "
+            "untick to let updates move past it later"))
+        self.keep_version.connect("toggled", self.on_toggled)
+        self.combobox.get_parent().pack_start(self.keep_version, False, False, 6)
 
         # emerge / unmerge combobox:
         self.emerge_combolist = Gtk.ListStore(str)
@@ -275,7 +282,12 @@ class AdvancedEmergeDialog:
                 [self.package.full_name] + [f.lstrip("+") for f in flags])})
         keyword = self.get_keyword()
         if keyword and not keyword.startswith("-"):
-            requested.append({"kind": "keywords", "line": "=%s %s" % (ebuild, keyword)})
+            # for the package: later testing versions stay installable
+            requested.append({"kind": "keywords",
+                              "line": "%s %s" % (self.package.full_name, keyword)})
+        keep = getattr(self, "keep_version", None)  # built after the first preview
+        if keep is not None and keep.get_active():
+            requested.append({"kind": "mask", "line": ">" + ebuild})
         return targets, requested
 
     def cancel_clicked(self, widget):
@@ -628,7 +640,8 @@ class AdvancedEmergeDialog:
             command = "emerge " + " ".join(targets)
             for r in requested:
                 command += "\n+ package.%s: %s" % (
-                    "accept_keywords" if r["kind"] == "keywords" else "use", r["line"])
+                    {"keywords": "accept_keywords", "mask": "mask"}.get(r["kind"], "use"),
+                    r["line"])
             problem = self.required_use_problem()
             if problem:
                 command += ("\n\n!! These USE flags break the package's rules (REQUIRED_USE)."

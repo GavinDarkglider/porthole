@@ -186,6 +186,22 @@ class MainWindow(PluginHandler):
         self.update_assistant = None
         self.add_update_assistant_menu()
         self.watch_jobs()
+        self.setup_install_queue()
+
+    def setup_install_queue(self):
+        """The toolbar's Queue button opens the install queue and counts it"""
+        from porthole.updater.installqueue import InstallQueue
+        self.install_queue = InstallQueue()
+        self.install_queue_window = None
+        button = self.wtree.get_object("btn_queue")
+        button.connect("clicked", self.show_install_queue)
+        button.set_tooltip_text(_("Packages waiting to be installed together"))
+
+        def count():
+            n = len(self.install_queue.items)
+            button.set_label(_("Queue (%d)") % n if n else _("Queue"))
+        self.install_queue.listeners.append(count)
+        count()
 
     def watch_jobs(self):
         """Reload the package lists whenever a runner job finishes, however

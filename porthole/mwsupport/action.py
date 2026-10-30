@@ -90,8 +90,22 @@ class ActionHandler(CategoryHandler):
         return True
 
     def request_install(self, package_name, targets, requested=()):
+        """Emerge, Advanced Emerge and Upgrade: add to the install queue,
+        which is planned and installed as a whole"""
+        self.install_queue.add(package_name, targets, requested)
+        self.show_install_queue()
+
+    def show_install_queue(self, *widget):
+        from porthole.updater.installqueue import InstallQueueWindow
+        if self.install_queue_window is None:
+            self.install_queue_window = InstallQueueWindow(self.install_queue,
+                                                           self.plan_install)
+        self.install_queue_window.present()
+
+    def plan_install(self, package_name, targets, requested, on_queued=None):
         """Have the runner plan an install as root: it is queued if it needs
-        nothing approved, otherwise the plan is shown for review"""
+        nothing approved, otherwise the plan is shown for review.
+        on_queued() runs once its job is queued."""
         import json
         from porthole.updater.elevate import run_as_root, service
         from porthole.updater.review import working
@@ -99,20 +113,25 @@ class ActionHandler(CategoryHandler):
                        % package_name)
         request = json.dumps({"targets": list(targets), "requested": list(requested)})
         run_as_root(service("submit", "install", "--request", request),
-                    lambda ok, out: (busy.destroy(), self.install_planned(ok, out)))
+                    lambda ok, out: (busy.destroy(),
+                                     self.install_planned(ok, out, on_queued)))
 
-    def install_planned(self, ok, output):
+    def install_planned(self, ok, output, on_queued=None):
         if not ok:
             SingleButtonDialog(_("Couldn't plan the install"), self.mainwindow,
                                output or _("Cancelled."), None, _("OK"))
+            self.show_install_queue()  # still there to try again
             return
         outcome, _sep, what = output.strip().splitlines()[-1].partition(" ")
         if outcome == "queued":
+            if on_queued:
+                on_queued()
             from porthole.updater.follow import show_in_terminal
             show_in_terminal(what)
         else:
             from porthole.updater.review import UpdateAssistant
-            UpdateAssistant(self.mainwindow, self, plan_file=what).present_plan()
+            UpdateAssistant(self.mainwindow, self, plan_file=what,
+                            on_queued=on_queued).present_plan()
 
     def runner_submitted(self, package_name, ok, output):
         """Follow a submitted job in the terminal, or say why it wasn't taken"""

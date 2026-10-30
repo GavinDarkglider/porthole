@@ -295,12 +295,19 @@ def check_request(text):
     for r in request.get("requested") or []:
         kind, line = r.get("kind"), str(r.get("line", ""))
         words = line.split()
-        if kind not in ("use", "keywords") or len(words) < 2 or "\n" in line:
+        if (kind not in ("use", "keywords", "mask") or "\n" in line
+                or len(words) < (1 if kind == "mask" else 2)):
             raise JobError("Not a setting Porthole can add: %s %s" % (kind, line[:60]))
         try:
-            Atom(words[0])
+            atom = Atom(words[0])
         except Exception:
             raise JobError("Not a package atom: %s" % words[0])
+        if kind == "mask":
+            # "keep this version": masking what is newer, nothing else
+            if len(words) != 1 or atom.operator != ">":
+                raise JobError("A version lock is >cat/pkg-version: %s" % line[:60])
+            requested.append({"kind": kind, "line": words[0]})
+            continue
         check = _USE_FLAG if kind == "use" else _KEYWORD
         if not all(check.match(w) for w in words[1:]):
             raise JobError("Not a valid %s setting: %s" % (kind, line[:60]))
@@ -521,16 +528,17 @@ class Runner:
                 status = "failed"
         log("\n== %s" % {"done": "Finished", "failed": "Failed",
                          "cancelled": "Cancelled"}[status])
+        # the job is over now: the job window stops following it here, and
+        # the re-check below shows in the tray as a check
+        self.update(job_id, status=status, finished=time.time())
         if job.get("recheck"):
-            self.update(job_id, rechecking=True)
             log("\n== Checking what is left to update")
             try:
                 with check_lock():
-                    Service(load_config(), log).run(force=True, sync=False,
-                                                    from_runner=True)
+                    Service(load_config(), Log(echo=False)).run(
+                        force=True, sync=False, from_runner=True)
             except Exception as e:
                 log("!! re-check failed: %s: %s" % (type(e).__name__, e))
-        self.update(job_id, status=status, finished=time.time(), rechecking=False)
 
     # -- steps: each returns True on success --
 

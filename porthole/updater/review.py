@@ -68,11 +68,13 @@ def working(parent, text):
 
 
 class UpdateAssistant(Gtk.Window):
-    def __init__(self, parent, mainwindow, plan_file=None):
+    def __init__(self, parent, mainwindow, plan_file=None, on_queued=None):
         """The world update plan; with plan_file, a plan for installing
-        packages from Porthole (worked out by the runner)"""
+        packages from Porthole (worked out by the runner), and on_queued()
+        runs once its job is queued"""
         self.plan_file = plan_file or PLAN_FILE
         self.install = plan_file is not None
+        self.on_queued = on_queued
         super().__init__(title="Porthole: install" if self.install
                          else "Porthole: update assistant")
         # a window of its own, not transient for Porthole's: window managers
@@ -369,6 +371,8 @@ class UpdateAssistant(Gtk.Window):
             return
         outcome, _sep, what = output.strip().splitlines()[-1].partition(" ")
         if outcome == "queued":
+            if self.on_queued:
+                self.on_queued()
             from porthole.updater.follow import show_in_terminal
             show_in_terminal(what)
             self.hide()
@@ -557,6 +561,8 @@ class UpdateAssistant(Gtk.Window):
             self.error("Couldn't start", output or "Cancelled.")
             self.load()
             return
+        if show and self.install and self.on_queued:
+            self.on_queued()
         if show:
             # an update or install started: the job window takes over
             # ("JOB" from submit update, "queued JOB" from submit install)
