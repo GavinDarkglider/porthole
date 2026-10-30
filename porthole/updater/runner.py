@@ -407,7 +407,7 @@ def submit_install(text, expect=None, log=None, later=False):
     plan["request"] = request
     path = store_install_plan(plan)
     if plan.get("status") == "ready" and not request["review"]:
-        return "queued", queue_install(plan, path)
+        return "queued", queue_install(plan, path, later)
     return "review", path
 
 
