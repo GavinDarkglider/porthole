@@ -93,7 +93,9 @@ class ActionHandler(CategoryHandler):
         """Emerge, Advanced Emerge and Upgrade: add to the install queue,
         which is planned and installed as a whole"""
         self.install_queue.add(package_name, targets, requested)
-        self.show_install_queue()
+        from porthole.updater.installqueue import added_popup
+        added_popup(self.mainwindow, package_name, len(self.install_queue.items),
+                    self.show_install_queue)
 
     def show_install_queue(self, *widget):
         from porthole.updater.installqueue import InstallQueueWindow
@@ -103,15 +105,16 @@ class ActionHandler(CategoryHandler):
         self.install_queue_window.present()
 
     def plan_install(self, package_name, targets, requested, on_queued=None):
-        """Have the runner plan an install as root: it is queued if it needs
-        nothing approved, otherwise the plan is shown for review.
-        on_queued() runs once its job is queued."""
+        """Have the runner plan the queue as root and show the plan for
+        review (always: only Install there starts it). on_queued() runs
+        once its job is queued."""
         import json
         from porthole.updater.elevate import run_as_root, service
         from porthole.updater.review import working
         busy = working(self.mainwindow, _("Working out what installing %s needs...")
                        % package_name)
-        request = json.dumps({"targets": list(targets), "requested": list(requested)})
+        request = json.dumps({"targets": list(targets), "requested": list(requested),
+                              "review": True})
         run_as_root(service("submit", "install", "--request", request),
                     lambda ok, out: (busy.destroy(),
                                      self.install_planned(ok, out, on_queued)))

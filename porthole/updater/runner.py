@@ -313,7 +313,10 @@ def check_request(text):
             raise JobError("Not a valid %s setting: %s" % (kind, line[:60]))
         requested.append({"kind": kind, "line": " ".join(words)})
     choices = validate_choices(request.get("choices") or {})
-    return {"targets": targets, "requested": requested, "choices": choices}
+    # True: always return the plan for review, even if nothing needs approving
+    review = bool(request.get("review"))
+    return {"targets": targets, "requested": requested, "choices": choices,
+            "review": review}
 
 
 def submit_install(text, log=None):
@@ -335,7 +338,7 @@ def submit_install(text, log=None):
             os.unlink(os.path.join(INSTALL_DIR, old))
         except OSError:
             pass
-    if plan.get("status") == "ready":
+    if plan.get("status") == "ready" and not request["review"]:
         return "queued", queue_install(plan, path)
     return "review", path
 

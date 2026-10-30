@@ -2,10 +2,11 @@
     Porthole: the install queue
 
     Emerge, Advanced Emerge and Upgrade add packages (with their emerge
-    options and chosen settings) here instead of running anything. When
-    the user installs the queue, it becomes one request: the runner plans
-    all of it together, so dependencies shared between the packages are
-    worked out once and there is one review and one job. The queue is
+    options and chosen settings) here instead of running anything; a
+    popup says so. When the user processes the queue, it becomes one
+    request: the runner plans all of it together (dependencies shared
+    between the packages are worked out once), the plan is always shown
+    for review, and only Install there starts the one job. The queue is
     kept per user and survives restarting Porthole; it is emptied only
     once its job is queued.
 
@@ -22,7 +23,7 @@ import os
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import Gtk
+from gi.repository import GLib, Gtk
 
 from porthole.updater.commands import icon_path
 
@@ -88,6 +89,37 @@ class InstallQueue:
         return options + atoms, requested
 
 
+def added_popup(parent, name, count, open_queue):
+    """A short note that a package went into the queue; it closes itself"""
+    dialog = Gtk.MessageDialog(transient_for=parent, modal=False,
+                               message_type=Gtk.MessageType.INFO,
+                               buttons=Gtk.ButtonsType.NONE,
+                               text="%s added to the install queue" % name)
+    dialog.set_title("Porthole")
+    dialog.format_secondary_text(
+        "%d package%s queued. Nothing is installed until you process the queue "
+        "(the Queue button) and approve the plan." % (count, "s" if count != 1 else ""))
+    dialog.add_buttons("Open queue", 1, "OK", Gtk.ResponseType.OK)
+    dialog.set_default_response(Gtk.ResponseType.OK)
+
+    closed = []
+
+    def response(d, r):
+        closed.append(True)
+        d.destroy()
+        if r == 1:
+            open_queue()
+
+    def timeout():
+        if not closed:
+            dialog.response(Gtk.ResponseType.OK)
+        return False
+    dialog.connect("response", response)
+    GLib.timeout_add_seconds(6, timeout)
+    dialog.show_all()
+    return dialog
+
+
 class InstallQueueWindow(Gtk.Window):
     def __init__(self, queue, install):
         """install(name, targets, requested, on_queued) plans and starts
@@ -121,13 +153,17 @@ class InstallQueueWindow(Gtk.Window):
         clear.connect("clicked", lambda b: self.queue.clear())
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.hide())
-        self.install_button = Gtk.Button(label="Install queue")
+        self.install_button = Gtk.Button(label="Process queue...")
+        self.install_button.set_tooltip_text(
+            "Work out what the queued packages need and show it for review; "
+            "nothing is installed until you press Install there")
         self.install_button.get_style_context().add_class("suggested-action")
         self.install_button.connect("clicked", self.on_install)
-        buttons.pack_start(remove, False, False, 0)
+        # Close away from Process queue, so one isn't pressed for the other
+        buttons.pack_start(close, False, False, 0)
+        buttons.pack_start(remove, False, False, 12)
         buttons.pack_start(clear, False, False, 0)
         buttons.pack_end(self.install_button, False, False, 0)
-        buttons.pack_end(close, False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         queue.listeners.append(self.refresh)
@@ -144,8 +180,9 @@ class InstallQueueWindow(Gtk.Window):
         self.heading.set_text(
             "Nothing is queued. Emerge, Advanced Emerge and Upgrade add packages here."
             if not count else
-            "%d package%s queued. Install queue works out what they need together "
-            "(one plan to review, one job); nothing runs before that."
+            "%d package%s queued. Process queue works out what they need together "
+            "and shows it for review; nothing is installed until you press Install "
+            "there."
             % (count, "s" if count != 1 else ""))
         self.install_button.set_sensitive(bool(count))
 
