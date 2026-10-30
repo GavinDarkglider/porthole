@@ -270,6 +270,15 @@ class MainWindow(PluginHandler):
         item.connect("activate", self.open_update_assistant)
         menu.insert(item, 0)
         item.show()
+        news = Gtk.MenuItem.new_with_mnemonic(_("_News..."))
+        news.connect("activate", self.open_news)
+        menu.insert(news, 1)
+        news.show()
+
+    def open_news(self, *widget):
+        """Gentoo news: read it, mark it read or unread"""
+        from porthole.updater import news
+        news.window()
 
     def open_update_assistant(self, *widget):
         """Show the plan made by the update service"""

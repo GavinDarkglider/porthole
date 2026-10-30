@@ -162,6 +162,10 @@ class UpdateAssistant(Gtk.Window):
         else:
             # the background check's plan, or the user's own if newer
             self.plan, self.plan_file = latest_plan()
+        if self.plan:
+            # counted now, not when the plan was made
+            from porthole.updater import news
+            self.plan["news_unread"] = news.unread_count()
         for child in self.content.get_children():
             child.destroy()
         plan = self.plan
@@ -484,9 +488,9 @@ class UpdateAssistant(Gtk.Window):
         self.content.reorder_child(box, 2)
 
     def show_buttons(self, can_start, stale):
-        news = (self.plan or {}).get("news_unread")
+        from porthole.updater import news as gentoo_news
+        news = gentoo_news.unread_count()
         self.news_button.set_label("Read news (%d)" % news if news else "Read news")
-        self.news_button.set_sensitive(bool(news))
         jobs = read_jobs()
         busy = any(j["status"] in ACTIVE for j in jobs)
         changed = self.choices_changed()
@@ -515,8 +519,10 @@ class UpdateAssistant(Gtk.Window):
         return self.mainwindow.process_manager
 
     def on_news(self, button):
-        self.process_manager.add("Read Gentoo news", "eselect news read new",
-                                 lambda: None, "Update Assistant")
+        from porthole.updater import news
+        window = news.window()
+        if self.load not in window.listeners:
+            window.listeners.append(self.load)
 
     def on_recheck(self, button):
         """Work out the update as the user: no password, no sync (the

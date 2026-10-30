@@ -333,6 +333,10 @@ def main(argv=None):
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
+    news = sub.add_parser("news", help="mark Gentoo news items read or unread")
+    news.add_argument("state", choices=("read", "unread"))
+    news.add_argument("--repo", default="gentoo")
+    news.add_argument("names", nargs="+", metavar="ITEM")
     sub.add_parser("runner", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
@@ -378,6 +382,15 @@ def job_command(args, parser):
     from porthole.updater import runner
     if args.command == "runner":
         return runner.Runner().run()
+    if args.command == "news":
+        from porthole.updater import news
+        try:
+            left = news.set_read(args.repo, args.names, args.state == "read")
+        except (ValueError, OSError) as e:
+            print(e, file=sys.stderr)
+            return 3
+        print("%d unread" % left)
+        return 0
     try:
         if args.command == "submit":
             if args.kind == "install":

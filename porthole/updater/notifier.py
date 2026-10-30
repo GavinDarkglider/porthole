@@ -218,6 +218,9 @@ class Notifier(Gtk.Application):
         self.reload_pending = False
         # the background check's plan, or the user's own (Check now) if newer
         self.plan, _path = latest_plan()
+        if self.plan:
+            from porthole.updater import news
+            self.plan["news_unread"] = news.unread_count()
         self.state = read_json(STATE_FILE, {}) or {}
         running = (self.state.get("running")
                    and time.time() - self.state.get("started", 0) < STALE_RUN)
