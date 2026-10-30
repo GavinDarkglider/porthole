@@ -40,7 +40,7 @@ class CommonReader(threading.Thread):
         # quit even if thread is still running
         self.daemon = True
         print("threading.enumerate() = ",threading.enumerate(), file=stderr)
-        print("this thread is :", _thread.get_ident(), ' current thread ', threading.currentThread(), file=stderr)
+        print("this thread is :", _thread.get_ident(), ' current thread ', threading.current_thread(), file=stderr)
 
     def please_die( self ):
         """ Tell the thread to die """

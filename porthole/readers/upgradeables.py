@@ -71,7 +71,7 @@ class UpgradableListReader(CommonReader):
         """fill upgrade tree"""
         debug.dprint("READERS: UpgradableListReader(); process id = %d *******************" %os.getpid())
         print("READERS: UpgradableListReader(); threading.enumerate() = ",threading.enumerate(), file=stderr)
-        print("READERS: UpgradableListReader(); this thread is :", _thread.get_ident(), ' current thread ', threading.currentThread(), file=stderr)
+        print("READERS: UpgradableListReader(); this thread is :", _thread.get_ident(), ' current thread ', threading.current_thread(), file=stderr)
         self.get_system_list()
         self.get_sets()
         for key in self.cat_order:

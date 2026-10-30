@@ -434,7 +434,7 @@ class ProcessManager: #dbus.service.Object):
                 Gtk.main_quit()
             except:
                 Gtk.mainquit()
-        if self.reader.isAlive():
+        if self.reader.is_alive():
             self.reader.die = "Please"
             debug.dprint("TERMINAL: reader process still alive - killing...")
             self.reader.join()
@@ -566,6 +566,15 @@ class ProcessManager: #dbus.service.Object):
 
 
     def confirm_delete(self, widget = None, *event):
+        if self.job_mode:
+            # the job runs on in the runner: closing only stops following
+            # it, and ends this window's process (porthole --follow-job), so
+            # the next one starts afresh (with any updated Porthole)
+            if self.reader.process_running:
+                self.kill_process()
+            self.window_visible = False
+            self.window.destroy()
+            return True
         if self.allow_delete:
             retval = False
         else:
