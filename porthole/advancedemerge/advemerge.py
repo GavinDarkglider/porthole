@@ -52,9 +52,12 @@ from porthole.views.useflags import UseFlagWidget
 class AdvancedEmergeDialog:
     """Class to perform advanced emerge dialog functionality."""
 
-    def __init__(self, package, setup_command, re_init_portage, install=None):
+    def __init__(self, package, setup_command, re_init_portage, install=None,
+                 rebuild=False):
         """ Initialize Advanced Emerge Dialog window; install(name, targets,
-        requested) plans and queues an install with the chosen settings """
+        requested) adds an install with the chosen settings to the queue.
+        rebuild: change the USE flags of the installed version (rebuilt
+        with --oneshot, so the world file is left alone) """
         # Preserve passed parameters
         self.package = package
         self.setup_command = setup_command
@@ -106,6 +109,9 @@ class AdvancedEmergeDialog:
         self.use_flags_frame = self.wtree.get_object("frameUseFlags")
         self.keywords_frame = self.wtree.get_object("frameKeywords")
         self.window.set_title(_("Advanced Emerge Settings for %s") % package.full_name)
+        self.rebuild = rebuild
+        if rebuild:
+            self.window.set_title(_("Change USE flags of %s") % package.full_name)
 
         self.command_textview = self.wtree.get_object("command_textview")
         self.command_buffer = self.command_textview.get_buffer()
@@ -182,6 +188,11 @@ class AdvancedEmergeDialog:
         cell = Gtk.CellRendererText()
         self.combobox.pack_start(cell, True)
         self.combobox.add_attribute(cell, 'text', 0)
+        if rebuild:
+            # the installed version, not the recommended one
+            for x, ver in enumerate(self.verList):
+                if ver["installed"]:
+                    index = x
         self.combobox.set_active(index) # select "recommended" ebuild by default
         # installing a version doesn't stop later updates, unless asked to
         self.keep_version = Gtk.CheckButton(label=_("Keep this version"))
@@ -189,6 +200,13 @@ class AdvancedEmergeDialog:
             "Don't update past this version (adds a package.mask line); "
             "untick to let updates move past it later"))
         self.keep_version.connect("toggled", self.on_toggled)
+        if rebuild:
+            # rebuilding what is installed shouldn't add it to the world file
+            self.wtree.get_object("cbOneShot").set_active(True)
+            # only the USE flags matter here: keywords and versions don't
+            for widget in (self.keywords_frame, self.keep_version):
+                widget.set_no_show_all(True)
+                widget.hide()
         self.combobox.get_parent().pack_start(self.keep_version, False, False, 6)
 
         # emerge / unmerge combobox:
@@ -280,7 +298,9 @@ class AdvancedEmergeDialog:
             # for the package, so the next version keeps them
             requested.append({"kind": "use", "line": " ".join(
                 [self.package.full_name] + [f.lstrip("+") for f in flags])})
-        keyword = self.get_keyword()
+        # changing USE flags leaves keywords alone: the installed version
+        # is already accepted
+        keyword = "" if self.rebuild else self.get_keyword()
         if keyword and not keyword.startswith("-"):
             # for the package: later testing versions stay installable
             requested.append({"kind": "keywords",

@@ -122,28 +122,16 @@ class DependsView(CommonTreeView):
         # make it easier to read across columns
         self.set_rules_hint(True)
 
-        # create popup menu for rmb-click
-        arch = "~" + backends.portage_lib.get_arch()
+        # popup menu for rmb-click: as in the package list; a dependency is
+        # installed --oneshot, so it isn't added to the world file
         menu = Gtk.Menu()
         menuitems = {}
         menuitems["emerge --oneshot"] = Gtk.MenuItem(_("Emerge"))
         menuitems["emerge --oneshot"].connect("activate", self.emerge)
-        menuitems["pretend-emerge"] = Gtk.MenuItem(_("Pretend Emerge"))
-        menuitems["pretend-emerge"].connect("activate", self.emerge, True, None)
-        menuitems["sudo-emerge --oneshot"] = Gtk.MenuItem(_("Sudo Emerge"))
-        menuitems["sudo-emerge --oneshot"].connect("activate", self.emerge, None, True)
-        menuitems["Advanced emerge dialog"] = Gtk.MenuItem(_("Advanced Emerge"))
+        menuitems["Advanced emerge dialog"] = Gtk.MenuItem(_("Advanced Emerge..."))
         menuitems["Advanced emerge dialog"].connect("activate", self.adv_emerge)
-        #menuitems["unmerge"] = Gtk.MenuItem(_("Unmerge"))
-        #menuitems["unmerge"].connect("activate", self.unmerge)
-        #menuitems["sudo-unmerge"] = Gtk.MenuItem(_("Sudo Unmerge"))
-        #menuitems["sudo-unmerge"].connect("activate", self.unmerge, True)
-        menuitems["add-keyword"] = Gtk.MenuItem(_("Append with %s to package.keywords") % arch)
-        menuitems["add-keyword"].connect("activate", self.add_keyword)
-        #menuitems["deselect_all"] = Gtk.MenuItem(_("De-Select all"))
-        #menuitems["deselect_all"].connect("activate", self.deselect_all)
-        #menuitems["select_all"] = Gtk.MenuItem(_("Select all"))
-        #menuitems["select_all"].connect("activate", self.select_all)
+        menuitems["change-use"] = Gtk.MenuItem(_("Change USE flags..."))
+        menuitems["change-use"].connect("activate", self.change_use)
 
         for item in list(menuitems.values()):
             menu.append(item)
@@ -266,54 +254,11 @@ class DependsView(CommonTreeView):
 
         #pop up menu if was rmb-click and have a valid package
         if self.dopopup and package:
-            if utils.is_root():
-                if package.get_best_ebuild() != package.get_latest_ebuild(): # i.e. no ~arch keyword
-                    self.popup_menuitems["add-keyword"].show()
-                else: self.popup_menuitems["add-keyword"].hide()
-                installed = package.get_installed()
-                havebest = False
-                if installed:
-                    #self.popup_menuitems["unmerge"].show()
-                    if package.get_best_ebuild() in installed:
-                        havebest = True
-                else:
-                    pass
-                    #self.popup_menuitems["unmerge"].hide()
-                if havebest:
-                    self.popup_menuitems["emerge --oneshot"].hide()
-                    self.popup_menuitems["pretend-emerge"].hide()
-                else:
-                    self.popup_menuitems["emerge --oneshot"].show()
-                    self.popup_menuitems["pretend-emerge"].show()
-                self.popup_menuitems["sudo-emerge --oneshot"].hide()
-                #self.popup_menuitems["sudo-unmerge"].hide()
-            else:
-                self.popup_menuitems["emerge --oneshot"].hide()
-                #self.popup_menuitems["unmerge"].hide()
-                if utils.can_gksu() and \
-                        (package.get_best_ebuild() != package.get_latest_ebuild()):
-                    self.popup_menuitems["add-keyword"].show()
-                else:
-                    self.popup_menuitems["add-keyword"].hide()
-                installed = package.get_installed()
-                havebest = False
-                if installed and utils.can_sudo():
-                    #self.popup_menuitems["sudo-unmerge"].show()
-                    if package.get_best_ebuild() in installed:
-                        havebest = True
-                else:
-                    pass
-                    #self.popup_menuitems["sudo-unmerge"].hide()
-                if havebest:
-                    self.popup_menuitems["sudo-emerge --oneshot"].hide()
-                    self.popup_menuitems["pretend-emerge"].hide()
-                else:
-                    if utils.can_sudo():
-                        self.popup_menuitems["sudo-emerge --oneshot"].show()
-                    else:
-                        self.popup_menuitems["sudo-emerge --oneshot"].hide()
-                    self.popup_menuitems["pretend-emerge"].show()
-            self.popup_menu.popup(None, None, None, self.event.button, self.event.time)
+            installed = package.get_installed()
+            items = self.popup_menuitems
+            items["emerge --oneshot"].set_visible(package.get_best_ebuild() not in installed)
+            items["change-use"].set_visible(bool(installed))
+            self.popup_menu.popup_at_pointer(self.event)
             self.dopopup = False
             self.event = None
             return True
@@ -428,19 +373,17 @@ class DependsView(CommonTreeView):
         #debug.dprint("********** DependsView: dep_window_callback(); DependsView: dep_window['tree'] = " + str(self.dep_window['tree']))
 
     def emerge(self, menuitem_widget, pretend=None, sudo=None):
-        emergestring = ['emerge']
+        # a dependency: not for the world file
+        emergestring = ['emerge', 'oneshot']
         if pretend:
             emergestring.append('pretend')
         if sudo:
             emergestring.append('sudo')
         self.dispatch(emergestring, {'caller': "DependsView: emerge()", 'package': utils.get_treeview_selection(self, 2)})
 
-    def add_keyword(self, widget):
-        arch = "~" + backends.portage_lib.get_arch()
-        name = utils.get_treeview_selection(self, 2).full_name
-        string = name + " " + arch + "\n"
-        debug.dprint("DependsView: dependsview add_keyword(); %s" %string)
-        db.userconfigs.set_user_config('KEYWORDS', name=name, add=arch, callback=None)
+    def change_use(self, widget):
+        self.dispatch("change_use", {'caller': "DependsView: change_use()",
+                                     'package': utils.get_treeview_selection(self, 2)})
 
     def adv_emerge(self, widget):
         self.dispatch("adv_emerge", {'caller': "DependsView: emerge()", 'package': utils.get_treeview_selection(self, 2)})

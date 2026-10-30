@@ -168,7 +168,7 @@ class ActionHandler(CategoryHandler):
         debug.dprint("MAINWINDOW: action_callback(); " +
             "caller = %s, action = '%s', arg = %s"
             %(arg['caller'], str(action), str(arg)))
-        if action in ["adv_emerge", "set path", "package changed", "refresh"]:
+        if action in ["adv_emerge", "change_use", "set path", "package changed", "refresh"]:
             # handle possible spaces in callback action string
             _action = action.replace(' ', '_')
             ret_val = None
@@ -178,6 +178,16 @@ class ActionHandler(CategoryHandler):
         else:
             return self._action_install(action, arg)
 
+
+    def _action_change_use_(self, arg):
+        """Change the USE flags of an installed package: Advanced Emerge on
+        the installed version, queued as a --oneshot rebuild"""
+        package = arg.get('package')
+        if package is None:
+            return False
+        AdvancedEmergeDialog(package, self.setup_command, self.re_init_portage,
+                             install=self.request_install, rebuild=True)
+        return True
 
     def _action_adv_emerge_(self, arg):
         """handle advanced emerge action callback"""
@@ -225,6 +235,8 @@ class ActionHandler(CategoryHandler):
         if "sudo" in action:
             commands = ['sudo -p "Password: " '] + commands
         commands.append(config.Prefs.emerge.get_string())
+        if "oneshot" in action and "--oneshot" not in commands[-1]:
+            commands.append("--oneshot ")
         if "ebuild" in arg:
             commands.append('=' + arg['ebuild'])
             cp = PMS_LIB.pkgsplit(arg['ebuild'])[0]

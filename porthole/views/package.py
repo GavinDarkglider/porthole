@@ -67,22 +67,17 @@ class PackageView(CommonTreeView):
         # initialize the treeview
         CommonTreeView.__init__(self)
 
-        # create popup menu for rmb-click
-        arch = "~" + backends.portage_lib.get_arch()
+        # popup menu for rmb-click: the toolbar's actions for this package
         menu = Gtk.Menu()
         menuitems = {}
         menuitems["emerge"] = Gtk.MenuItem(_("Emerge"))
         menuitems["emerge"].connect("activate", self.emerge)
-        menuitems["pretend-emerge"] = Gtk.MenuItem(_("Pretend Emerge"))
-        menuitems["pretend-emerge"].connect("activate", self.emerge, True, None)
-        menuitems["sudo-emerge"] = Gtk.MenuItem(_("Sudo Emerge"))
-        menuitems["sudo-emerge"].connect("activate", self.emerge, None, True)
+        menuitems["adv-emerge"] = Gtk.MenuItem(_("Advanced Emerge..."))
+        menuitems["adv-emerge"].connect("activate", self.adv_emerge)
         menuitems["unmerge"] = Gtk.MenuItem(_("Unmerge"))
         menuitems["unmerge"].connect("activate", self.unmerge)
-        menuitems["sudo-unmerge"] = Gtk.MenuItem(_("Sudo Unmerge"))
-        menuitems["sudo-unmerge"].connect("activate", self.unmerge, True)
-        menuitems["add-keyword"] = Gtk.MenuItem(_("Append with %s to package.keywords") % arch)
-        menuitems["add-keyword"].connect("activate", self.add_keyword)
+        menuitems["change-use"] = Gtk.MenuItem(_("Change USE flags..."))
+        menuitems["change-use"].connect("activate", self.change_use)
         menuitems["deselect_all"] = Gtk.MenuItem(_("De-Select all"))
         menuitems["deselect_all"].connect("activate", self.deselect_all)
         menuitems["select_all"] = Gtk.MenuItem(_("Select all"))
@@ -320,14 +315,15 @@ class PackageView(CommonTreeView):
         self.set_cursor(path) # sets off _clicked
         return True
 
-    def add_keyword(self, widget):
-        arch = "~" + backends.portage_lib.get_arch()
-        name = utils.get_treeview_selection(self, MODEL_ITEM["package"]).full_name
-        string = name + " " + arch + "\n"
-        debug.dprint("VIEWS: Package view add_keyword(); %s" %string)
-        def callback():
-            self.mainwindow_callback("refresh", {'caller': 'VIEWS: Package view add_keyword()'})
-        db.userconfigs.set_user_config('KEYWORDS', name=name, add=arch, callback=callback)
+    def adv_emerge(self, widget):
+        package = utils.get_treeview_selection(self, MODEL_ITEM["package"])
+        self.mainwindow_callback("adv_emerge", {'package': package,
+                                                'caller': 'VIEWS: Package view adv_emerge()'})
+
+    def change_use(self, widget):
+        package = utils.get_treeview_selection(self, MODEL_ITEM["package"])
+        self.mainwindow_callback("change_use", {'package': package,
+                                                'caller': 'VIEWS: Package view change_use()'})
 
     def emerge(self, widget, pretend=None, sudo=None):
         emergestring = ['emerge']
@@ -388,52 +384,16 @@ class PackageView(CommonTreeView):
 
         #pop up menu if was rmb-click
         if self.dopopup:
-            if utils.is_root():
-                if package.get_best_ebuild() != package.get_latest_ebuild(): # i.e. no ~arch keyword
-                    self.popup_menuitems["add-keyword"].show()
-                else: self.popup_menuitems["add-keyword"].hide()
-                installed = package.get_installed()
-                havebest = False
-                if installed:
-                    self.popup_menuitems["unmerge"].show()
-                    if package.get_best_ebuild() in installed:
-                        havebest = True
-                else:
-                    self.popup_menuitems["unmerge"].hide()
-                if havebest:
-                    self.popup_menuitems["emerge"].hide()
-                    self.popup_menuitems["pretend-emerge"].hide()
-                else:
-                    self.popup_menuitems["emerge"].show()
-                    self.popup_menuitems["pretend-emerge"].show()
-                self.popup_menuitems["sudo-emerge"].hide()
-                self.popup_menuitems["sudo-unmerge"].hide()
-            else:
-                self.popup_menuitems["emerge"].hide()
-                self.popup_menuitems["unmerge"].hide()
-                if utils.can_gksu() and \
-                        (package.get_best_ebuild() != package.get_latest_ebuild()):
-                    self.popup_menuitems["add-keyword"].show()
-                else:
-                    self.popup_menuitems["add-keyword"].hide()
-                installed = package.get_installed()
-                havebest = False
-                if installed and utils.can_sudo():
-                    self.popup_menuitems["sudo-unmerge"].show()
-                    if package.get_best_ebuild() in installed:
-                        havebest = True
-                else:
-                    self.popup_menuitems["sudo-unmerge"].hide()
-                if havebest:
-                    self.popup_menuitems["sudo-emerge"].hide()
-                    self.popup_menuitems["pretend-emerge"].hide()
-                else:
-                    if utils.can_sudo():
-                        self.popup_menuitems["sudo-emerge"].show()
-                    else:
-                        self.popup_menuitems["sudo-emerge"].hide()
-                    self.popup_menuitems["pretend-emerge"].show()
-            self.popup_menu.popup(None, None, None, None, self.event.button, self.event.time)
+            # Emerge unless the recommended version is already installed;
+            # Unmerge and Change USE flags only for installed packages.
+            # (Root is asked for when a job is submitted, so the menu is
+            # the same for everyone.)
+            installed = package.get_installed()
+            items = self.popup_menuitems
+            items["emerge"].set_visible(package.get_best_ebuild() not in installed)
+            items["unmerge"].set_visible(bool(installed))
+            items["change-use"].set_visible(bool(installed))
+            self.popup_menu.popup_at_pointer(self.event)
             self.dopopup = False
             self.event = None
             return True
