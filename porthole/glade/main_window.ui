@@ -453,106 +453,6 @@
               </object>
             </child>
 
-            <!-- Emerge Options Menu -->
-            <child>
-              <object class="GtkMenuItem" id="settings1">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_Emerge Options</property>
-                <property name="use-underline">True</property>
-
-                <child type="submenu">
-                  <object class="GtkMenu" id="settings1_menu">
-                    <property name="can-focus">False</property>
-
-                    <!-- Pretend -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="pretend">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_Pretend</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="P" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <!-- Update -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="update">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_Update</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="u" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <!-- Only Fetch -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="fetch">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Only _Fetch</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="F" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <!-- Verbose -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="verbose">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_Verbose</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="V" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <!-- Noreplace -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="noreplace">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_Noreplace</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="n" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <!-- Oneshot -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="oneshot">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">_Oneshot</property>
-                        <property name="use-underline">True</property>
-                        <accelerator key="1" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-
-                    <child>
-                      <object class="GtkSeparatorMenuItem" id="seperator123">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                      </object>
-                    </child>
-
-                    <!-- Search Descriptions -->
-                    <child>
-                      <object class="GtkCheckMenuItem" id="search_descriptions1">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Search _Descriptions</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="on_search_descriptions1_activate" swapped="no"/>
-                        <accelerator key="D" signal="activate" modifiers="GDK_CONTROL_MASK"/>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
 
             <!-- Help Menu -->
             <child>
@@ -649,7 +549,7 @@
             <property name="can-focus">False</property>
             <property name="toolbar-style">both</property>
             <child>
-              <object class="GtkToolButton" id="btn_emerge">
+              <object class="GtkMenuToolButton" id="btn_emerge">
                 <property name="visible">True</property>
                 <property name="can-focus">False</property>
                 <property name="label" translatable="yes">E_merge</property>

@@ -317,17 +317,17 @@ class ActionHandler(CategoryHandler):
             return False
         return True
 
-    def emerge_package(self, package, sudo=False):
-        """Emerge the package."""
+    def emerge_package(self, package, sudo=False, oneshot=False):
+        """Emerge the package (oneshot: not added to the world file)."""
+        options = config.Prefs.emerge.get_string()
+        if oneshot and "--oneshot" not in options:
+            options += "--oneshot "
         if (sudo or (not utils.is_root() and utils.can_sudo())) \
                 and not config.Prefs.emerge.pretend:
             self.setup_command(package.get_name(),
-                'sudo -p "Password: " emerge'+
-                config.Prefs.emerge.get_string() +
-                package.full_name)
+                'sudo -p "Password: " emerge'+ options + package.full_name)
         else:
-            self.setup_command(package.get_name(), "emerge" +
-                config.Prefs.emerge.get_string() + package.full_name)
+            self.setup_command(package.get_name(), "emerge" + options + package.full_name)
 
     def adv_emerge_package(self, package):
         """Advanced emerge of the package."""

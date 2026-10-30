@@ -78,7 +78,6 @@ class MainBase(object):
             "on_help_contents" : self.help_contents,
             "on_about" : self.about,
             "view_filter_changed" : self.view_filter_changed,
-            "on_search_descriptions1_activate" : self.search_set,
             "on_open_log" : self.open_log,
             "on_run_custom" : self.custom_run,
             "on_reload_db" : self.reload_db,
@@ -98,17 +97,6 @@ class MainBase(object):
         # as a parent window
         config.Mainwindow = self.mainwindow
 
-        # how should we setup our saved menus?
-        settings = ["pretend", "fetch", "update", "verbose", "noreplace",
-                        "oneshot"] # "search_descriptions1"]
-        option = 'empty'
-        for option in settings:
-            widget = self.wtree.get_object(option)
-            state = getattr(config.Prefs.emerge, option) or False
-            debug.dprint("MAINWINDOW: __init__(); option = %s, state = %s"
-                    %(option, str(state)))
-            widget.set_active(state)
-            widget.connect("activate", self.emerge_setting_set, option)
         # setup a convienience tuple
         self.tool_widgets = ["emerge_package1", "adv_emerge_package1",
                 "unmerge_package1", "btn_emerge", "btn_adv_emerge",

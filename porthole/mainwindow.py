@@ -187,6 +187,38 @@ class MainWindow(PluginHandler):
         self.add_update_assistant_menu()
         self.watch_jobs()
         self.setup_install_queue()
+        self.setup_emerge_choices()
+
+    def setup_emerge_choices(self):
+        """Emerge or Emerge one-shot, chosen when emerging (the arrow on
+        the toolbar button, and the Package menu), not as a hidden default"""
+        oneshot_label = _("Emerge _one-shot (not added to the world file)")
+        menu = Gtk.Menu()
+        for label, oneshot in ((_("_Emerge"), False), (oneshot_label, True)):
+            item = Gtk.MenuItem.new_with_mnemonic(label)
+            item.connect("activate", lambda w, o=oneshot: self.emerge_btn(w, oneshot=o))
+            menu.append(item)
+        menu.show_all()
+        button = self.wtree.get_object("btn_emerge")
+        button.set_menu(menu)
+        button.set_arrow_tooltip_text(_("Emerge, or emerge one-shot"))
+        # and the Package menu, after Emerge Package
+        package_menu = self.wtree.get_object("package_menu")
+        emerge_item = self.wtree.get_object("emerge_package1")
+        item = Gtk.MenuItem.new_with_mnemonic(oneshot_label)
+        item.connect("activate", lambda w: self.emerge_btn(w, oneshot=True))
+        package_menu.insert(item, package_menu.get_children().index(emerge_item) + 1)
+        item.show()
+        # searching descriptions too, next to the search box
+        entry = self.wtree.get_object("search_entry")
+        check = Gtk.CheckButton(label=_("Descriptions"))
+        check.set_tooltip_text(_("Search package descriptions as well as names"))
+        check.set_active(bool(config.Prefs.main.search_desc))
+        check.connect("toggled", self.search_set)
+        box = entry.get_parent()
+        box.pack_start(check, False, False, 4)
+        box.reorder_child(check, box.get_children().index(entry) + 1)
+        check.show()
 
     def setup_install_queue(self):
         """The toolbar's Queue button opens the install queue and counts it"""
@@ -355,11 +387,12 @@ class MainWindow(PluginHandler):
         """Set whether or not to search descriptions"""
         config.Prefs.main.search_desc = widget.get_active()
 
-    def emerge_btn(self, widget, sudo=False):
-        """callback for the emerge toolbutton and menu entries"""
-        if not self.process_selection("emerge"):
+    def emerge_btn(self, widget, sudo=False, oneshot=False):
+        """callback for the emerge toolbutton and menu entries; oneshot:
+        install without adding the package to the world file"""
+        if not self.process_selection("emerge --oneshot" if oneshot else "emerge"):
             package = utils.get_treeview_selection(self.package_view, 2)
-            self.emerge_package(package, sudo)
+            self.emerge_package(package, sudo, oneshot)
 
     def adv_emerge_btn(self, *widget):
         """Advanced emerge of the currently selected package."""

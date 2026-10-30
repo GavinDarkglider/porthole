@@ -72,6 +72,8 @@ class PackageView(CommonTreeView):
         menuitems = {}
         menuitems["emerge"] = Gtk.MenuItem(_("Emerge"))
         menuitems["emerge"].connect("activate", self.emerge)
+        menuitems["emerge-oneshot"] = Gtk.MenuItem(_("Emerge one-shot (not added to the world file)"))
+        menuitems["emerge-oneshot"].connect("activate", self.emerge_oneshot)
         menuitems["adv-emerge"] = Gtk.MenuItem(_("Advanced Emerge..."))
         menuitems["adv-emerge"].connect("activate", self.adv_emerge)
         menuitems["unmerge"] = Gtk.MenuItem(_("Unmerge"))
@@ -315,6 +317,11 @@ class PackageView(CommonTreeView):
         self.set_cursor(path) # sets off _clicked
         return True
 
+    def emerge_oneshot(self, widget):
+        self.mainwindow_callback(["emerge", "oneshot"], {
+            'full_name': self._last_selected,
+            'caller': 'VIEWS: Package view emerge_oneshot()'})
+
     def adv_emerge(self, widget):
         package = utils.get_treeview_selection(self, MODEL_ITEM["package"])
         self.mainwindow_callback("adv_emerge", {'package': package,
@@ -391,6 +398,7 @@ class PackageView(CommonTreeView):
             installed = package.get_installed()
             items = self.popup_menuitems
             items["emerge"].set_visible(package.get_best_ebuild() not in installed)
+            items["emerge-oneshot"].set_visible(package.get_best_ebuild() not in installed)
             items["unmerge"].set_visible(bool(installed))
             items["change-use"].set_visible(bool(installed))
             self.popup_menu.popup_at_pointer(self.event)
