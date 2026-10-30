@@ -775,33 +775,15 @@ class Analyzer:
         --remote-only), so it runs unprivileged. None when not checked."""
         if not self.live or self.target_root() != "/":
             return None
-        slr = shutil.which("smart-live-rebuild")
-        if not slr:
-            return {"changed": [], "error": "smart-live-rebuild isn't installed "
-                    "(app-portage/smart-live-rebuild)", "verified": True}
-        command = [slr, "--pretend", "--no-color", "--remote-only",
-                   "--unprivileged-user", "--quiet"]
-        if os.geteuid() == 0:
-            # it only reads: no need for root (and its git calls run as portage)
-            command = ["runuser", "-u", "portage", "--", "env",
-                       "HOME=/var/lib/portage/home"] + command
         self.log("Checking live packages for new upstream commits...")
-        try:
-            proc = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                  text=True, timeout=600, cwd="/")
-        except (OSError, subprocess.SubprocessError) as e:
-            return {"changed": [], "error": str(e), "verified": True}
-        if proc.returncode != 0:
-            return {"changed": [], "verified": True,
-                    "error": (proc.stderr.strip().splitlines() or ["failed"])[-1]}
+        atoms, error = smart_live_rebuild()
+        if error:
+            return {"changed": [], "verified": True, "error": error}
         import portage
         vardb = portage.db[portage.root]["vartree"].dbapi
         changed = []
-        for line in proc.stdout.split():
-            try:
-                atom = Atom(line)
-            except Exception:
-                continue
+        for line in atoms:
+            atom = Atom(line)
             installed = vardb.match(atom)
             if not installed or atom.cp in self.live_exclude or atom.cp in self.held:
                 continue
@@ -1768,6 +1750,36 @@ def _unneeded_note(plan):
         return ["%d installed package%s no longer needed."
                 % (len(packages), "s are" if len(packages) != 1 else " is")]
     return []
+
+
+def smart_live_rebuild():
+    """The live packages whose upstream has new commits, as atoms, from
+    smart-live-rebuild: (atoms, None), or ([], error). It only asks the
+    remotes (--pretend --remote-only), so it runs unprivileged."""
+    slr = shutil.which("smart-live-rebuild")
+    if not slr:
+        return [], "smart-live-rebuild isn't installed (app-portage/smart-live-rebuild)"
+    command = [slr, "--pretend", "--no-color", "--remote-only",
+               "--unprivileged-user", "--quiet"]
+    if os.geteuid() == 0:
+        # it only reads: no need for root (and its git calls run as portage)
+        command = ["runuser", "-u", "portage", "--", "env",
+                   "HOME=/var/lib/portage/home"] + command
+    try:
+        proc = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                              text=True, timeout=600, cwd="/")
+    except (OSError, subprocess.SubprocessError) as e:
+        return [], str(e)
+    if proc.returncode != 0:
+        return [], (proc.stderr.strip().splitlines() or ["failed"])[-1]
+    atoms = []
+    for line in proc.stdout.split():
+        try:
+            Atom(line)
+        except Exception:
+            continue
+        atoms.append(line)
+    return atoms, None
 
 
 def main(argv=None):

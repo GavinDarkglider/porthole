@@ -22,7 +22,7 @@
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
-        sets NAME...                root-only sets (security, preserved-rebuild)
+        sets NAME...                root-only sets (preserved-rebuild)
         session [--minutes N]       Porthole's root helper (see session.py)
 
     Settings live in /etc/porthole/updater.conf:
@@ -219,22 +219,8 @@ def last_repo_sync():
     return max(times) if times else None
 
 
-def security_packages(log):
-    """Installed packages affected by a GLSA not yet applied (@security),
-    which only root can work out; for Porthole's Sets view. None if it
-    couldn't be worked out."""
-    try:
-        import portage
-        from portage._sets import load_default_config
-        config = load_default_config(portage.settings, portage.db[portage.root])
-        return sorted({atom.cp for atom in config.getSetAtoms("security")})
-    except Exception as e:
-        log("Couldn't work out @security: %s" % e)
-        return None
-
-
 # sets only root can work out (see readers/sets.py)
-ROOT_SETS = ("security", "preserved-rebuild")
+ROOT_SETS = ("preserved-rebuild",)
 
 
 def preserved_rebuild_packages():
@@ -366,7 +352,6 @@ class Service:
                             live_exclude=self.config["live_exclude"],
                             depclean=self.config["offer_depclean"]).analyze()
             plan["sync"] = sync_info
-            plan["security"] = security_packages(self.log)
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds, "
                      "%d live rebuilds"
@@ -458,8 +443,7 @@ def main(argv=None):
     if args.command == "plan":
         return plan_command(args.request)
     if args.command == "sets":
-        found = {"security": lambda: security_packages(lambda m: print(m, file=sys.stderr)),
-                 "preserved-rebuild": lambda: preserved_rebuild_packages()}
+        found = {"preserved-rebuild": preserved_rebuild_packages}
         print(json.dumps({name: found[name]() for name in args.names}))
         return 0
     if args.command != "run":

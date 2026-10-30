@@ -40,11 +40,13 @@ SET_GROUPS = [
 OTHER = _("Other")
 # the same as @selected, split
 SKIPPED_SETS = {"selected-packages", "selected-sets"}
-# only root can work these out: the root update check lists them
-FROM_ROOT_CHECK = {"preserved-rebuild", "security"}
+# only root can work this out (portage's list of old libraries in use):
+# the root update check lists it, and an unlocked Porthole asks root
+FROM_ROOT_CHECK = {"preserved-rebuild"}
 # slow to work out (@module-rebuild reads every installed file list):
 # worked out when opened in the view (see packages_of)
-LAZY_SETS = {"module-rebuild", "unavailable", "changed-subslot", "downgrade", "changed-deps"}
+LAZY_SETS = {"module-rebuild", "unavailable", "changed-subslot", "downgrade", "changed-deps",
+             "security", "smart-live-rebuild"}
 # the category tree nests on "-", so names keep theirs as U+2011
 NB_HYPHEN = "\u2011"
 
@@ -61,12 +63,19 @@ def set_packages(config, name):
         live = root_sets([name])
         if live is not None:
             return set(live.get(name) or ())
-        # else root's own plan (the user can't see these)
+        # else root's own plan (the user can't see it)
         from porthole.updater.service import PLAN_FILE, read_json
         plan = read_json(PLAN_FILE) or {}
-        if name == "security":
-            return set(plan.get("security") or ())
         return {m["cp"] for m in (plan.get("preserved") or {}).get("merge_list") or []}
+    if name == "smart-live-rebuild":
+        # portage's set refuses to run as the user; asked the way the
+        # update check asks (it only reads the upstream repositories)
+        from portage.dep import Atom
+        from porthole.updater.analyze import smart_live_rebuild
+        atoms, error = smart_live_rebuild()
+        if error:
+            debug.dprint("READERS: SetListReader(); @%s: %s" % (name, error))
+        return {Atom(a).cp for a in atoms}
     try:
         return {atom.cp for atom in config.getSetAtoms(name)}
     except Exception as e:
@@ -76,7 +85,7 @@ def set_packages(config, name):
 
 def packages_of(name, config=None):
     """{name: Package} for a set, for the package view"""
-    if config is None and name not in FROM_ROOT_CHECK:
+    if config is None and name not in FROM_ROOT_CHECK and name != "smart-live-rebuild":
         import portage
         from portage._sets import load_default_config
         config = load_default_config(portage.settings, portage.db[portage.root])

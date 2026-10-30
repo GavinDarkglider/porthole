@@ -15,8 +15,8 @@
     (lock, quit or crash) and when the N minutes are up (0: never).
 
     While unlocked, the service's root-only views work too: plans include
-    the old libraries still in use, and the Sets view shows @security and
-    @preserved-rebuild as they are now.
+    the old libraries still in use, and the Sets view shows
+    @preserved-rebuild as it is now.
 
     Copyright (C) 2026 Porthole developers
 
@@ -386,7 +386,7 @@ def lock_button(tool=False, parent=None):
             label = "Unlock"
             tip = ("Enter the password once, for a while, instead of for every "
                    "change. While unlocked, checks also see old libraries still in "
-                   "use and security updates, and custom commands can run as root.")
+                   "use, and custom commands can run as root.")
         if tool:
             button.set_icon_name(icon)
         else:

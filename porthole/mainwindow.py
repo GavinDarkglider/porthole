@@ -195,8 +195,8 @@ class MainWindow(PluginHandler):
         SESSION.listeners.append(self.lock_changed)
 
     def lock_changed(self):
-        """On unlocking, the Sets view's root-only sets (@security,
-        @preserved-rebuild) are worked out again, as they are now"""
+        """On unlocking, the Sets view's root-only set (@preserved-rebuild)
+        is worked out again, as it is now"""
         from porthole.updater.session import SESSION
         was, self.was_unlocked = self.was_unlocked, SESSION.unlocked()
         if was or not self.was_unlocked or not self.loaded.get("Sets"):
