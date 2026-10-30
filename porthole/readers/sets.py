@@ -27,10 +27,30 @@ from porthole.utils import debug
 from porthole import db
 from porthole.db.package import Package
 from porthole.readers.commonreader import CommonReader
-from porthole.utils.utils import get_set_name
+
+# the Sets view's groups, in order; a set in none of them goes in "Other"
+# (that includes your own, from /etc/portage/sets)
+SET_GROUPS = [
+    (_("Main"), ["world", "selected", "system", "profile", "installed"]),
+    (_("Rebuilds"), ["preserved-rebuild", "smart-live-rebuild", "live-rebuild",
+                     "deprecated-live-rebuild", "changed-subslot", "changed-deps",
+                     "module-rebuild", "x11-module-rebuild", "golang-rebuild",
+                     "rust-rebuild", "rebuilt-binaries"]),
+]
+OTHER = _("Other")
+# only root can work these out; showing them empty would say "nothing"
+SKIPPED_SETS = {"security", "selected-packages", "selected-sets"}
+# the category tree nests on "-", so names keep theirs as U+2011
+NB_HYPHEN = "\u2011"
+
+
+def category(group, name):
+    return "%s-@%s" % (group, name.replace("-", NB_HYPHEN))
+
 
 class SetListReader(CommonReader):
-    """ Convert userconfigs sets to a filename (category) & pkg (package) db (tuple) """
+    """ Portage's package sets (@world, @system, the rebuild sets, your
+    own...) as categories of packages """
     def __init__( self ):
         """ Initialize """
         CommonReader.__init__(self)
@@ -42,39 +62,46 @@ class SetListReader(CommonReader):
         self.count = 0
         self.pkg_dict_total = 0
 
-
     def run( self ):
         """fill SETS tree"""
         debug.dprint("READERS: SetListReader(); process id = %d *******************" %os.getpid())
-        debug.dprint("READERS: SetListReader(); db.userconfigs is type : " +str(type(db.userconfigs)))
-        filenames = db.userconfigs.get_source_keys("SETS")
-        debug.dprint("READERS: SetListReader(); filenames are: " + str(filenames))
-        for filename in filenames:
-            debug.dprint("READERS: SetListReader(); filename is: " + filename)
-            key =get_set_name(filename)
-            if key not in list(self.pkg_dict.keys()):
+        import portage
+        from portage._sets import load_default_config
+        config = load_default_config(portage.settings, portage.db[portage.root])
+        names = sorted(n for n in config.getSets() if n not in SKIPPED_SETS)
+        grouped = [(group, [n for n in members if n in names]) for group, members in SET_GROUPS]
+        known = {n for _group, members in grouped for n in members}
+        grouped.append((OTHER, [n for n in names if n not in known]))
+        for group, members in grouped:
+            for name in members:
+                if self.cancelled: self.done = True; return
+                key = category(group, name)
                 self.pkg_dict[key] = {}
                 self.pkg_count[key] = 0
-
-            for atom in db.userconfigs.get_source_atoms('SETS', filename):
-                debug.dprint("READERS: SetListReader(); atom.name is: " + atom.name)
-                self.count += 1
-                if self.cancelled: self.done = True; return
-                self.pkg_dict[key][atom.name] = db.db.get_package(atom.name)
-                if self.pkg_dict[key][atom.name] == None:
-                    self.pkg_dict[key][atom.name] = Package(atom.name)
-                self.pkg_count[key] += 1
-
+                for cp in sorted(self.set_packages(config, name)):
+                    self.count += 1
+                    package = db.db.get_package(cp) or Package(cp)
+                    self.pkg_dict[key][cp] = package
+                    self.pkg_count[key] += 1
         self.pkg_dict_total = 0
         for key in self.pkg_count:
             self.pkg_dict_total += self.pkg_count[key]
             if self.pkg_dict[key] == {}:
                 pkg = Package(_("None"))
                 self.pkg_dict[key][_("None")] = pkg
-        #debug.dprint("READERS: SetListReader(); new pkg_list = " + str(self.pkg_dict))
         # set the thread as finished
         self.done = True
         return
 
-
-
+    def set_packages(self, config, name):
+        """The package names in a set (nested sets included)"""
+        if name == "preserved-rebuild":
+            # the registry is root's; the update check (as root) lists them
+            from porthole.updater.service import latest_plan
+            plan, _path = latest_plan()
+            return {m["cp"] for m in ((plan or {}).get("preserved") or {}).get("merge_list") or []}
+        try:
+            return {atom.cp for atom in config.getSetAtoms(name)}
+        except Exception as e:
+            debug.dprint("READERS: SetListReader(); @%s: %s" % (name, e))
+            return set()

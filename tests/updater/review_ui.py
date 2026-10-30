@@ -2,8 +2,8 @@
     Click through the update assistant on a fake system from scenarios.py:
     toggle check boxes by label, re-plan with the resulting choices, and
     screenshot each step (needs a display, xwininfo and ImageMagick).
-    Re-planning runs the analyzer directly instead of through sudo and
-    the job runner.
+    Re-planning runs the analyzer directly, in this process, and nothing
+    is sent to root.
 
     Usage: review_ui.py PORTHOLE_SRC OUT_DIR SCENARIO [LABEL_PREFIX...]
       e.g. review_ui.py ~/porthole /tmp/shots held-stuck "Keep lib/v-1"
@@ -43,15 +43,20 @@ def describe(plan):
         [h["cp"] for h in plan.get("held_by_you") or []],
         [s["title"] for s in plan["stages"] if s.get("approval")])
 
-# the assistant reads our plan; re-planning runs the analyzer with its choices
-review.read_json = lambda path, default=None: json.load(open(plan_path)) if path == review.PLAN_FILE else default
+# the assistant reads our plan; re-planning (as the user, like the real
+# thing) runs the analyzer with its choices; nothing is sent to root
+review.latest_plan = lambda: (json.load(open(plan_path)), plan_path)
 review.stale_reason = lambda plan: None
 review.read_jobs = lambda: []
-def fake_root(argv, callback):
-    choices = json.loads(argv[argv.index("--choices") + 1])
+def fake_plan(request, callback, out=None):
+    choices = request.get("choices") or {}
     print("  re-plan with", {k: v for k, v in choices.items() if v})
     print("  ->", describe(analyze(choices)))
-    callback(True, "job")
+    callback(plan_path, None)
+import porthole.updater.elevate as elevate
+elevate.plan_as_user = fake_plan
+def fake_root(argv, callback):
+    print("  (would ask for root: %s)" % " ".join(argv[-4:]))
 review.run_as_root = fake_root
 review.UpdateAssistant.show_progress = lambda self: None
 

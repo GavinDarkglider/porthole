@@ -598,8 +598,9 @@ class MainWindow(PluginHandler):
             self.chg_pkgview(self.package_view)
             cat_scroll.show()
             # all need to be sorted for them to be
-            # displayed in the tree correctly
-            sort_categories = True
+            # displayed in the tree correctly; the sets come in their
+            # own order (see readers/sets.py)
+            sort_categories = myview != SHOW_SETS
             if myview == SHOW_UPGRADE:
                 self.package_view.set_view(UPGRADABLE)
             elif myview == SHOW_DEPRECATED:
