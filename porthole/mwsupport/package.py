@@ -160,6 +160,8 @@ class PackageHandler(MainBase):
             self.plugin_views[mode]["set_pkg_actions"](enabled, package)
             return
         self.widget["emerge_package1"].set_sensitive(enabled)
+        if "emerge_oneshot1" in self.widget:
+            self.widget["emerge_oneshot1"].set_sensitive(enabled)
         self.widget["adv_emerge_package1"].set_sensitive(enabled)
         self.widget["unmerge_package1"].set_sensitive(enabled)
         self.widget["btn_emerge"].set_sensitive(enabled)
@@ -178,7 +180,8 @@ class PackageHandler(MainBase):
         self.packagebook.notebook.set_sensitive(enabled)
 
     def upgrade_packages(self, *widget):
-        """Upgrade selected packages that have newer versions available."""
+        """Update Packages: queue updates of the packages ticked in the
+        Updates view, or open the update assistant"""
         if self.last_view_setting in GROUP_SELECTABLE:
             if not self.get_selected_list():
                 debug.dprint("PackageHandler: upgrade_packages(); " +

@@ -160,7 +160,7 @@ class MainWindow(PluginHandler):
         # populate the view_filter menu
         self.widget["view_filter_list"] = Gtk.ListStore(str)
         for i in [_("All Packages"), _("Installed Packages"),
-                    _("Search Results"), _("Upgradable Packages"),
+                    _("Search Results"), _("Updates Available"),
                     _("Deprecated Packages"), _("Sets")]:
             self.widget["view_filter_list"].append([i])
         self.widget["view_filter"].set_model(self.widget["view_filter_list"])
@@ -209,6 +209,9 @@ class MainWindow(PluginHandler):
         item.connect("activate", lambda w: self.emerge_btn(w, oneshot=True))
         package_menu.insert(item, package_menu.get_children().index(emerge_item) + 1)
         item.show()
+        # greyed out with the other package actions while nothing is selected
+        self.widget["emerge_oneshot1"] = item
+        item.set_sensitive(emerge_item.get_sensitive())
         # searching descriptions too, next to the search box
         entry = self.wtree.get_object("search_entry")
         check = Gtk.CheckButton(label=_("Descriptions"))

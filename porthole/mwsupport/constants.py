@@ -45,6 +45,6 @@ OFF = False
 # create the translated reader type names
 READER_NAMES = {"Deprecated": _("Deprecated"),
                 "Sets": _("Sets"),
-                "Upgradable": _("Upgradable"),
+                "Upgradable": _("Updates"),
                 "Binpkgs": _("Binpkgs")}
 

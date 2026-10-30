@@ -440,7 +440,7 @@
                             <child>
                               <object class="GtkLabel">
                                 <property name="visible">True</property>
-                                <property name="label" translatable="yes">_Upgrade Packages</property>
+                                <property name="label" translatable="yes">_Update Packages</property>
                                 <property name="use-underline">True</property>
                               </object>
                             </child>
