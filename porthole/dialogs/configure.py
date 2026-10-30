@@ -76,6 +76,8 @@ class ConfigDialog:
         # set widget values to values in prefs
         self.set_widget_values()
 
+        self.add_unlock_setting()
+
         # the update service's settings (updater.conf, saved as root)
         from porthole.updater.settings import UpdaterSettingsPage
         self.updates_page = UpdaterSettingsPage()
@@ -91,6 +93,30 @@ class ConfigDialog:
     #-----------------------------------------------
     # GUI Callback function definitions start here
     #-----------------------------------------------
+
+    def add_unlock_setting(self):
+        """How long Unlock lasts: the user's own Porthole setting, on the
+        Global page"""
+        from porthole.updater.session import TIMEOUTS, unlock_minutes
+        grid = self.builder.get_object("viewport1").get_child()
+        top = max(grid.child_get_property(c, "top-attach") + grid.child_get_property(c, "height")
+                  for c in grid.get_children())
+        heading = Gtk.Label(xalign=0, margin_top=12)
+        heading.set_markup("<b>%s</b>" % _("Unlocking"))
+        grid.attach(heading, 0, top, 2, 1)
+        row = Gtk.Box(spacing=12)
+        row.pack_start(Gtk.Label(label=_("Unlock Porthole for"), xalign=0), False, False, 0)
+        self.unlock_time = Gtk.ComboBoxText()
+        for minutes, label in TIMEOUTS:
+            self.unlock_time.append(str(minutes), _(label))
+        self.unlock_time.set_active_id(str(unlock_minutes()))
+        row.pack_start(self.unlock_time, False, False, 0)
+        grid.attach(row, 0, top + 1, 2, 1)
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        hint.set_markup("<small>%s</small>" % _(
+            "Unlock (on the toolbar) asks for your password once; until this time "
+            "is up, changes need no password. Used from the next unlock."))
+        grid.attach(hint, 0, top + 2, 2, 1)
 
     def on_config_response(self, dialog_widget, response_id):
         """ Parse dialog response (ok, cancel, apply or help clicked) """
@@ -330,6 +356,7 @@ class ConfigDialog:
 
     def apply_widget_values(self):
         """ Set prefs from widget values """
+        config.Prefs.globals.unlock_minutes = int(self.unlock_time.get_active_id())
         # Terminal Color Tags
         for name in self.tagnamelist:
             widget = self.builder.get_object(name + '_fg')
