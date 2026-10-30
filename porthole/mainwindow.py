@@ -878,6 +878,8 @@ class MainWindow(PluginHandler):
         if reader_type in ["Upgradable", "Deprecated", "Sets"]:
             self.pkg_list[reader_type] = self.reader.pkg_dict
             self.pkg_count[reader_type] = self.reader.pkg_count
+            if reader_type == "Upgradable":
+                self.package_view.plan_versions = self.reader.plan_versions
             debug.dprint("MAINWINDOW: _reader_done(): " +
                 "pkg_count = " + str(self.pkg_count))
             self.loaded[reader_type] = True

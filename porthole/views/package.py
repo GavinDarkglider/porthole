@@ -64,6 +64,8 @@ class PackageView(CommonTreeView):
         self.iter = None
         self.model = None
         self.current_view = None
+        # the update plan's version of each package, for the Updates view
+        self.plan_versions = {}
         # initialize the treeview
         CommonTreeView.__init__(self)
 
@@ -593,7 +595,12 @@ class PackageView(CommonTreeView):
 
                 # Conditionaly populate the recommended column
                 if config.Prefs.views.show_recommended:
-                    if best_ebuild:
+                    planned, held = (self.plan_versions.get(package.full_name, (None, False))
+                                     if self.current_view == UPGRADABLE else (None, False))
+                    if planned:
+                        version = backends.portage_lib.get_version(planned)
+                        model.set_value(_iter, MODEL_ITEM["recommended"], "(%s)" % version if held else version) # what the update plan merges, or keeps it from
+                    elif best_ebuild:
                         model.set_value(_iter, MODEL_ITEM["recommended"], backends.portage_lib.get_version(best_ebuild)) #  recommended by portage
                         #debug.dprint("VIEWS populate_info(): got best ebuild for '%s' = %s" % (package.full_name, best_ebuild))
                     elif latest_ebuild:

@@ -61,6 +61,8 @@ class UpgradableListReader(CommonReader):
         self.pkg_count = {}
         self.count = 0
         self.pkg_dict_total = 0
+        # {cp: (the version the plan merges, or holds back, held back)}
+        self.plan_versions = {}
         # command lifted fom emwrap and emwrap.sh
         self.system_cmd = "emerge -ep --nocolor --nospinner system | cut -s -f2 -d ']'| cut -f1 -d '[' | sed 's/^[ ]\\+//' | sed 's/[ ].*$//'"
         #self.start = self.run
@@ -85,6 +87,15 @@ class UpgradableListReader(CommonReader):
         wanted += [m["cp"] for m in (plan.get("preserved") or {}).get("merge_list") or []]
         wanted += [c["cp"] for c in (plan.get("live") or {}).get("changed") or []]
         held = [h.get("cp") or h["cpv"].rsplit("-", 1)[0] for h in plan.get("held_back") or []]
+        for entry in ((plan.get("live") or {}).get("changed") or []) + \
+                ((plan.get("preserved") or {}).get("merge_list") or []) + \
+                (plan.get("merge_list") or []):
+            if entry.get("cpv"):
+                self.plan_versions[entry["cp"]] = (entry["cpv"], False)
+        for h in plan.get("held_back") or []:
+            # the version it is kept from (it stays at the installed one)
+            self.plan_versions.setdefault(h.get("cp") or h["cpv"].rsplit("-", 1)[0],
+                                          (h["cpv"], True))
         if held:
             key = _("Held back")
             self.cat_order.append(key)
