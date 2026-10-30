@@ -32,7 +32,8 @@ from porthole.updater.analyze import format_report, summarize
 from porthole.updater.commands import icon_path, script_command
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE
-from porthole.updater.service import PLAN_FILE, STATE_DIR, STATE_FILE, read_json
+from porthole.updater.service import (
+    STATE_DIR, STATE_FILE, USER_PLAN_FILE, latest_plan, read_json, world_request)
 from porthole.updater.viewer import current_job, describe, read_jobs
 
 APP_ID = "org.porthole.UpdateNotifier"
@@ -215,7 +216,8 @@ class Notifier(Gtk.Application):
 
     def reload(self):
         self.reload_pending = False
-        self.plan = read_json(PLAN_FILE)
+        # the background check's plan, or the user's own (Check now) if newer
+        self.plan, _path = latest_plan()
         self.state = read_json(STATE_FILE, {}) or {}
         running = (self.state.get("running")
                    and time.time() - self.state.get("started", 0) < STALE_RUN)
@@ -366,15 +368,17 @@ class Notifier(Gtk.Application):
         self.spawn(script_command("porthole") + ["--review"])
 
     def check_now(self):
+        """Work out the update as the user: no password, no sync (the
+        background check syncs once a day)"""
+        from porthole.updater.elevate import plan_as_user
         self.check_item.set_sensitive(False)
         self.tray.set_tooltip("Checking for updates...")
-        run_as_root(service("submit", "check"), self.check_submitted)
+        plan_as_user(world_request(), self.check_done, out=USER_PLAN_FILE)
 
-    def check_submitted(self, ok, output):
-        if not ok:
-            self.check_item.set_sensitive(True)
-            Notify.Notification.new("Couldn't check for updates",
-                                    output or "Cancelled.", None).show()
+    def check_done(self, plan_file, error):
+        self.check_item.set_sensitive(True)
+        if not plan_file:
+            Notify.Notification.new("Couldn't check for updates", error, None).show()
         self.reload()
 
     def spawn(self, command):

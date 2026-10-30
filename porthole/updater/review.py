@@ -27,7 +27,8 @@ from porthole.updater.analyze import (
 from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
-from porthole.updater.service import PLAN_FILE, STATE_DIR, read_json
+from porthole.updater.service import (
+    PLAN_FILE, STATE_DIR, USER_PLAN_FILE, latest_plan, read_json, world_request)
 from porthole.updater.viewer import read_jobs
 
 
@@ -156,7 +157,11 @@ class UpdateAssistant(Gtk.Window):
 
     def load(self, *args):
         previous = (self.plan or {}).get("generated")
-        self.plan = read_json(self.plan_file)
+        if self.install:
+            self.plan = read_json(self.plan_file)
+        else:
+            # the background check's plan, or the user's own if newer
+            self.plan, self.plan_file = latest_plan()
         for child in self.content.get_children():
             child.destroy()
         plan = self.plan
@@ -360,8 +365,9 @@ class UpdateAssistant(Gtk.Window):
                 request = dict(self.plan["request"], choices=self.pending)
                 plan_as_user(request, self.install_replanned)
                 return
-            run_as_root(service("submit", "check", "--no-sync",
-                                "--choices", json.dumps(self.pending)), self.replanned)
+            # worked out as the user; root only when the update starts
+            from porthole.updater.elevate import plan_as_user
+            plan_as_user(world_request(self.pending), self.replanned, out=USER_PLAN_FILE)
 
     def install_replanned(self, plan_file, error):
         """The install worked out again with the changed choices"""
@@ -373,14 +379,15 @@ class UpdateAssistant(Gtk.Window):
         self.plan = None
         self.load()
 
-    def replanned(self, ok, output):
+    def replanned(self, plan_file, error):
         self.choices_bar.set_sensitive(True)
         self.choices_label.set_text("You changed the plan. Work it out again to check "
                                     "your choices before updating.")
-        if not ok:
-            self.error("Couldn't re-plan", output or "Cancelled.")
-        else:
-            self.show_progress()
+        if not plan_file:
+            self.error("Couldn't re-plan", error)
+            return
+        self.plan = None
+        self.load()
 
     def _stages(self, plan):
         if not plan.get("stages"):
@@ -512,8 +519,21 @@ class UpdateAssistant(Gtk.Window):
                                  lambda: None, "Update Assistant")
 
     def on_recheck(self, button):
+        """Work out the update as the user: no password, no sync (the
+        background check syncs once a day)"""
+        from porthole.updater.elevate import plan_as_user
         self.recheck_button.set_sensitive(False)
-        run_as_root(service("submit", "check"), self.submitted)
+        busy = working(self, "Checking for updates...")
+        choices = normalize_choices((self.plan or {}).get("choices"))
+
+        def done(plan_file, error):
+            busy.destroy()
+            self.recheck_button.set_sensitive(True)
+            if not plan_file:
+                self.error("Couldn't check for updates", error)
+            self.plan = None
+            self.load()
+        plan_as_user(world_request(choices), done, out=USER_PLAN_FILE)
 
     def on_start(self, button):
         plan = self.plan
@@ -543,6 +563,14 @@ class UpdateAssistant(Gtk.Window):
         if self.install:
             # root plans it again and installs only if it is this same plan
             run_as_root(service("submit", "install", "--request", json.dumps(plan["request"]),
+                                "--expect", plan["signature"]),
+                        lambda ok, out: self.submitted(ok, out, show=True))
+            return
+        if plan.get("signature"):
+            # the user's own plan: root plans again and starts only if it is
+            # this same plan, then keeps these choices for later checks
+            request = dict(plan["request"], save_choices=True)
+            run_as_root(service("submit", "install", "--request", json.dumps(request),
                                 "--expect", plan["signature"]),
                         lambda ok, out: self.submitted(ok, out, show=True))
             return

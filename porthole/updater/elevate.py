@@ -53,7 +53,7 @@ def run_as_root(argv, callback):
         _spawn(["pkexec"] + argv, callback)
 
 
-def plan_as_user(request, callback):
+def plan_as_user(request, callback, out=None):
     """Work out an install as the user (resolving needs no root):
     callback(plan_file, error). The plan is only for review; the runner
     plans again as root and installs only if it arrives at the same plan."""
@@ -71,7 +71,9 @@ def plan_as_user(request, callback):
     fd, request_file = tempfile.mkstemp(prefix="request-", suffix=".json", dir=cache)
     with os.fdopen(fd, "w") as f:
         json.dump(request, f)
-    out = request_file.replace("request-", "plan-")
+    out = out or request_file.replace("request-", "plan-")
+    if os.path.exists(out):
+        os.unlink(out)  # so a failed run isn't mistaken for a new plan
     env = {"PYTHONPATH": SRC} if LOCAL else {}
 
     def done(ok, output):

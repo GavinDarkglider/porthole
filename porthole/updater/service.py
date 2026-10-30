@@ -54,7 +54,7 @@ import subprocess
 import sys
 import time
 
-from porthole.updater.analyze import Analyzer, format_report
+from porthole.updater.analyze import WORLD_ARGS as WORLD_TARGETS, Analyzer, format_report
 
 CONFIG_FILE = "/etc/porthole/updater.conf"
 STATE_DIR = "/var/lib/porthole"
@@ -62,6 +62,35 @@ PLAN_FILE = os.path.join(STATE_DIR, "plan.json")
 STATE_FILE = os.path.join(STATE_DIR, "state.json")
 # the user's standing choices: updates to hold, changes to refuse (runner.py)
 CHOICES_FILE = os.path.join(STATE_DIR, "choices.json")
+# an update plan the user worked out themselves (Check now), without root
+USER_PLAN_FILE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"),
+    "porthole", "update-plan.json")
+
+
+def latest_plan():
+    """(plan, path): the newer of the background check's plan and the
+    user's own"""
+    import datetime
+
+    def when(plan):
+        try:
+            return datetime.datetime.fromisoformat(plan["generated"]).timestamp()
+        except (KeyError, TypeError, ValueError):
+            return 0
+    plans = [(read_json(path), path) for path in (PLAN_FILE, USER_PLAN_FILE)]
+    plans = [(plan, path) for plan, path in plans if plan]
+    if not plans:
+        return None, PLAN_FILE
+    return max(plans, key=lambda pp: when(pp[0]))
+
+
+def world_request(choices=None):
+    """What a world update check asks the planner for"""
+    config = load_config()
+    return {"targets": list(WORLD_TARGETS), "requested": [],
+            "choices": choices if choices is not None else read_json(CHOICES_FILE, {}) or {},
+            "live": config["live_rebuild"], "live_exclude": config["live_exclude"]}
 LOG_FILE = "/var/log/porthole/updater.log"
 LOCK_FILE = "/run/lock/porthole-updater.lock"
 

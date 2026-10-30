@@ -315,8 +315,20 @@ def check_request(text):
     choices = validate_choices(request.get("choices") or {})
     # True: always return the plan for review, even if nothing needs approving
     review = bool(request.get("review"))
+    live_exclude = [str(n) for n in request.get("live_exclude") or []]
+    for name in live_exclude:
+        try:
+            ok = Atom(name).cp == name
+        except Exception:
+            ok = False
+        if not ok:
+            raise JobError("Not a package name: %s" % name)
     return {"targets": targets, "requested": requested, "choices": choices,
-            "review": review}
+            "review": review, "live": bool(request.get("live")),
+            "live_exclude": live_exclude,
+            # a world update the user approved: its choices become the
+            # standing ones (for the weekly checks)
+            "save_choices": bool(request.get("save_choices")) and "@world" in targets}
 
 
 def store_install_plan(plan):
@@ -344,11 +356,16 @@ def submit_install(text, expect=None, log=None):
         if not re.match(r"^[0-9a-f]{24}$", expect):
             raise JobError("Not a plan fingerprint: %s" % expect[:40])
         wanted = [t for t in request["targets"] if not t.startswith("-")]
-        job = new_job("install", "Install " + ", ".join(wanted[:3])
-                      + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""),
+        world = "@world" in wanted
+        title = "Update" if world else (
+            "Install " + ", ".join(wanted[:3])
+            + (" and %d more" % (len(wanted) - 3) if len(wanted) > 3 else ""))
+        job = new_job("update" if world else "install", title,
                       [{"kind": "plan-install", "title": "Check the plan you approved",
                         "request": request, "expect": expect}], recheck=True)
         with jobs_state() as state:
+            if world and any(j["kind"] == "update" for j in active_jobs(state)):
+                raise JobError("An update is already queued or running.")
             state["jobs"].append(job)
             prune(state)
         return "queued", job
@@ -579,18 +596,25 @@ class Runner:
         request = step["request"]
         log("Working out the install as root, to compare with the plan you approved...")
         plan = Analyzer(request["targets"], choices=request["choices"],
-                        requested=request["requested"], log=log).analyze()
+                        requested=request["requested"], log=log,
+                        live=request.get("live", False),
+                        live_exclude=request.get("live_exclude") or ()).analyze()
         plan["request"] = request
         path = store_install_plan(plan)
         if plan.get("status") not in ("ready", "needs-approval"):
-            log("!! It can't be installed as it stands (%s); see %s" % (plan.get("status"), path))
+            log("!! It can't go ahead as it stands (%s); see %s" % (plan.get("status"), path))
             return False
         signature = plan_signature(plan)
         if signature != step["expect"]:
+            again = ("Check for updates again" if "@world" in request["targets"]
+                     else "Process the install queue again")
             log("!! The plan differs from the one you approved (something changed since): "
-                "nothing was done. Process the queue again to review it. (New plan: %s)" % path)
+                "nothing was done. %s to review it. (New plan: %s)" % (again, path))
             return False
         log("Same plan as approved.")
+        if request.get("save_choices"):
+            write_json(CHOICES_FILE, request["choices"])
+            log("Your choices are kept for later checks.")
         with jobs_state() as state:
             job = find_job(state, job_id)
             here = next(i for i, s in enumerate(job["steps"])

@@ -1663,7 +1663,9 @@ def main(argv=None):
             request = json.load(f)
         plan = Analyzer(request["targets"], args.config_root,
                         choices=request.get("choices"),
-                        requested=request.get("requested") or ()).analyze()
+                        requested=request.get("requested") or (),
+                        live=bool(request.get("live")),
+                        live_exclude=request.get("live_exclude") or ()).analyze()
         plan["request"] = request
         plan["signature"] = plan_signature(plan)
     else:
