@@ -612,7 +612,8 @@ class SystemSettingsPage(Gtk.Notebook):
             self.pending["use"].pop(flag, None)
         else:
             self.pending["use"][flag] = want
-        self._refresh()
+        # after the click's own handler: it belongs to a label the refresh replaces
+        GLib.idle_add(lambda: self._refresh() and False)
 
     def _set_expand(self, name, values):
         self.pending["expand"][name] = values

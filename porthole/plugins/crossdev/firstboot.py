@@ -38,6 +38,10 @@ NETWORK = {"networkmanager": ("net-misc/networkmanager", "NetworkManager",
                               "NetworkManager (Wi-Fi and wired; nmtui to connect)"),
            "dhcpcd": ("net-misc/dhcpcd", "dhcpcd", "dhcpcd (wired, Wi-Fi with wpa_supplicant)"),
            "none": (None, None, "Nothing at boot")}
+WIFI = {"wpa_supplicant": "wpa_supplicant (works with older kernels, like the Switch's 4.9)",
+        "iwd": "iwd (needs a recent kernel)"}
+# Porthole's files in the system for what the choices need from its packages
+CHOICES_FILE = "00-porthole-firstboot"
 _HOST = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 _HASH = re.compile(r"^\$(6|y|5)\$[./A-Za-z0-9$]{8,200}$")
@@ -139,6 +143,10 @@ def check(config):
     if network not in NETWORK:
         raise FirstBootError("Not a network choice: %s" % network)
     out["network"] = network
+    wifi = config.get("wifi", "wpa_supplicant")
+    if wifi not in WIFI:
+        raise FirstBootError("Not a Wi-Fi choice: %s" % wifi)
+    out["wifi"] = wifi
     out["sshd"] = bool(config.get("sshd"))
     return out
 
@@ -199,6 +207,43 @@ def read_public(name, state_dir=None):
         return {}
 
 
+def choice_files(config):
+    """{relative path in etc/portage: text} the choices need: NetworkManager
+    built for the chosen Wi-Fi program, and the other one masked so
+    nothing pulls it in"""
+    network = config.get("network", "networkmanager")
+    wifi = config.get("wifi", "wpa_supplicant")
+    use, mask = [], []
+    if network != "none":
+        if wifi == "wpa_supplicant":
+            use.append("net-wireless/wpa_supplicant dbus")
+            if network == "networkmanager":
+                use.append("net-misc/networkmanager wifi -iwd")
+            mask.append("net-wireless/iwd")
+        else:
+            if network == "networkmanager":
+                use.append("net-misc/networkmanager wifi iwd")
+            mask.append("net-wireless/wpa_supplicant")
+    head = ("# Porthole: what the system's First boot choices need (network: %s, Wi-Fi: %s).\n"
+            "# Porthole replaces this file.\n" % (network, wifi))
+    return {"package.use/" + CHOICES_FILE: head + "".join(l + "\n" for l in use) if use else None,
+            "package.mask/" + CHOICES_FILE: head + "".join(l + "\n" for l in mask) if mask
+            else None}
+
+
+def write_choice_files(target, config):
+    for relative, text in choice_files(config).items():
+        path = os.path.join(target.portage_dir, relative)
+        if os.path.isfile(os.path.dirname(path)):
+            raise FirstBootError("%s is a single file; Porthole needs it to be a folder"
+                                 % os.path.dirname(path))
+        if text is None:
+            if os.path.exists(path):
+                os.unlink(path)
+        else:
+            _write(target.root, os.path.relpath(path, target.root), text)
+
+
 def remove(name, state_dir=None):
     for path in (state_file(name, state_dir), state_file(name + ".public", state_dir)):
         try:
@@ -210,9 +255,12 @@ def remove(name, state_dir=None):
 def packages(config):
     """Packages the setup needs in the system (added to its package list)"""
     wanted = []
-    package = NETWORK[config.get("network", "networkmanager")][0]
+    network = config.get("network", "networkmanager")
+    package = NETWORK[network][0]
     if package:
         wanted.append(package)
+    if network != "none":
+        wanted.append("net-wireless/" + config.get("wifi", "wpa_supplicant"))
     if config.get("user", {}).get("admin"):
         wanted.append("app-admin/sudo")
     return wanted

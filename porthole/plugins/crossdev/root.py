@@ -361,7 +361,8 @@ def firstboot(args):
             raise ValueError("That file is too big")
         with open(args[1]) as f:
             config = json.load(f)
-        fb.save(target.name, config)
+        config = fb.save(target.name, config)
+        fb.write_choice_files(target, config)
     except (OSError, ValueError, fb.FirstBootError) as e:
         print(e, file=sys.stderr)
         return 1

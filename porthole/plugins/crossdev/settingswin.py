@@ -527,7 +527,9 @@ class SystemSettingsWindow(Gtk.Window):
         if (word in conf.effective(self.info, name, without).split()) != want:
             words.append(word if want else "-" + word)
         self.set(name, " ".join(words))
-        self._redraw(*{"USE": ("use", "overview")}.get(name, ("hardware", "overview")))
+        # after the click's own handler: it belongs to a widget the redraw replaces
+        GLib.idle_add(lambda: self._redraw(*{"USE": ("use", "overview")}.get(
+            name, ("hardware", "overview"))) and False)
 
     def changed_words(self, name):
         """(words Porthole's block sets, words not saved yet)"""
@@ -560,6 +562,19 @@ class SystemSettingsWindow(Gtk.Window):
                                text=self.search)
         find.connect("search-changed", self._search_changed)
         box.pack_start(find, False, False, 0)
+        # the flags shown: refilled as you type (the search box itself stays)
+        self.use_results = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.pack_start(self.use_results, False, False, 0)
+        self._use_results()
+
+    def _use_results(self):
+        from porthole.updater.system import categorise, category_order
+        box, info = self.use_results, self.info
+        prefixes = tuple(n.lower() + "_" for n in info["expand"] + info["hidden"])
+        arch = info["arch"]
+
+        def plain(flag):
+            return not flag.startswith(prefixes) and flag != arch and flag
         mine, pending = self.changed_words("USE")
         on = {w for w in self.get("USE").split() if plain(w)}
         if self.search:
@@ -591,14 +606,16 @@ class SystemSettingsWindow(Gtk.Window):
                               if f not in info["global"]}), False, False, 0)
 
     def _search_changed(self, entry):
+        # never destroy the entry from its own signal: only the results
         self.search = entry.get_text().strip()
-        self._clear("use")
-        self._use()
-        self.tabs["use"].show_all()
-        for child in self.tabs["use"].get_children():
-            if isinstance(child, Gtk.SearchEntry):
-                child.grab_focus_without_selecting()
-                child.set_position(-1)
+        GLib.idle_add(self._refill_use_results)
+
+    def _refill_use_results(self):
+        for child in self.use_results.get_children():
+            child.destroy()
+        self._use_results()
+        self.use_results.show_all()
+        return False
 
     # -- Hardware --
 
@@ -886,7 +903,7 @@ class SystemSettingsWindow(Gtk.Window):
                 self.package_use[atom] = words
             else:
                 self.package_use.pop(atom, None)
-            self._redraw("packages")
+            GLib.idle_add(lambda: self._redraw("packages") and False)
         self.package_flags.pack_start(_heading("USE flags of %s" % atom), False, False, 0)
         self.package_flags.pack_start(_flags(
             sorted(state), described, None, on_click=toggle, state=on, changed=set(mine),
@@ -988,6 +1005,20 @@ class SystemSettingsWindow(Gtk.Window):
             button.set_active(saved.get("network", "networkmanager") == key)
             self.fb["network"][key] = button
             box.pack_start(button, False, False, 0)
+        box.pack_start(_heading("Wi-Fi through"), False, False, 0)
+        first = None
+        self.fb["wifi"] = {}
+        for key, title in fb.WIFI.items():
+            button = (Gtk.RadioButton.new_with_label(None, title) if first is None else
+                      Gtk.RadioButton.new_with_label_from_widget(first, title))
+            first = first or button
+            button.set_margin_start(6)
+            button.set_active(saved.get("wifi", "wpa_supplicant") == key)
+            self.fb["wifi"][key] = button
+            box.pack_start(button, False, False, 0)
+        box.pack_start(_small(
+            "The other one is masked in the system, so nothing installs it, and NetworkManager "
+            "is built for the one chosen."), False, False, 0)
         self.fb["sshd"] = Gtk.CheckButton(label=TITLES_SSHD, margin_start=6)
         self.fb["sshd"].set_active(saved.get("sshd", False))
         box.pack_start(self.fb["sshd"], False, False, 0)
@@ -1042,6 +1073,7 @@ class SystemSettingsWindow(Gtk.Window):
                 config.pop("user_hash", None)
             config["network"] = next(k for k, b in self.fb["network"].items()
                                      if b.get_active())
+            config["wifi"] = next(k for k, b in self.fb["wifi"].items() if b.get_active())
             config["sshd"] = self.fb["sshd"].get_active()
             fb.check(config)
         except fb.FirstBootError as e:
