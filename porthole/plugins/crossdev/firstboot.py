@@ -363,12 +363,12 @@ def _add_user(root, user, log):
                "%wheel ALL=(ALL:ALL) ALL\n", 0o440)
 
 
-def _enable(root, init, service, log):
+def _enable(root, init, service, log, runlevel="default"):
     if init == "openrc":
         if not os.path.exists(os.path.join(root, "etc/init.d", service)):
             log("!! %s isn't installed in the system: not started at boot" % service)
             return
-        link = os.path.join(root, "etc/runlevels/default", service)
+        link = os.path.join(root, "etc/runlevels", runlevel, service)
         os.makedirs(os.path.dirname(link), mode=0o755, exist_ok=True)
         if not os.path.lexists(link):
             os.symlink("/etc/init.d/" + service, link)
@@ -385,6 +385,33 @@ def _enable(root, init, service, log):
         if not os.path.lexists(link):
             os.symlink("/usr/lib/systemd/system/" + unit, link)
     log("Starts at boot: %s" % service)
+
+
+def _desktop(root, init, log):
+    """A display manager in the system starts the desktop at boot (with
+    dbus and elogind, which a desktop session needs)"""
+    for manager in ("lightdm", "sddm", "gdm", "lxdm", "xdm"):
+        if any(os.path.exists(os.path.join(root, d, manager))
+               for d in ("usr/sbin", "usr/bin")):
+            break
+    else:
+        return
+    if init == "openrc":
+        if not os.path.exists(os.path.join(root, "etc/init.d/display-manager")):
+            log("!! %s is installed but OpenRC's display-manager service isn't "
+                "(gui-libs/display-manager-init)" % manager)
+            return
+        _set_line(root, "etc/conf.d/display-manager", "DISPLAYMANAGER", manager)
+        for service, runlevel in (("elogind", "boot"), ("dbus", "default")):
+            if os.path.exists(os.path.join(root, "etc/init.d", service)):
+                _enable(root, init, service, log, runlevel)
+        _enable(root, init, "display-manager", log)
+    else:
+        link = os.path.join(root, "etc/systemd/system/display-manager.service")
+        if not os.path.lexists(link):
+            os.makedirs(os.path.dirname(link), mode=0o755, exist_ok=True)
+            os.symlink("/usr/lib/systemd/system/%s.service" % manager, link)
+        log("Starts at boot: %s" % manager)
 
 
 def apply(target, config, log=lambda m: None):
@@ -439,6 +466,7 @@ def apply(target, config, log=lambda m: None):
                 "not set")
     if config.get("user"):
         _add_user(root, config["user"], log)
+    _desktop(root, init, log)
     service = NETWORK[config.get("network", "networkmanager")][1]
     if service:
         _enable(root, init, service, log)

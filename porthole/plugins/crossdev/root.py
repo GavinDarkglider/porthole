@@ -27,6 +27,9 @@
                                                JSON: the text as a string)
         plugin crossdev profile NAME REPO:PROFILE
                                                point it at another profile
+        plugin crossdev packages NAME JSON     what it installs: its world file and
+                                               USE for single packages
+                                               ({"world": [...], "use": {...}})
         plugin crossdev firstboot NAME FILE    its first-boot setup (FILE: JSON
                                                the front end wrote, mode 0600,
                                                password hashes, never passwords)
@@ -366,6 +369,25 @@ def firstboot(args):
     return 0
 
 
+def packages(args):
+    """plugin crossdev packages NAME JSON"""
+    from porthole.plugins.crossdev import packages as pk
+    if len(args) != 2:
+        print("usage: plugin crossdev packages NAME JSON", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    try:
+        request = pk.save(target, json.loads(args[1]))
+    except (ValueError, pk.PackagesError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    count = len(request["world"])
+    print("%s installs %d package%s" % (target.title, count, "" if count == 1 else "s"))
+    return 0
+
+
 def step_firstboot(runner, job_id, step, log):
     """Write the first-boot setup into the system (the end of its build)"""
     from porthole.plugins.crossdev import firstboot as fb, roots
@@ -387,6 +409,6 @@ def step_firstboot(runner, job_id, step, log):
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
-            "firstboot": firstboot}
+            "firstboot": firstboot, "packages": packages}
 STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain,
          "firstboot": step_firstboot}

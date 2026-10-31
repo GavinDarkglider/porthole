@@ -25,7 +25,8 @@ from porthole.plugins.crossdev import conf
 from porthole.updater.settings import _facts, _flags, _heading, _small
 
 TABS = (("overview", "Overview"), ("compiler", "Compiler"), ("use", "USE flags"),
-        ("hardware", "Hardware"), ("build", "Build options"), ("firstboot", "First boot"),
+        ("hardware", "Hardware"), ("build", "Build options"), ("packages", "Packages"),
+        ("firstboot", "First boot"),
         ("files", "Files"))
 
 
@@ -156,6 +157,14 @@ class SystemSettingsWindow(Gtk.Window):
                 ("%s:%s" % (r, link.split(loc.rstrip("/") + "/profiles/", 1)[1])
                  for r, loc in info["repos"].items()
                  if link.startswith(loc.rstrip("/") + "/profiles/")), link)
+            from porthole.plugins.crossdev import packages as pk
+            info["lookup"] = pk.Lookup(target)
+            info["world"] = pk.read_world(target)
+            info["package_use"] = pk.read_use(target)
+            info["board_meta"] = pk.board_meta(target, info["repos"])
+            info["described"] = {a: info["lookup"].describe(a)
+                                 for a in info["world"] + info["board_meta"]}
+            info["firstboot_packages"] = firstboot.packages(info["firstboot"])
         except Exception as e:
             info = {"error": "%s: %s" % (type(e).__name__, e)}
         GLib.idle_add(self._show, info)
@@ -176,6 +185,8 @@ class SystemSettingsWindow(Gtk.Window):
         self._use()
         self._hardware()
         self._build()
+        self._packages_reset()
+        self._packages()
         self._firstboot()
         self._files()
         for key in self.tabs:
@@ -285,7 +296,8 @@ class SystemSettingsWindow(Gtk.Window):
             self.on_changed()
 
     def on_delete(self, *args):
-        if not self.dirty():
+        packages = self.info is not None and self._packages_dirty()
+        if not self.dirty() and not packages:
             return False
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
@@ -298,7 +310,12 @@ class SystemSettingsWindow(Gtk.Window):
         if answer == Gtk.ResponseType.NO:
             return False
         if answer == Gtk.ResponseType.YES:
-            self.save(then=self.destroy)
+            if packages and self.dirty():
+                self.save(then=lambda: self.save_packages(then=self.destroy))
+            elif packages:
+                self.save_packages(then=self.destroy)
+            else:
+                self.save(then=self.destroy)
         return True
 
     def error(self, text, detail):
@@ -687,6 +704,209 @@ class SystemSettingsWindow(Gtk.Window):
             words.append("~" + self.info["arch"])
         self.set("ACCEPT_KEYWORDS", " ".join(words))
         self._redraw("overview")
+
+    # -- Packages --
+
+    def _packages_reset(self):
+        self.world = list(self.info["world"])
+        self.package_use = {k: list(v) for k, v in self.info["package_use"].items()}
+        self.selected_package = None
+
+    def _packages_dirty(self):
+        return (self.world != self.info["world"]
+                or self.package_use != self.info["package_use"])
+
+    def _describe(self, atom):
+        if atom not in self.info["described"]:
+            self.info["described"][atom] = self.info["lookup"].describe(atom)
+        return self.info["described"][atom]
+
+    def _packages(self):
+        from porthole.plugins.crossdev import packages as pk
+        box, info = self.tabs["packages"], self.info
+        box.pack_start(_small(
+            "What the system installs on top of its base (@system): its world file, as on any "
+            "Gentoo system. Porthole on the system finds the same list there."), False, False, 0)
+        if self._packages_dirty():
+            bar = Gtk.Box(spacing=8)
+            bar.pack_start(_small("Not saved yet."), False, False, 0)
+            save = Gtk.Button(label="Save the package list")
+            save.connect("clicked", lambda b: self.save_packages())
+            undo = Gtk.Button(label="Discard")
+            undo.connect("clicked", lambda b: (self._packages_reset(),
+                                               self._redraw("packages")))
+            bar.pack_end(save, False, False, 0)
+            bar.pack_end(undo, False, False, 0)
+            box.pack_start(bar, False, False, 0)
+        # the board's base
+        for meta in info["board_meta"]:
+            if meta not in self.world:
+                described = self._describe(meta)
+                row = Gtk.Box(spacing=8, margin_start=6)
+                row.pack_start(_small("Board base from the profile's repository: %s (%s)"
+                                      % (meta, described["description"])), False, False, 0)
+                add = Gtk.Button(label="Add")
+                add.connect("clicked", lambda b, m=meta: self._add_package(m))
+                row.pack_end(add, False, False, 0)
+                box.pack_start(row, False, False, 0)
+        # starter lists
+        row = Gtk.Box(spacing=6)
+        starter = Gtk.ComboBoxText()
+        for i, (title, _text, _list) in enumerate(pk.STARTERS):
+            starter.append(str(i), title)
+        starter.set_active(0)
+        row.pack_start(Gtk.Label(label="Start from:"), False, False, 0)
+        row.pack_start(starter, True, True, 0)
+        add_list = Gtk.Button(label="Add these")
+        add_list.connect("clicked", lambda b: [self._add_package(a, redraw=False) for a in
+                                               pk.STARTERS[int(starter.get_active_id())][2]]
+                         and None or self._redraw("packages"))
+        row.pack_start(add_list, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        starter_note = _small(pk.STARTERS[0][1])
+        starter.connect("changed", lambda c: starter_note.set_markup(
+            "<small>%s</small>" % GLib.markup_escape_text(pk.STARTERS[int(c.get_active_id())][1])))
+        box.pack_start(starter_note, False, False, 0)
+        # find one
+        find = Gtk.SearchEntry(placeholder_text="Find a package to add")
+        box.pack_start(find, False, False, 0)
+        results = Gtk.ListStore(str, str)
+        results_view = Gtk.TreeView(model=results, headers_visible=False, no_show_all=True)
+        results_view.append_column(Gtk.TreeViewColumn("", Gtk.CellRendererText(), text=0))
+        cell = Gtk.CellRendererText(ellipsize=3)
+        results_view.append_column(Gtk.TreeViewColumn("", cell, text=1))
+        results_scroll = Gtk.ScrolledWindow(min_content_height=140, no_show_all=True)
+        results_scroll.add(results_view)
+        box.pack_start(results_scroll, False, False, 0)
+
+        def search(entry):
+            results.clear()
+            found = info["lookup"].find(entry.get_text())
+            for cp in found[:40]:
+                results.append([cp, self._describe(cp)["description"]])
+            results_scroll.set_visible(bool(found))
+            results_view.set_visible(bool(found))
+        find.connect("search-changed", search)
+        results_view.connect("row-activated", lambda v, path, c: self._add_package(
+            results[path][0]))
+        box.pack_start(_small("Double-click a package found to add it."), False, False, 0)
+
+        # the list
+        box.pack_start(_heading("Installs (%d)" % len(self.world)), False, False, 0)
+        store = Gtk.ListStore(str, str, str, str)
+        for atom in self.world:
+            d = self._describe(atom)
+            store.append([atom, d["cpv"].split("/", 1)[1] if d["cpv"] else "",
+                          d["repo"] or "", d["problem"] or d["description"]])
+        for atom in info["firstboot_packages"]:
+            if atom not in self.world:
+                d = self._describe(atom)
+                store.append([atom, d["cpv"].split("/", 1)[1] if d["cpv"] else "",
+                              d["repo"] or "", "for the First boot tab's choices"])
+        view = Gtk.TreeView(model=store)
+        for i, title in enumerate(("Package", "Would install", "From", "About")):
+            renderer = Gtk.CellRendererText()
+            if i == 3:
+                renderer.set_property("ellipsize", 3)
+            column = Gtk.TreeViewColumn(title, renderer, text=i)
+            column.set_resizable(True)
+            column.set_expand(i == 3)
+            view.append_column(column)
+        view.set_tooltip_column(3)
+        scroll = Gtk.ScrolledWindow(min_content_height=200)
+        scroll.add(view)
+        box.pack_start(scroll, False, False, 0)
+        missing = [a for a in self.world if self._describe(a)["problem"]]
+        for atom in missing:
+            d = self._describe(atom)
+            hint = ""
+            if d["problem"].startswith("Not in the repositories"):
+                hint = (" Tick the repository that has it for %s (Repositories, "
+                        "“Repositories of: %s”)." % (info["target"].title,
+                                                              info["target"].title))
+            elif "keyworded" in d["problem"]:
+                hint = " Allow testing versions of it (Files: package.accept_keywords)."
+            box.pack_start(_small("⚠ %s: %s.%s" % (atom, d["problem"], hint)),
+                           False, False, 0)
+        buttons = Gtk.Box(spacing=6)
+        remove = Gtk.Button(label="Remove")
+        remove.connect("clicked", lambda b: self._remove_package(view))
+        buttons.pack_start(remove, False, False, 0)
+        box.pack_start(buttons, False, False, 0)
+        self.package_flags = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        box.pack_start(self.package_flags, False, False, 0)
+        view.get_selection().connect("changed", lambda sel: self._package_selected(sel))
+        if self.selected_package:
+            for row in store:
+                if row[0] == self.selected_package:
+                    view.get_selection().select_iter(row.iter)
+
+    def _add_package(self, atom, redraw=True):
+        if atom not in self.world:
+            self.world.append(atom)
+        if redraw:
+            self.selected_package = atom
+            self._redraw("packages")
+
+    def _remove_package(self, view):
+        model, row = view.get_selection().get_selected()
+        if row and model[row][0] in self.world:
+            self.world.remove(model[row][0])
+            self.package_use.pop(model[row][0], None)
+            self.selected_package = None
+            self._redraw("packages")
+
+    def _package_selected(self, selection):
+        from porthole.plugins.crossdev import packages as pk
+        for child in self.package_flags.get_children():
+            child.destroy()
+        model, row = selection.get_selected()
+        if not row:
+            return
+        atom = model[row][0]
+        self.selected_package = atom
+        d = self._describe(atom)
+        if not d["cpv"] or not d["iuse"]:
+            return
+        state = self.info["lookup"].use_state(d["cpv"])
+        mine = {f.lstrip("-"): not f.startswith("-") for f in self.package_use.get(atom, [])}
+        location = self.info["repos"].get(d["repo"]) or ""
+        described = pk.flag_descriptions(location, d["cp"])
+        described = {f: described.get(f) or self.info["descriptions"].get(f, "")
+                     for f in state}
+
+        def on(flag):
+            return mine.get(flag, state[flag])
+
+        def toggle(flag):
+            words = [w for w in self.package_use.get(atom, []) if w.lstrip("-") != flag]
+            if (not on(flag)) != state[flag]:
+                words.append(flag if not on(flag) else "-" + flag)
+            if words:
+                self.package_use[atom] = words
+            else:
+                self.package_use.pop(atom, None)
+            self._redraw("packages")
+        self.package_flags.pack_start(_heading("USE flags of %s" % atom), False, False, 0)
+        self.package_flags.pack_start(_flags(
+            sorted(state), described, None, on_click=toggle, state=on, changed=set(mine),
+            pending=set(), source=lambda f: "Set here for %s" % atom if f in mine else
+            "As the system would build it"), False, False, 0)
+        self.package_flags.show_all()
+
+    def save_packages(self, then=None):
+        from porthole.updater.elevate import run_as_root, service
+        request = {"world": self.world, "use": self.package_use}
+
+        def done(ok, output):
+            if not ok:
+                self.error("The package list wasn't saved", output)
+                return
+            self.changed()
+            if then:
+                then()
+        run_as_root(service("plugin", "crossdev", "packages", self.name, json.dumps(request)),
+                    done)
 
     # -- First boot --
 
