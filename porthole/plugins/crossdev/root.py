@@ -13,10 +13,13 @@
                                                a new system for another
                                                computer (roots.py)
         plugin crossdev remove-root NAME       queue a job deleting one
+        plugin crossdev toolchain NAME         queue a job building the cross
+                                               toolchain its profile allows
 
     Job steps (kind "plugin", plugin "crossdev"):
 
         remove-root   {"name": NAME}
+        toolchain     {"name": NAME}
 
     Copyright (C) 2026 Porthole developers
 
@@ -120,7 +123,6 @@ def new_root(args):
 
 def remove_root(args):
     from porthole.plugins.crossdev import roots
-    from porthole.updater import runner
     if len(args) != 1:
         print("usage: plugin crossdev remove-root NAME", file=sys.stderr)
         return 2
@@ -129,16 +131,72 @@ def remove_root(args):
     except roots.RootError as e:
         print(e, file=sys.stderr)
         return 1
-    title = "Delete the system %s" % target.title
+    return _queue("Delete the system %s" % target.title, "remove-root", target.name)
+
+
+def _queue(title, action, name):
+    from porthole.updater import runner
     job = runner.new_job("plugin", title, [{"kind": "plugin", "title": title,
-                                            "plugin": "crossdev", "action": "remove-root",
-                                            "name": target.name}], recheck=False)
+                                            "plugin": "crossdev", "action": action,
+                                            "name": name}], recheck=False)
     with runner.jobs_state() as state:
         state["jobs"].append(job)
         runner.prune(state)
     runner.start_runner()
     print(job["id"])
     return 0
+
+
+def toolchain(args):
+    from porthole.plugins.crossdev import roots
+    if len(args) != 1:
+        print("usage: plugin crossdev toolchain NAME", file=sys.stderr)
+        return 2
+    target = roots.made_here().get(args[0])
+    if target is None:
+        print("No system called %s was made here" % args[0], file=sys.stderr)
+        return 1
+    return _queue("Build the cross toolchain for %s" % target.title, "toolchain",
+                  target.name)
+
+
+def step_toolchain(runner, job_id, step, log):
+    """Work the toolchain out again (as root, now), build it with
+    crossdev, and let distccd run the new compiler"""
+    import shutil
+    from porthole.plugins.crossdev import roots, toolchain as tc
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    if not shutil.which("crossdev"):
+        log("!! crossdev isn't installed (Ready to build for another computer?)")
+        return False
+    output = checks.repos().get(checks.REPO_NAME)
+    if not output:
+        log("!! crossdev's repository isn't there yet (Ready to build for another "
+            "computer?, Create it)")
+        return False
+    try:
+        resolved = tc.resolve(target)
+    except tc.ToolchainError as e:
+        log("!! %s" % e)
+        return False
+    log("The toolchain %s's profile allows, for %s:" % (target.title, resolved["tuple"]))
+    for title, version, repo, built in tc.compare(resolved):
+        log("   %-15s %-22s from %s%s" % (title, version, repo,
+                                          "  (built: %s)" % built if built else ""))
+    argv = tc.command(resolved, output)
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv):
+        return False
+    if shutil.which("distcc-config"):
+        # distccd runs only the compilers listed in its masquerade directory
+        log("$ distcc-config --update-masquerade-with-crossdev")
+        if not runner.run_logged(job_id, step, log,
+                                 ["distcc-config", "--update-masquerade-with-crossdev"]):
+            return False
+    return True
 
 
 def step_remove_root(runner, job_id, step, log):
@@ -151,5 +209,5 @@ def step_remove_root(runner, job_id, step, log):
 
 
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
-            "remove-root": remove_root}
-STEPS = {"remove-root": step_remove_root}
+            "remove-root": remove_root, "toolchain": toolchain}
+STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain}

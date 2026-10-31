@@ -189,6 +189,12 @@ class SystemsWindow(Gtk.Window):
         new = Gtk.Button(label="New system…")
         new.connect("clicked", lambda b: self.new_system())
         buttons.pack_start(new, False, False, 0)
+        self.toolchain_button = Gtk.Button(label="Build its toolchain…")
+        self.toolchain_button.set_tooltip_text(
+            "The cross compiler for it: the versions of gcc, binutils, the C library and "
+            "kernel headers its profile allows, built here with crossdev.")
+        self.toolchain_button.connect("clicked", lambda b: self.build_toolchain())
+        buttons.pack_start(self.toolchain_button, False, False, 0)
         self.remove_button = Gtk.Button(label="Delete…")
         self.remove_button.connect("clicked", lambda b: self.remove_system())
         buttons.pack_start(self.remove_button, False, False, 0)
@@ -220,6 +226,7 @@ class SystemsWindow(Gtk.Window):
 
     def update_buttons(self):
         self.remove_button.set_sensitive(self.selected() is not None)
+        self.toolchain_button.set_sensitive(self.selected() is not None)
 
     def error(self, text, detail):
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
@@ -246,6 +253,62 @@ class SystemsWindow(Gtk.Window):
                 self.error("The system wasn't made", output)
             self.refresh()
         run_as_root(service("plugin", "crossdev", *args), done)
+
+    def build_toolchain(self):
+        """Show what its profile allows (worked out as the user), then
+        queue the build"""
+        from porthole.plugins.crossdev import roots, toolchain as tc
+        name = self.selected()
+        target = roots.made_here().get(name)
+        if target is None:
+            return
+        self.toolchain_button.set_sensitive(False)
+
+        def work():
+            try:
+                resolved = tc.resolve(target)
+                GLib.idle_add(self.confirm_toolchain, target, resolved, None)
+            except Exception as e:
+                GLib.idle_add(self.confirm_toolchain, target, None, str(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def confirm_toolchain(self, target, resolved, problem):
+        from porthole.plugins.crossdev import toolchain as tc
+        self.update_buttons()
+        if problem:
+            self.error("Porthole couldn't work out the toolchain", problem)
+            return False
+        rows = tc.compare(resolved)
+        if all(built == version for _t, version, _r, built in rows):
+            text = "The toolchain for %s is built and up to date." % target.title
+            build = "Build it again"
+        else:
+            text = "Build the toolchain for %s?" % target.title
+            build = "Build it"
+        lines = ["%s %s (from %s)%s" % (title, version, repo,
+                                        "" if built is None else
+                                        ", built now" if built == version else
+                                        ", %s built now" % built)
+                 for title, version, repo, built in rows]
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE, text=text)
+        dialog.format_secondary_text(
+            "Cross compiler for %s, the versions %s's profile allows:\n\n%s\n\n"
+            "crossdev builds it as a job; it takes an hour or more." % (
+                resolved["tuple"], target.title, "\n".join(lines)))
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, build, Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return False
+        from porthole.updater.elevate import run_as_root, service
+
+        def done(ok, output):
+            if not ok:
+                self.error("The toolchain build wasn't queued", output)
+        run_as_root(service("plugin", "crossdev", "toolchain", target.name), done)
+        return False
 
     def remove_system(self):
         name = self.selected()
