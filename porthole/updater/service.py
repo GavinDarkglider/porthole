@@ -37,6 +37,10 @@
                                     on that list; the checkout stays)
                                     (--systems with add/remove: the list for
                                     other systems only, not this computer)
+        repo folder NAME --folder PATH|--synced
+                                    one of the list for other systems from a
+                                    folder of yours for now (a working copy,
+                                    not synced), or back to its checkout
         repo remove NAME [--delete-files]
         repo sync NAME              add, remove or sync a repository
         binhost add NAME --uri U [--priority N] [--no-verify]
@@ -689,7 +693,8 @@ def main(argv=None):
     prof.add_argument("name", help="e.g. default/linux/amd64/23.0/desktop")
     prof.add_argument("--target", default=None, help="the system (default: this computer)")
     repo = sub.add_parser("repo", help="add, remove or sync a repository")
-    repo.add_argument("action", choices=("add", "remove", "sync", "use", "drop", "enable", "disable"))
+    repo.add_argument("action", choices=("add", "remove", "sync", "use", "drop", "enable",
+                                         "disable", "folder"))
     repo.add_argument("name")
     repo.add_argument("--sync-type", default="git")
     repo.add_argument("--uri")
@@ -698,7 +703,10 @@ def main(argv=None):
     repo.add_argument("--delete-files", action="store_true",
                       help="remove: also delete its checkout (/var/db/repos/NAME only)")
     repo.add_argument("--target", default=None, help="the system (default: this computer)")
-    repo.add_argument("--folder", default=None, help="add: a repository already in this folder")
+    repo.add_argument("--folder", default=None, help="add: a repository already in this "
+                      "folder; folder: use this folder instead of the synced checkout")
+    repo.add_argument("--synced", action="store_true",
+                      help="folder: back to the synced checkout")
     repo.add_argument("--systems", action="store_true",
                       help="add/remove: for other systems only, not this computer")
     binhost = sub.add_parser("binhost", help="add or remove a binhost")
@@ -869,6 +877,10 @@ def job_command(args, parser):
             elif args.action in ("enable", "disable"):
                 print("\n".join((runner.enable_repo if args.action == "enable"
                                  else runner.disable_repo)(args.name)))
+            elif args.action == "folder":
+                if bool(args.folder) == bool(args.synced):
+                    parser.error("repo folder needs --folder PATH or --synced")
+                print("\n".join(runner.repo_folder(args.name, args.folder)))
             elif args.action in ("use", "drop"):
                 if not args.target:
                     parser.error("repo %s needs --target" % args.action)

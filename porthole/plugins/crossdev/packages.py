@@ -38,11 +38,15 @@ STARTERS = (
       "xfce-base/xfce4-panel", "xfce-base/xfce4-session", "xfce-base/xfce4-settings",
       "x11-terms/xfce4-terminal", "x11-misc/lightdm", "x11-misc/lightdm-gtk-greeter",
       "media-fonts/dejavu", "www-client/firefox-bin", "net-misc/networkmanager",
-      "gnome-extra/nm-applet", "app-portage/porthole", "app-editors/nano")),
+      "gnome-extra/nm-applet", "app-portage/porthole", "app-editors/nano"),
+     # USE for every package a desktop needs (a base profile has none of
+     # them; lightdm needs elogind or systemd); X11 only, no Wayland parts
+     ("X", "elogind", "dbus", "-wayland")),
     ("Text only: tools to finish by hand",
      "No desktop: an editor, network tools and Porthole's background parts.",
      ("app-editors/nano", "net-misc/networkmanager", "net-misc/openssh",
-      "app-portage/gentoolkit", "app-portage/porthole")),
+      "app-portage/gentoolkit", "app-portage/porthole"),
+     ()),
 )
 
 

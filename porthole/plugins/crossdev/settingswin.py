@@ -769,20 +769,24 @@ class SystemSettingsWindow(Gtk.Window):
         # starter lists
         row = Gtk.Box(spacing=6)
         starter = Gtk.ComboBoxText()
-        for i, (title, _text, _list) in enumerate(pk.STARTERS):
+        for i, (title, _text, _list, _use) in enumerate(pk.STARTERS):
             starter.append(str(i), title)
         starter.set_active(0)
         row.pack_start(Gtk.Label(label="Start from:"), False, False, 0)
         row.pack_start(starter, True, True, 0)
         add_list = Gtk.Button(label="Add these")
-        add_list.connect("clicked", lambda b: [self._add_package(a, redraw=False) for a in
-                                               pk.STARTERS[int(starter.get_active_id())][2]]
-                         and None or self._redraw("packages"))
+        add_list.connect("clicked", lambda b: self._add_starter(
+            pk.STARTERS[int(starter.get_active_id())]))
         row.pack_start(add_list, False, False, 0)
         box.pack_start(row, False, False, 0)
-        starter_note = _small(pk.STARTERS[0][1])
+        def note(entry):
+            text = entry[1]
+            if entry[3]:
+                text += " Also sets USE for every package: %s." % " ".join(entry[3])
+            return text
+        starter_note = _small(note(pk.STARTERS[0]))
         starter.connect("changed", lambda c: starter_note.set_markup(
-            "<small>%s</small>" % GLib.markup_escape_text(pk.STARTERS[int(c.get_active_id())][1])))
+            "<small>%s</small>" % GLib.markup_escape_text(note(pk.STARTERS[int(c.get_active_id())]))))
         box.pack_start(starter_note, False, False, 0)
         # find one
         find = Gtk.SearchEntry(placeholder_text="Find a package to add")
@@ -857,6 +861,26 @@ class SystemSettingsWindow(Gtk.Window):
             for row in store:
                 if row[0] == self.selected_package:
                     view.get_selection().select_iter(row.iter)
+
+    def set_word(self, name, word, on):
+        """Turn one word of an incremental variable on or off (pending)"""
+        if self.word_on(name, word) == on:
+            return
+        words = [w for w in (self.values().get(name) or "").split() if w.lstrip("-") != word]
+        without = dict(self.values())
+        without[name] = " ".join(words)
+        if (word in conf.effective(self.info, name, without).split()) != on:
+            words.append(word if on else "-" + word)
+        self.set(name, " ".join(words))
+
+    def _add_starter(self, starter):
+        _title, _text, atoms, use = starter
+        for atom in atoms:
+            self._add_package(atom, redraw=False)
+        # the USE flags the list needs, as changes not saved yet (USE tab)
+        for word in use:
+            self.set_word("USE", word.lstrip("-"), not word.startswith("-"))
+        self._redraw("packages", "use", "overview")
 
     def _add_package(self, atom, redraw=True):
         if atom not in self.world:

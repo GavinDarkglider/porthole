@@ -95,6 +95,8 @@ class RepositoriesPage(Gtk.Box):
                                       ("address", "Add by address...", self.add_by_address),
                                       ("folder", "Add a folder...", self.add_folder),
                                       ("remove", "Remove...", self.remove),
+                                      ("working", "Use a folder instead...",
+                                       self.working_copy),
                                       ("sync", "Sync now", self.sync)):
             button = Gtk.Button(label=label)
             button.connect("clicked", lambda b, c=callback: c())
@@ -162,6 +164,8 @@ class RepositoriesPage(Gtk.Box):
                     continue
                 syncs = ("%s %s" % (info["sync_type"], info["sync_uri"])).strip() or \
                     "(a folder, not synced)"
+                if info.get("synced"):
+                    syncs = "from %s for now (not synced)" % info["location"]
                 row = dict(info, name=name, main=False, installed=0, pool=True,
                            file=None, missing=False)
                 self.repos.append(row)
@@ -178,6 +182,8 @@ class RepositoriesPage(Gtk.Box):
                 "other systems: this computer doesn't use them.</small>")
             for r in self.repos:
                 syncs = ("%s %s" % (r["sync_type"], r["sync_uri"])).strip() or "(not synced)"
+                if r.get("synced"):
+                    syncs = "from %s for now (not synced)" % r["location"]
                 self.store.append([r["name"], syncs, r["where"], "", r["main"], r["used"],
                                    not r["main"]])
         self.selected()
@@ -198,6 +204,7 @@ class RepositoriesPage(Gtk.Box):
                          "used": repo in used or repo == "gentoo", "pool": repo in pool,
                          "sync_type": info.get("sync_type", ""),
                          "sync_uri": info.get("sync_uri", ""), "file": None,
+                         "synced": info.get("synced"),
                          "where": "for other systems only" if repo in pool else
                          "this computer's"})
         return rows
@@ -253,6 +260,14 @@ class RepositoriesPage(Gtk.Box):
         self.button_remove.set_sensitive(bool(repo) and not repo["main"] and (
             self.target is None or repo.get("pool", False)))
         self.button_sync.set_sensitive(bool(repo) and bool(repo["sync_type"]))
+        # the list's repositories: a working copy of yours in place of the checkout
+        self.button_working.set_sensitive(bool(repo) and repo.get("pool", False))
+        self.button_working.set_label("Back to the synced checkout"
+                                      if repo and repo.get("synced") else
+                                      "Use a folder instead...")
+        self.button_working.set_tooltip_text(
+            "Build the systems with a working copy of yours (fixes not pushed yet), never "
+            "synced, until you switch back to the synced checkout")
 
     def changed(self):
         if self.on_changed:
@@ -280,6 +295,34 @@ class RepositoriesPage(Gtk.Box):
         if (output or "").split()[-1:] != ["added"]:
             _follow(output)  # its first sync
         self.changed()
+
+    def working_copy(self):
+        repo = self.chosen()
+        if not repo or not repo.get("pool"):
+            return
+
+        def done(ok, output):
+            if not ok:
+                _error(self.get_toplevel(), "That wasn't changed", output or "Cancelled.")
+            self.changed()
+        if repo.get("synced"):
+            run_as_root(service("repo", "folder", repo["name"], "--synced"), done)
+            return
+        dialog = Gtk.FileChooserDialog(
+            title="A working copy of %s" % repo["name"], transient_for=self.get_toplevel(),
+            action=Gtk.FileChooserAction.SELECT_FOLDER)
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Use it", Gtk.ResponseType.OK)
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=70, margin=6)
+        hint.set_markup("<small>The systems using %s are built from this folder, as it "
+                        "is, until you switch back: it is never synced or changed by "
+                        "Porthole. The synced checkout stays as it is.</small>"
+                        % GLib.markup_escape_text(repo["name"]))
+        dialog.set_extra_widget(hint)
+        answer = dialog.run()
+        folder = dialog.get_filename()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.OK and folder:
+            run_as_root(service("repo", "folder", repo["name"], "--folder", folder), done)
 
     # -- removing --
 

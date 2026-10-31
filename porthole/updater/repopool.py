@@ -49,7 +49,11 @@ def repos(path=None):
                        "sync_type": section.get("sync-type", "").strip(),
                        "sync_uri": section.get("sync-uri", "").strip(),
                        "auto_sync": section.get("auto-sync", "yes").strip().lower()
-                       in ("yes", "true", "1")}
+                       in ("yes", "true", "1"),
+                       # used from a folder of the user's for now (see use_folder)
+                       "synced": {k: section.get("porthole-synced-" + k, "").strip()
+                                  for k in SYNCED_KEYS}
+                       if section.get("porthole-synced-location") else None}
     return found
 
 
@@ -77,6 +81,39 @@ def add(name, location, sync_type="", sync_uri="", auto_sync=True, path=None):
         parser[name]["sync-uri"] = sync_uri
         parser[name]["auto-sync"] = "yes" if auto_sync else "no"
     _write(parser, path)
+
+
+SYNCED_KEYS = ("location", "sync-type", "sync-uri", "auto-sync")
+
+
+def use_folder(name, folder, path=None):
+    """Use a folder of the user's (a working copy, say a fix not pushed
+    yet) in place of a repository's synced checkout, without syncing it;
+    folder None goes back to the synced checkout. The synced checkout's
+    settings are kept in the entry (porthole-synced-*) meanwhile."""
+    parser = _parser(path)
+    if not parser.has_section(name):
+        raise ValueError("%s isn't one of the repositories for other systems" % name)
+    section = parser[name]
+    if folder:
+        if not section.get("porthole-synced-location"):
+            for key in SYNCED_KEYS:
+                if section.get(key):
+                    section["porthole-synced-" + key] = section[key]
+        for key in ("sync-type", "sync-uri", "auto-sync"):
+            section.pop(key, None)
+        section["location"] = folder
+        section["auto-sync"] = "no"
+    else:
+        if not section.get("porthole-synced-location"):
+            raise ValueError("%s isn't used from a folder" % name)
+        for key in SYNCED_KEYS:
+            section.pop(key, None)
+            saved = section.pop("porthole-synced-" + key, None)
+            if saved:
+                section[key] = saved
+    _write(parser, path)
+    return section["location"]
 
 
 def remove(name, path=None):

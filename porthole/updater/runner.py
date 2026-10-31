@@ -1355,6 +1355,40 @@ def rename_repo(old, new, portage_dir="/etc/portage"):
     return changed
 
 
+def repo_folder(name, folder):
+    """Use a folder of the user's in place of a repository of Porthole's
+    list (a working copy with fixes not pushed yet), never synced, for the
+    systems using it too; folder None: back to the synced checkout"""
+    import configparser
+    from porthole.updater import repopool
+    if name not in repopool.repos():
+        raise JobError("%s isn't one of the repositories for other systems" % name)
+    if folder:
+        folder = check_folder(folder)
+        own = repo_own_name(folder)
+        if own and own != name:
+            raise JobError("That repository calls itself %s (profiles/repo_name), not %s"
+                           % (own, name))
+    try:
+        location = repopool.use_folder(name, folder)
+    except ValueError as e:
+        raise JobError(str(e))
+    changed = [repopool.POOL_FILE]
+    for target in targets.load().values():
+        if target.local or name not in repopool.target_repos(target.portage_dir):
+            continue
+        parser = configparser.ConfigParser(interpolation=None)
+        parser.read(repopool.target_file(target.portage_dir))
+        locations = {n: (location if n == name else parser.get(n, "location"))
+                     for n in parser.sections()}
+        repopool.write_target_repos(target.portage_dir, locations, target.title)
+        # where a chroot into the system bind-mounts it
+        os.makedirs(os.path.join(target.root, location.lstrip("/")), mode=0o755,
+                    exist_ok=True)
+        changed.append(repopool.target_file(target.portage_dir))
+    return ["%s now from %s" % (name, location)] + changed
+
+
 def check_folder(path):
     """A folder already on this computer holding a repository (the user's
     own checkout): its real path. Porthole never syncs or deletes it."""
