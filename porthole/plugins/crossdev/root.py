@@ -52,23 +52,19 @@ def check(args):
     return 0
 
 
-def make_repo(args, portage_dir="/etc/portage", location=checks.REPO_DIR):
+def create_repo(portage_dir="/etc/portage", location=checks.REPO_DIR):
     """The repository crossdev needs, the way the Gentoo wiki sets it up:
-    local, never synced, using the gentoo repository's eclasses"""
+    local, never synced, using the gentoo repository's eclasses. Returns
+    what was done; ValueError if it can't be made."""
     from porthole.updater import system
-    if args:
-        print("usage: plugin crossdev make-repo", file=sys.stderr)
-        return 2
     name = checks.REPO_NAME
     if name in system.repos_conf_sections(portage_dir):
-        print("There already is a repository called %s" % name, file=sys.stderr)
-        return 1
+        raise ValueError("There already is a repository called %s" % name)
     directory = os.path.join(portage_dir, "repos.conf")
     if os.path.isfile(directory):
-        print("%s is a single file. Porthole adds each repository in a file of its "
-              "own: move it into a new directory of that name first." % directory,
-              file=sys.stderr)
-        return 1
+        raise ValueError("%s is a single file. Porthole adds each repository in a file of "
+                         "its own: move it into a new directory of that name first."
+                         % directory)
     repo_name = os.path.join(location, "profiles", "repo_name")
     if os.path.exists(location):
         # left from before: used again only if it is this repository
@@ -78,9 +74,8 @@ def make_repo(args, portage_dir="/etc/portage", location=checks.REPO_DIR):
         except OSError:
             mine = False
         if not mine:
-            print("%s is there already and isn't a %s repository; move it away first"
-                  % (location, name), file=sys.stderr)
-            return 1
+            raise ValueError("%s is there already and isn't a %s repository; move it "
+                             "away first" % (location, name))
     else:
         os.makedirs(os.path.join(location, "profiles"), mode=0o755)
         os.makedirs(os.path.join(location, "metadata"), mode=0o755)
@@ -96,7 +91,18 @@ def make_repo(args, portage_dir="/etc/portage", location=checks.REPO_DIR):
                 % (name, location))
     os.chmod(path + ".new", 0o644)
     os.replace(path + ".new", path)
-    print("Created %s (%s)" % (name, location))
+    return "Created crossdev's repository %s (%s)" % (name, location)
+
+
+def make_repo(args, portage_dir="/etc/portage", location=checks.REPO_DIR):
+    if args:
+        print("usage: plugin crossdev make-repo", file=sys.stderr)
+        return 2
+    try:
+        print(create_repo(portage_dir, location))
+    except (ValueError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
     return 0
 
 
@@ -203,9 +209,14 @@ def step_toolchain(runner, job_id, step, log):
         return False
     output = checks.repos().get(checks.REPO_NAME)
     if not output:
-        log("!! crossdev's repository isn't there yet (Ready to build for another "
-            "computer?, Create it)")
-        return False
+        # a local folder crossdev writes its toolchain ebuilds into: part of
+        # building the toolchain, made here rather than sending the user off
+        try:
+            log(create_repo())
+        except (ValueError, OSError) as e:
+            log("!! crossdev's repository couldn't be made: %s" % e)
+            return False
+        output = checks.repos().get(checks.REPO_NAME)
     log("The toolchain %s's profile allows, for %s:" % (target.title, resolved["tuple"]))
     for title, version, repo, built in tc.compare(resolved):
         log("   %-15s %-22s from %s%s" % (title, version, repo,
