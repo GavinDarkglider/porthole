@@ -75,6 +75,18 @@ check("too many jobs", "-j3" in found.get(
     "MAKEOPTS runs more jobs than this machine handles well", ""))
 check("jobs advice", system.jobs_advice("-j 2", facts)[:2] == (2, 3))
 
+# categories: the table, then words in the description, then specific/other
+described = {"newcodec": "Enable the foo video decoder", "oddball": "Something unusual",
+             "localthing": "Build the thing (app-misc/foo)"}
+local = {"localthing": ["app-misc/foo"]}
+check("table", system.categorise("pulseaudio", described, local) == "Audio")
+check("description words", system.categorise("newcodec", described, local) == "Video and codecs")
+check("package specific", system.categorise("localthing", described, local) ==
+      system.SPECIFIC)
+check("other", system.categorise("oddball", described, local) == system.OTHER)
+check("every table category in the order", all(
+    t in system.category_order() for t, _f in system.CATEGORIES))
+
 # Porthole's global USE file: written, read back, refused, removed
 import json  # noqa: E402
 from porthole.updater import runner, targets  # noqa: E402

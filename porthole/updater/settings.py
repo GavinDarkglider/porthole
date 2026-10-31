@@ -501,6 +501,8 @@ class SystemSettingsPage(Gtk.Notebook):
         self.info = None
         self.pending = {"use": {}, "expand": {}}  # value None: back to make.conf's
         self.preview_labels = []
+        self.use_view = "categories"  # or "make.conf": as the file groups them
+        self.show_profile = False
         self.licences = LicencesPage(target)
         self.tabs = {}
         for name, title in (("overview", "Overview"), ("use", "USE flags"),
@@ -532,7 +534,13 @@ class SystemSettingsPage(Gtk.Notebook):
             info["profile"] = system.profile()[0]
             info["profile_use"] = system.profile_use()
             info["machine"] = system.machine()
-            info["descriptions"], _local = system.flag_descriptions()
+            info["descriptions"], info["local"] = system.flag_descriptions()
+            info["global"] = system.global_flags()
+            try:
+                import portage
+                info["arch"] = portage.settings["ARCH"]
+            except Exception:
+                info["arch"] = None
             info["iuse"] = system.all_iuse()
             info["findings"] = system.findings(info["conf"], info["machine"], info["iuse"])
             info["expand"] = {name: system.expand_values(name) for name in system.EXPAND}
@@ -759,32 +767,76 @@ class SystemSettingsPage(Gtk.Notebook):
         if bar:
             box.pack_start(bar, False, False, 0)
         box.pack_start(_small(
-            "Your USE flags as make.conf groups them, each with its comment. Hover a "
-            "flag for what it does; click one to switch it for every package (in "
-            "Porthole's own file, not make.conf). Struck through: no package has the "
-            "flag, so it does nothing."), False, False, 0)
+            "Hover a flag for what it does and where it is set; click one to switch it "
+            "for every package (in Porthole's own file, not make.conf). Dimmed: off. "
+            "Struck through: no package has the flag, so it does nothing."), False, False, 0)
         porthole = self._effective()["use"]
         changed = set(porthole) | set(self.pending["use"])
-        flag_view = lambda flags: _flags(flags, described, iuse, on_click=self._toggle,
-                                         state=self._flag_state, changed=changed,
-                                         pending=set(self.pending["use"]))
-        if porthole or self.pending["use"]:
-            box.pack_start(_heading("Porthole's changes (package.use/00-porthole-global)"),
-                           False, False, 0)
-            box.pack_start(flag_view(sorted(changed)), False, False, 0)
-        mine = set()
-        for group in conf["use_groups"]:
-            box.pack_start(_heading(group["title"]), False, False, 0)
-            for note in group["notes"]:
-                box.pack_start(_small(note), False, False, 0)
-            box.pack_start(flag_view(group["flags"]), False, False, 0)
-            mine.update(f.lstrip("-+") for f in group["flags"])
-        inherited = sorted(f for f in info["profile_use"]
-                           if f.lstrip("-") not in mine and "_" not in f.lstrip("-"))
-        expander = Gtk.Expander(label="From the profile (%s): %d more"
-                                % (info["profile"] or "?", len(inherited)))
-        expander.add(flag_view(inherited))
-        box.pack_start(expander, False, False, 0)
+        mine = {f.lstrip("-+") for g in conf["use_groups"] for f in g["flags"]}
+        profile = {f.lstrip("-") for f in info["profile_use"]
+                   if "_" not in f.lstrip("-") and f.lstrip("-") != info.get("arch")}
+
+        def source(flag):
+            if flag in self.pending["use"]:
+                return "Porthole's change, not applied yet"
+            if flag in porthole:
+                return "Set in Porthole's global USE file"
+            if flag in mine:
+                return "Set in make.conf"
+            return "From the profile (%s)" % (info["profile"] or "?")
+
+        def flag_view(flags):
+            return _flags(flags, described, iuse, on_click=self._toggle,
+                          state=self._flag_state, changed=changed,
+                          pending=set(self.pending["use"]), source=source,
+                          packages={f: p for f, p in info["local"].items()
+                                    if f not in info["global"]})
+
+        # how to show them
+        choices = Gtk.Box(spacing=12)
+        by_category = Gtk.RadioButton.new_with_label(None, "By what they do")
+        as_written = Gtk.RadioButton.new_with_label_from_widget(by_category,
+                                                                "As make.conf groups them")
+        (by_category if self.use_view == "categories" else as_written).set_active(True)
+        include = Gtk.CheckButton(label="Include the profile's defaults (%d)"
+                                  % len(profile - mine))
+        include.set_active(self.show_profile)
+        include.set_sensitive(self.use_view == "categories")
+        for widget in (by_category, as_written, include):
+            choices.pack_start(widget, False, False, 0)
+
+        def switch_view(*args):
+            self.use_view = "categories" if by_category.get_active() else "make.conf"
+            self.show_profile = include.get_active()
+            self._refresh()
+        by_category.connect("toggled", lambda b: b.get_active() and switch_view())
+        include.connect("toggled", switch_view)
+        box.pack_start(choices, False, False, 0)
+
+        if self.use_view == "categories":
+            from porthole.updater.system import categorise, category_order
+            shown = mine | changed | (profile if self.show_profile else set())
+            groups = {}
+            for flag in shown:
+                groups.setdefault(categorise(flag, described, info["local"]), []).append(flag)
+            for title in category_order():
+                if groups.get(title):
+                    box.pack_start(_heading(title), False, False, 0)
+                    box.pack_start(flag_view(sorted(groups[title])), False, False, 0)
+        else:
+            if porthole or self.pending["use"]:
+                box.pack_start(_heading("Porthole's changes (package.use/00-porthole-global)"),
+                               False, False, 0)
+                box.pack_start(flag_view(sorted(changed)), False, False, 0)
+            for group in conf["use_groups"]:
+                box.pack_start(_heading(group["title"]), False, False, 0)
+                for note in group["notes"]:
+                    box.pack_start(_small(note), False, False, 0)
+                box.pack_start(flag_view(group["flags"]), False, False, 0)
+            expander = Gtk.Expander(label="From the profile (%s): %d more"
+                                    % (info["profile"] or "?", len(profile - mine)))
+            expander.add(flag_view(sorted(profile - mine)))
+            box.pack_start(expander, False, False, 0)
         # a flag that isn't listed anywhere
         add = Gtk.Box(spacing=6, margin_top=8)
         add.pack_start(Gtk.Label(label="Another flag:"), False, False, 0)
@@ -892,7 +944,8 @@ def _text_colour():
     return hex_of(palette()["text"])
 
 
-def _flags(flags, described, known, on_click=None, state=None, changed=(), pending=()):
+def _flags(flags, described, known, on_click=None, state=None, changed=(), pending=(),
+           source=None, packages=None):
     """Flags as small labels that wrap, off ones dimmed, unknown ones
     struck through; hover for the description. With on_click, each is a
     button (state(flag): whether it is on now; changed: flags Porthole's
@@ -918,7 +971,13 @@ def _flags(flags, described, known, on_click=None, state=None, changed=(), pendi
         if known is not None and name not in known:
             tip = "No package has this flag: setting it changes nothing."
         tip = ("Off: " if off else "On: ") + tip
-        if name in changed:
+        if packages and name in packages:
+            users = sorted(set(packages[name]))
+            tip += "\nUsed by: %s%s" % (", ".join(users[:8]),
+                                        " and %d more" % (len(users) - 8) if len(users) > 8 else "")
+        if source:
+            tip += "\n" + source(name) + "."
+        elif name in changed:
             tip += "\nSet by Porthole's global USE file%s." % (
                 " (not applied yet)" if name in pending else "")
         label = Gtk.Label(xalign=0)

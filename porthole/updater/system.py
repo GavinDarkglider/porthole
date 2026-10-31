@@ -132,6 +132,17 @@ def flag_descriptions():
     return descriptions, local
 
 
+def global_flags():
+    """Flags Gentoo describes as global (use.desc): many packages use them"""
+    flags = set()
+    for profiles in _repo_profiles():
+        for line in _lines(os.path.join(profiles, "use.desc")):
+            flag, sep, _text = line.partition(" - ")
+            if sep:
+                flags.add(flag.strip())
+    return flags
+
+
 def all_iuse():
     """Every flag some package in the repositories has (its IUSE): from
     the metadata cache where a repository has one, else from the
@@ -441,3 +452,84 @@ def preview_profile(name, log=lambda m: None):
             os.unlink(link)
         os.symlink(os.path.join(match[0][2], name), link)
         return Analyzer(config_root=scratch.root, log=log).analyze()
+
+
+# -- categories of USE flags ---------------------------------------------------------
+#
+# Gentoo doesn't categorise USE flags (use.desc is one flat list), so these
+# are Porthole's own: common global flags by hand, the rest by words in
+# their description, flags only some packages have on their own.
+
+CATEGORIES = (
+    ("Desktop and toolkits", """X wayland gtk gtk2 gtk3 gtk4 qt5 qt6 qt4 qt kde gnome xfce
+        lxde lxqt plasma kwallet gnome-keyring gnome-online-accounts libnotify
+        startup-notification xinerama xcomposite appindicator accessibility gui widgets
+        xcb branding
+        wxwidgets fltk motif tk sddm gdm lightdm screencast emerald compiz"""),
+    ("Graphics", """opengl vulkan egl gles1 gles2 glamor libglvnd vaapi vdpau nvenc cuda
+        opencl xa libkms libdrm drm d3d9 osmesa llvm gallium wayland-egl gbm"""),
+    ("Audio", """alsa pulseaudio pipewire jack oss sound openal portaudio sndio
+        libsamplerate soxr sndfile audiofile fluidsynth timidity midi mikmod bs2b ladspa
+        lv2 speex echo-cancel"""),
+    ("Video and codecs", """ffmpeg system-ffmpeg postproc libav x264 x265 xvid theora vpx aom
+        dav1d mp3 mp4 mpeg ogg vorbis flac wavpack aac a52 dts lame opus matroska wma wmv
+        dvd css vcd mad mpg123 musepack webm mkv"""),
+    ("Images", """jpeg jpeg2000 png gif svg tiff webp imlib lcms exif raw heif avif jpegxl
+        openexr wmf gimp imagemagick graphicsmagick"""),
+    ("Networking", """ipv6 ssl tls curl http http2 wifi iwd networkmanager bluetooth bluez
+        avahi zeroconf mdnsresponder-compat upnp ldap kerberos samba ads nfs ftp ssh
+        sftp vnc rdp dbus-network libproxy proxy socks5 tor rss xmpp irc mail imap
+        pop3 smtp sasl"""),
+    ("Hardware and devices", """usb udisks udev lm-sensors hddtemp apcupsd acpi apm upower
+        wacom tablet tslib joystick bluetooth scanner sane gphoto2 v4l v4l2 webcam
+        smartcard pcsc-lite libinput evdev synaptics battery"""),
+    ("System and services", """systemd elogind consolekit openrc dbus policykit pam
+        selinux apparmor caps seccomp xattr acl cgroups logrotate cron syslog
+        sysvinit split-usr multilib static static-pie"""),
+    ("Security and crypto", """crypt openssl gnutls nss libressl gcrypt nettle sodium gpg
+        gpgme keyring tpm hardened pie ssp"""),
+    ("Languages and scripting", """python perl lua ruby tcl java mono guile php javascript
+        nodejs rust go vala introspection script gcj"""),
+    ("Compression", """zlib bzip2 lzma xz zstd lz4 lzo brotli gzip zip unrar 7zip"""),
+    ("Data and formats", """sqlite mysql mariadb postgres berkdb gdbm odbc xml json yaml
+        icu pdf postscript ncurses readline slang unicode"""),
+    ("Printing and discs", """cups print printer cdr dvdr cdda cddb cdio libcdio blu-ray
+        bluray"""),
+    ("Language and translation", """nls l10n i18n spell hunspell aspell enchant"""),
+    ("Development and docs", """doc test debug examples static-libs man info vim-syntax
+        nano-syntax emacs bash-completion zsh-completion fish-completion valgrind
+        profile lto pgo"""),
+)
+_FLAG_CATEGORY = {flag: title for title, flags in CATEGORIES for flag in flags.split()}
+_WORDS = (
+    ("Audio", ("audio", "sound", "alsa", "pulseaudio")),
+    ("Video and codecs", ("video", "codec", "decoder", "encoder", "mpeg", "multimedia")),
+    ("Images", ("image", "picture", "photo")),
+    ("Graphics", ("opengl", "graphics", "gpu", "rendering", "3d")),
+    ("Networking", ("network", "protocol", "server", "client", "remote", "internet")),
+    ("Hardware and devices", ("hardware", "device", "driver", "sensor", "usb")),
+    ("Security and crypto", ("encrypt", "crypt", "security", "certificate")),
+    ("Languages and scripting", ("bindings", "scripting", "interpreter", "language support")),
+    ("Compression", ("compress",)),
+    ("Desktop and toolkits", ("desktop", "toolkit", "x11", "gui", "widget")),
+    ("Development and docs", ("documentation", "debug", "test suite", "developer")),
+)
+SPECIFIC = "For specific packages"
+OTHER = "Other"
+
+
+def categorise(flag, descriptions, local):
+    """The category of a flag (Porthole's own grouping)"""
+    if flag in _FLAG_CATEGORY:
+        return _FLAG_CATEGORY[flag]
+    text = (descriptions.get(flag) or "").lower()
+    for title, words in _WORDS:
+        if any(w in text for w in words):
+            return title
+    if flag in local:
+        return SPECIFIC
+    return OTHER
+
+
+def category_order():
+    return [title for title, _flags in CATEGORIES] + [SPECIFIC, OTHER]
