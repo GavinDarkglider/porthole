@@ -25,7 +25,7 @@ DESCRIPTION = ("Cross-compile a whole Gentoo system for another architecture wit
 desc = DESCRIPTION
 is_installed = True
 
-_state = {"manager": None, "menuitem": None}
+_state = {"manager": None, "menuitems": []}
 
 
 def _load(manager):
@@ -35,20 +35,28 @@ def _load(manager):
 
 def _enable():
     manager = _state["manager"]
-    if manager is None or _state["menuitem"] is not None:
+    if manager is None or _state["menuitems"]:
         return True
-    item = manager.new_menuitem("Ready to build for another computer?")
-    item.connect("activate", lambda w: _readiness())
-    item.show()
-    _state["menuitem"] = item
+    for label, action in (("Systems for other computers…", _systems),
+                          ("Ready to build for another computer?", _readiness)):
+        item = manager.new_menuitem(label)
+        item.connect("activate", lambda w, a=action: a())
+        item.show()
+        _state["menuitems"].append(item)
     return True
 
 
 def _disable():
-    if _state["menuitem"] is not None and _state["manager"] is not None:
-        _state["manager"].del_menuitem(_state["menuitem"])
-    _state["menuitem"] = None
+    if _state["manager"] is not None:
+        for item in _state["menuitems"]:
+            _state["manager"].del_menuitem(item)
+    _state["menuitems"] = []
     return True
+
+
+def _systems():
+    from porthole.plugins.crossdev.window import SystemsWindow
+    SystemsWindow(getattr(_state["manager"], "porthole_instance", None))
 
 
 def _readiness():

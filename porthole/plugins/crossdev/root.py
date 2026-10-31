@@ -8,6 +8,15 @@
         plugin crossdev make-repo              create the local repository
                                                crossdev writes its toolchain
                                                ebuilds into
+        plugin crossdev new-root NAME --profile REPO:PROFILE [--title T]
+                                 [--repo R ...]
+                                               a new system for another
+                                               computer (roots.py)
+        plugin crossdev remove-root NAME       queue a job deleting one
+
+    Job steps (kind "plugin", plugin "crossdev"):
+
+        remove-root   {"name": NAME}
 
     Copyright (C) 2026 Porthole developers
 
@@ -86,5 +95,61 @@ def make_repo(args, portage_dir="/etc/portage", location=checks.REPO_DIR):
     return 0
 
 
-COMMANDS = {"check": check, "make-repo": make_repo}
-STEPS = {}
+def new_root(args):
+    import argparse
+    from porthole.plugins.crossdev import roots
+    parser = argparse.ArgumentParser(prog="plugin crossdev new-root")
+    parser.add_argument("name")
+    parser.add_argument("--profile", required=True, help="REPO:PROFILE")
+    parser.add_argument("--title", default="")
+    parser.add_argument("--repo", action="append", default=[],
+                        help="another of this computer's repositories to use")
+    try:
+        opts = parser.parse_args(args)
+    except SystemExit as e:
+        return e.code or 2
+    repo, _, profile = opts.profile.partition(":")
+    try:
+        target = roots.create(opts.name, opts.title, repo, profile, opts.repo)
+    except (roots.RootError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print("Created %s in %s" % (target.name, target.root))
+    return 0
+
+
+def remove_root(args):
+    from porthole.plugins.crossdev import roots
+    from porthole.updater import runner
+    if len(args) != 1:
+        print("usage: plugin crossdev remove-root NAME", file=sys.stderr)
+        return 2
+    try:
+        target = roots.check_removable(args[0])
+    except roots.RootError as e:
+        print(e, file=sys.stderr)
+        return 1
+    title = "Delete the system %s" % target.title
+    job = runner.new_job("plugin", title, [{"kind": "plugin", "title": title,
+                                            "plugin": "crossdev", "action": "remove-root",
+                                            "name": target.name}], recheck=False)
+    with runner.jobs_state() as state:
+        state["jobs"].append(job)
+        runner.prune(state)
+    runner.start_runner()
+    print(job["id"])
+    return 0
+
+
+def step_remove_root(runner, job_id, step, log):
+    from porthole.plugins.crossdev import roots
+    try:
+        return roots.remove(step.get("name", ""), log=log)
+    except (roots.RootError, OSError) as e:
+        log("!! %s" % e)
+        return False
+
+
+COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
+            "remove-root": remove_root}
+STEPS = {"remove-root": step_remove_root}
