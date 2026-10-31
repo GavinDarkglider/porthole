@@ -1084,6 +1084,89 @@ def set_licence_policy(policy, target_name=None):
     return policy
 
 
+# MAKEOPTS for emerge run by hand on this computer, set by Porthole: an
+# env file applied to every package through package.env ("*/*"), read
+# first so the user's per-package env files still win. make.conf isn't
+# touched. Porthole's own jobs set MAKEOPTS in their environment, which
+# wins over package.env (the build cluster's value, see ondemand.py).
+MAKEOPTS_NAME = "00-porthole-makeopts"
+
+
+def makeopts_paths(portage_dir="/etc/portage"):
+    """(env file, package.env file) of Porthole's MAKEOPTS"""
+    return (os.path.join(portage_dir, "env", MAKEOPTS_NAME + ".conf"),
+            os.path.join(portage_dir, "package.env", MAKEOPTS_NAME))
+
+
+def local_makeopts():
+    """The safe MAKEOPTS for this computer: one job per thread, no more than
+    one per 2 GB of memory; no new jobs while the load is above the threads"""
+    from porthole.updater.ondemand import safe_jobs
+    return "-j%d -l%d" % (safe_jobs(), os.cpu_count() or 1)
+
+
+def read_makeopts(portage_dir="/etc/portage"):
+    """The MAKEOPTS Porthole set, or None (make.conf decides)"""
+    env, pkgenv = makeopts_paths(portage_dir)
+    if not os.path.isfile(pkgenv):
+        return None
+    try:
+        with open(env) as f:
+            for line in f:
+                match = re.match(r'^MAKEOPTS="([^"]*)"', line.strip())
+                if match:
+                    return match.group(1)
+    except OSError:
+        pass
+    return None
+
+
+def set_makeopts(mode, portage_dir="/etc/portage"):
+    """mode "auto": Porthole sets MAKEOPTS for this computer (worked out
+    again by the scheduled check if the computer changes); "off": make.conf
+    decides again"""
+    env, pkgenv = makeopts_paths(portage_dir)
+    if mode == "off":
+        for path in (pkgenv, env):
+            try:
+                os.unlink(path)
+            except FileNotFoundError:
+                pass
+        return "make.conf decides MAKEOPTS"
+    if mode != "auto":
+        raise JobError("makeopts is auto or off")
+    for directory in (os.path.dirname(env), os.path.dirname(pkgenv)):
+        if os.path.isfile(directory):
+            raise JobError(
+                "%s is a single file. Porthole keeps its settings in its own file, so it "
+                "needs %s to be a directory. Move the file into a new directory of that "
+                "name and try again." % (directory, directory))
+    value = local_makeopts()
+    for path, text in (
+            (env, "# Porthole: MAKEOPTS for emerge run by hand, worked out from this\n"
+                  "# computer's CPU threads and memory (Settings, System, Build options).\n"
+                  "# Porthole replaces this file; its own builds set MAKEOPTS for each build.\n"
+                  'MAKEOPTS="%s"\n' % value),
+            (pkgenv, "# Porthole: its MAKEOPTS for every package (Settings, System, Build\n"
+                     "# options). Per-package env files of your own still win.\n"
+                     "*/* %s.conf\n" % MAKEOPTS_NAME)):
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".new", "w") as f:
+            f.write(text)
+        os.chmod(path + ".new", 0o644)
+        os.replace(path + ".new", path)
+    return value
+
+
+def refresh_makeopts(portage_dir="/etc/portage"):
+    """Work Porthole's MAKEOPTS out again (more memory, another CPU), if
+    Porthole sets it; the new value, or None"""
+    current = read_makeopts(portage_dir)
+    if current is not None and current != local_makeopts():
+        return set_makeopts("auto", portage_dir)
+    return None
+
+
 def set_global_use(text, target_name=None):
     """Write Porthole's global USE file of a target from a JSON model
     (system.check_global_use), or remove it when there's nothing to set"""

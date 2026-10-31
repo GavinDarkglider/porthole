@@ -915,10 +915,45 @@ class SystemSettingsPage(Gtk.Notebook):
             ("CXXFLAGS", value("CXXFLAGS")),
             ("-march=native here is", m.get("march_native") or "?")]), False, False, 0)
         box.pack_start(_heading("Parallel builds"), False, False, 0)
+        from porthole.updater.runner import local_makeopts, read_makeopts
+        porthole = read_makeopts()
         jobs, suggested, why = jobs_advice(value("MAKEOPTS"), m)
-        box.pack_start(_facts([("MAKEOPTS", value("MAKEOPTS")),
-                               ("Suggested", "-j%d (%s)" % (suggested, why))]),
-                       False, False, 0)
+        if porthole:
+            box.pack_start(_facts([("MAKEOPTS", "%s, set by Porthole" % porthole),
+                                   ("make.conf says", value("MAKEOPTS")
+                                    + " (not used any more)")]), False, False, 0)
+            box.pack_start(_small(
+                "For emerge run by hand: worked out from this computer (%s), and again if "
+                "it changes. It is in Porthole's own files (env/00-porthole-makeopts.conf, "
+                "package.env/00-porthole-makeopts); make.conf isn't touched. Porthole's own "
+                "builds work it out for each build, counting the computers that help "
+                "compile." % why), False, False, 0)
+            button = Gtk.Button(label="Let make.conf decide again", halign=Gtk.Align.START)
+            button.connect("clicked", lambda b: self._makeopts("off"))
+        else:
+            box.pack_start(_facts([("MAKEOPTS", value("MAKEOPTS") + " (from make.conf)"),
+                                   ("Suggested", "-j%d (%s)" % (suggested, why))]),
+                           False, False, 0)
+            box.pack_start(_small(
+                "Porthole can set it for you: worked out from this computer's threads and "
+                "memory, kept up to date, in its own files (make.conf isn't touched). Its "
+                "own builds then work it out for each build, counting the computers that "
+                "help compile."), False, False, 0)
+            button = Gtk.Button(label="Let Porthole set it (%s)" % local_makeopts(),
+                                halign=Gtk.Align.START)
+            button.connect("clicked", lambda b: self._makeopts("auto"))
+        box.pack_start(button, False, False, 0)
+
+    def _makeopts(self, mode):
+        def done(ok, output):
+            if not ok:
+                _error(self.get_toplevel(), "MAKEOPTS wasn't changed", output or "Cancelled.")
+                return
+            for child in self.tabs["build"].get_children():
+                child.destroy()
+            self._build(self.info)
+            self.tabs["build"].show_all()
+        run_as_root(service("makeopts", mode), done)
 
 
 def _heading(text):

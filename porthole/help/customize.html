@@ -67,8 +67,15 @@ and each is previewed before it is made.</p>
     profile's defaults</i> adds the flags your profile turns on.</li>
   <li><b>Hardware</b>: video cards, input devices and CPU flags, with
     <i>Use what cpuid2cpuflags finds</i>.</li>
-  <li><b>Build options</b>: compiler flags and parallel builds, with a
-    suggested <code>-j</code> for this machine (advice only).</li>
+  <li><b>Build options</b>: compiler flags and parallel builds.
+    <b>Let Porthole set it</b> hands <code>MAKEOPTS</code> to Porthole: it
+    works out a safe value from this computer's threads and memory (one job
+    per 2&nbsp;GB, at most one per thread) for emerge run by hand, keeps it
+    up to date, and writes it in its own files
+    (<code>env/00-porthole-makeopts.conf</code>,
+    <code>package.env/00-porthole-makeopts</code>), never in
+    <code>make.conf</code>. Porthole's own builds work it out again for
+    each build, counting the computers that help compile.</li>
   <li><b>Licences</b>: which licences are fine on this computer: free
     software only; also software that may be shared (firmware, some
     drivers); also software with an agreement you accept by using it; every

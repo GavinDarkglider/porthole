@@ -26,6 +26,9 @@
         global-use JSON [--target T]   Porthole's USE changes for every
                                     package (package.use/00-porthole-global)
         profile NAME [--target T]   switch the profile (one profiles.desc lists)
+        makeopts auto|off           Porthole sets MAKEOPTS for emerge run by hand
+                                    (package.env/00-porthole-makeopts), or
+                                    make.conf decides again
         repo add NAME --sync-type T --uri U [--priority N] [--no-auto-sync]
         repo add NAME --folder PATH a folder already here, never synced
         repo use|drop NAME --target S   a system uses a repository or stops
@@ -592,6 +595,13 @@ class Service:
 
         self.save_state(running=True, started=time.time())
         try:
+            from porthole.updater.runner import refresh_makeopts
+            try:
+                changed = refresh_makeopts()
+                if changed:
+                    self.log("MAKEOPTS worked out again for this computer: %s" % changed)
+            except Exception as e:
+                self.log("Couldn't work MAKEOPTS out again: %s" % e)
             sync_info = None
             if sync:
                 sync_info = self.sync(now=sync == "now")
@@ -673,6 +683,8 @@ def main(argv=None):
     guse.add_argument("changes", help='JSON: {"use": {FLAG: true|false}, '
                                       '"expand": {VAR: [VALUE...]}}')
     guse.add_argument("--target", default=None, help="the system (default: this computer)")
+    mko = sub.add_parser("makeopts", help="Porthole sets MAKEOPTS, or make.conf decides")
+    mko.add_argument("mode", choices=("auto", "off"))
     prof = sub.add_parser("profile", help="switch a system's profile")
     prof.add_argument("name", help="e.g. default/linux/amd64/23.0/desktop")
     prof.add_argument("--target", default=None, help="the system (default: this computer)")
@@ -868,6 +880,8 @@ def job_command(args, parser):
                 print(job["id"])
         elif args.command == "profile":
             print(runner.set_profile(args.name, args.target))
+        elif args.command == "makeopts":
+            print(runner.set_makeopts(args.mode))
         elif args.command == "global-use":
             print(runner.set_global_use(args.changes, args.target))
         elif args.command == "licences":
