@@ -55,6 +55,15 @@ def get_icon_for_package(package):
         icon = '' # Gtk.STOCK_NO
     return icon
 
+def view_colour(name):
+    """A package-list colour: the user's, or one fitting the theme"""
+    chosen = getattr(config.Prefs.views, name, "")
+    if chosen:
+        return chosen
+    from porthole.utils.themecolours import auto
+    return auto("upgrade" if name == "upgradable_fg" else "downgrade")
+
+
 def get_icon_for_upgrade_package(package):
     """Return an icon and foreground text color for a package"""
     if not package:
@@ -62,10 +71,10 @@ def get_icon_for_upgrade_package(package):
     #  find out if it can be upgraded
     if package.is_upgradable() == 1:  # 1 for only upgrades (no downgrades)
         icon = Gtk.STOCK_GO_UP
-        color = config.Prefs.views.upgradable_fg
+        color = view_colour("upgradable_fg")
     else: # it's a downgrade
         icon = Gtk.STOCK_GO_DOWN
-        color = config.Prefs.views.downgradable_fg
+        color = view_colour("downgradable_fg")
     return icon, color
 
 def is_root():

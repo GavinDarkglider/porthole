@@ -443,9 +443,9 @@ class PackageView(CommonTreeView):
                 model.set_value(_iter, MODEL_ITEM["world"], (packages[name].in_world))
                 upgradable = packages[name].is_dep_upgradable()
                 if upgradable == MODEL_ITEM["checkbox"]: # portage wants to upgrade
-                    model.set_value(_iter, MODEL_ITEM["text_colour"], config.Prefs.views.upgradable_fg)
+                    model.set_value(_iter, MODEL_ITEM["text_colour"], utils.view_colour("upgradable_fg"))
                 elif upgradable == -1: # portage wants to downgrade
-                    model.set_value(_iter, MODEL_ITEM["text_colour"], config.Prefs.views.downgradable_fg)
+                    model.set_value(_iter, MODEL_ITEM["text_colour"], utils.view_colour("downgradable_fg"))
                 else:
                     model.set_value(_iter, MODEL_ITEM["text_colour"], '')
                 # get an icon for the package
@@ -512,9 +512,9 @@ class PackageView(CommonTreeView):
                 model.set_value(_iter, MODEL_ITEM["world"], (packages[name].in_world))
                 upgradable = packages[name].is_dep_upgradable()
                 if upgradable == MODEL_ITEM["checkbox"]: # portage wants to upgrade
-                    model.set_value(_iter, MODEL_ITEM["text_colour"], config.Prefs.views.upgradable_fg)
+                    model.set_value(_iter, MODEL_ITEM["text_colour"], utils.view_colour("upgradable_fg"))
                 elif upgradable == -1: # portage wants to downgrade
-                    model.set_value(_iter, MODEL_ITEM["text_colour"], config.Prefs.views.downgradable_fg)
+                    model.set_value(_iter, MODEL_ITEM["text_colour"], utils.view_colour("downgradable_fg"))
                 else:
                     model.set_value(_iter, MODEL_ITEM["text_colour"], '')
                 # get an icon for the package

@@ -143,6 +143,9 @@ class ConfigDialog:
         for label in (view_page.get_children()[0], self.builder.get_object("label19"),
                       self.builder.get_object("label14")):
             label.set_xalign(0)
+        tab(_("General"), self.unlock_setting())
+        colours_page.pack_start(self.match_theme_check(), False, False, 0)
+        colours_page.reorder_child(self.match_theme, 2)
         tab(_("Package list"), view_page, colours_page)
         # the arch list chooses the keyword columns of the version table
         viewport = self.builder.get_object("viewport1")
@@ -153,7 +156,7 @@ class ConfigDialog:
         self.builder.get_object("label6").set_markup(
             _("<b>Architectures</b> shown in the version table"))
         tab(_("Package details"), summary_page, arch_grid)
-        tab(_("Terminal"), terminal_nb)
+        terminal_tab_widgets = [terminal_nb]
         # emerge output options and saved custom commands; the old warning
         # about the advanced emerge dialog has no option left to warn about
         frames = emerge_page.get_children()
@@ -161,16 +164,41 @@ class ConfigDialog:
             emerge_page.remove(frame)
         frames[1].destroy()
         frames[0].set_label(_("Emerge output"))
-        frames[2].set_label(_("Saved custom commands"))
+        frames[2].set_label(_("Saved commands"))
         self.builder.get_object("emerge_verbose").set_label(_("Verbose (more detail)"))
         self.builder.get_object("emerge_nospinner").set_label(
             _("No spinner (quieter output)"))
         self.builder.get_object("label57").set_label(
-            _("Offered when you run a custom command (Porthole, Run Custom Command):"))
-        tab(_("Commands"), frames[0], frames[2])
-        tab(_("General"), self.unlock_setting())
+            _("Offered in Porthole, Run Custom Command. Any command can be run there; "
+              "it runs in Porthole's terminal window."))
+        self.builder.get_object("label57").set_line_wrap(True)
+        # how emerge's output looks belongs with the terminal showing it
+        tab(_("Terminal"), *terminal_tab_widgets, frames[0])
+        tab(_("Commands"), frames[2])
         globals_page.destroy()
         notebook.insert_page(tabs, Gtk.Label(label=_("Porthole")), 0)
+
+    def match_theme_check(self):
+        """Package-list colours from the theme (until the user picks some)"""
+        self.match_theme = Gtk.CheckButton(label=_("Match the theme (colours are worked "
+                                                   "out to read well on it)"))
+        self.match_theme.set_active(not config.Prefs.views.upgradable_fg
+                                    and not config.Prefs.views.downgradable_fg)
+
+        def toggled(button):
+            if not button.get_active():
+                return
+            from porthole.utils.themecolours import auto
+            for name in ("upgradable_fg", "downgradable_fg"):
+                self.builder.get_object(name).set_color(Gdk.color_parse(
+                    auto("upgrade" if name == "upgradable_fg" else "downgrade")))
+        self.match_theme.connect("toggled", toggled)
+        toggled(self.match_theme)
+        # picking a colour yourself means you chose it
+        for name in ("upgradable_fg", "downgradable_fg"):
+            self.builder.get_object(name).connect(
+                "color-set", lambda w: self.match_theme.set_active(False))
+        return self.match_theme
 
     def unlock_setting(self):
         """How long Unlock lasts: the user's own Porthole setting"""
@@ -357,9 +385,11 @@ class ConfigDialog:
 
         # Terminal Color Tags
         default = config.Prefs.TAG_DICT['default']
-        attributes = Gtk.TextView().get_default_attributes()
-        self.default_textview_fg = attributes.appearance.fg_color
-        self.default_textview_bg = attributes.appearance.bg_color
+        # what the terminal really shows where no colour is set: the theme's
+        from porthole.utils.themecolours import hex_of, palette
+        theme = palette()
+        self.default_textview_fg = Gdk.color_parse(hex_of(theme["text"]))
+        self.default_textview_bg = Gdk.color_parse(hex_of(theme["base"]))
         if default[0]: default_fg = Gdk.color_parse(default[0])
         else: default_fg = self.default_textview_fg
         if default[1]: default_bg = Gdk.color_parse(default[1])
@@ -501,6 +531,9 @@ class ConfigDialog:
                     setattr(config.Prefs.views, name, self.get_color_spec(color))
                 else:
                     setattr(config.Prefs.views, name, '')
+        if self.match_theme.get_active():
+            # from the theme, whatever it is next time: nothing chosen
+            config.Prefs.views.upgradable_fg = config.Prefs.views.downgradable_fg = ""
 
         # Checkboxes:
         for category, name in self.checkboxes:

@@ -254,7 +254,9 @@ class PortholePreferences:
 
         # Tags left at their default follow the theme: values saved by
         # older versions are the light defaults, so treat those as unset.
-        self.TAG_DEFAULTS = dark_tags() if theme_is_dark() else LIGHT_TAGS
+        # the built-in colours, made readable on the theme in use
+        from porthole.utils.themecolours import fit_tags
+        self.TAG_DEFAULTS = fit_tags(dark_tags() if theme_is_dark() else LIGHT_TAGS)
         self.TAG_DICT = {}
         for tag_name, light in LIGHT_TAGS.items():
             current = list(self.TAG_DEFAULTS[tag_name])
@@ -289,8 +291,8 @@ class PortholePreferences:
             setattr(self.advemerge, option, value)
 
         viewoptions = [ \
-            ['downgradable_fg', '#FA0000'],
-            ['upgradable_fg', '#0000FF'],
+            ['downgradable_fg', ''],
+            ['upgradable_fg', ''],
             ['normal_fg','#000000'],
             ['normal_bg','#FFFFFF'],
             ['show_dl', True],
@@ -304,13 +306,13 @@ class PortholePreferences:
             except XMLManagerError:
                 value = default
             setattr(self.views, option, value)
-        # the old light-theme colours are unreadable on a dark theme: use
-        # lighter ones there, unless the user picked their own
-        if theme_is_dark():
-            for option, light, dark in (("upgradable_fg", "#0000FF", "#7AA2F7"),
-                                        ("downgradable_fg", "#FA0000", "#F7768E")):
-                if same_value(getattr(self.views, option), light):
-                    setattr(self.views, option, dark)
+        # "" = worked out from the theme (utils.view_colour); the old
+        # built-in colours count as not chosen
+        for option, old in (("upgradable_fg", ("#0000FF", "#7AA2F7")),
+                            ("downgradable_fg", ("#FA0000", "#F7768E"))):
+            value = getattr(self.views, option)
+            if not isinstance(value, str) or any(same_value(value, o) for o in old):
+                setattr(self.views, option, "")
 
         summaryoptions = [ \
             ['showtable', True],
