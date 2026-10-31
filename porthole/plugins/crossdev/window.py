@@ -367,7 +367,8 @@ class SystemsWindow(Gtk.Window):
 
 
 class NewSystemDialog(Gtk.Dialog):
-    """Name, the computer it is for, architecture, profile, repositories"""
+    """The computer it is for, a short name, its repositories (gentoo, and
+    only what the user ticks), then architecture and profile from those"""
 
     def __init__(self, parent):
         super().__init__(title="New system", transient_for=parent, modal=True)
@@ -376,11 +377,13 @@ class NewSystemDialog(Gtk.Dialog):
         self.set_default_response(Gtk.ResponseType.OK)
         self.repos = roots.host_repos()
         self.profiles = roots.profiles(self.repos)
+        self.known = set(self.repos)
+        self.ticked = set()
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, border_width=12)
         self.get_content_area().add(grid)
 
-        def row(n, text, widget):
-            grid.attach(Gtk.Label(label=text, xalign=1), 0, n, 1, 1)
+        def row(n, text, widget, yalign=0.5):
+            grid.attach(Gtk.Label(label=text, xalign=1, yalign=yalign), 0, n, 1, 1)
             grid.attach(widget, 1, n, 1, 1)
         self.title_entry = Gtk.Entry(placeholder_text="e.g. My Switch", hexpand=True)
         self.title_entry.connect("changed", self.title_changed)
@@ -392,52 +395,55 @@ class NewSystemDialog(Gtk.Dialog):
         self.named_by_hand = False
         self.name_entry.connect("key-press-event", self.name_typed)
         row(1, "Short name:", self.name_entry)
-        self.arch = Gtk.ComboBoxText()
-        arches = sorted({p[1] for p in self.profiles},
-                        key=lambda a: (a not in ARCHES, ARCHES.index(a) if a in ARCHES else 0, a))
-        mine = roots.host_arch()
-        for a in arches:
-            self.arch.append(a, "%s (this computer's)" % a if a == mine else a)
-        self.arch.connect("changed", lambda c: self.fill_profiles())
-        row(2, "Architecture:", self.arch)
-        self.profile = Gtk.ComboBoxText()
-        self.profile.connect("changed", lambda c: (self.fill_repos(), self.validate()))
-        row(3, "Profile:", self.profile)
-        self.experimental = Gtk.CheckButton(label="Show experimental profiles")
-        self.experimental.connect("toggled", lambda b: self.fill_profiles())
-        grid.attach(self.experimental, 1, 4, 1, 1)
+
+        repo_area = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.repo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        repo_area.pack_start(self.repo_box, False, False, 0)
         hint_row = Gtk.Box(spacing=8)
         hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=48)
-        hint.set_markup("<small>A board's own repository (like the Nintendo Switch "
-                        "overlay) brings its profiles. It is only for the systems you "
-                        "build: this computer doesn't use it.</small>")
+        hint.set_markup("<small>Tick what this system uses. A board's own repository "
+                        "(like the Nintendo Switch overlay) brings its profiles; this "
+                        "computer doesn't use the ones added here.</small>")
         hint_row.pack_start(hint, True, True, 0)
         add_repo = Gtk.Button(label="Add a repository…", valign=Gtk.Align.CENTER)
         add_repo.connect("clicked", self.add_repository)
         hint_row.pack_end(add_repo, False, False, 0)
-        grid.attach(hint_row, 1, 5, 1, 1)
+        repo_area.pack_start(hint_row, False, False, 0)
         self.waiting = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-        grid.attach(self.waiting, 1, 8, 1, 1)
+        repo_area.pack_start(self.waiting, False, False, 0)
+        row(2, "Repositories:", repo_area, yalign=0)
         self.watch = None
         self.connect("destroy", lambda d: self.watch and GLib.source_remove(self.watch))
-        grid.attach(Gtk.Label(label="Also use:", xalign=1, yalign=0), 0, 6, 1, 1)
-        self.repo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        grid.attach(self.repo_box, 1, 6, 1, 1)
+
+        self.arch = Gtk.ComboBoxText()
+        self.arch.connect("changed", lambda c: self.fill_profiles())
+        row(3, "Architecture:", self.arch)
+        self.profile = Gtk.ComboBoxText()
+        self.profile.connect("changed", lambda c: self.validate())
+        row(4, "Profile:", self.profile)
+        self.experimental = Gtk.CheckButton(label="Show experimental profiles")
+        self.experimental.connect("toggled", lambda b: self.fill_profiles())
+        grid.attach(self.experimental, 1, 5, 1, 1)
         self.keep_binpkgs = Gtk.CheckButton(
             label="Keep binary packages of what is built for it")
         self.keep_binpkgs.set_tooltip_text(
             "To install them on the computer it is for, or host them for it and others. "
             "Without: just the system. You can change it later.")
-        grid.attach(self.keep_binpkgs, 1, 7, 1, 1)
+        grid.attach(self.keep_binpkgs, 1, 6, 1, 1)
         self.message = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-        grid.attach(self.message, 1, 9, 1, 1)
-        # most boards are arm64; a board repository's profiles come first
-        self.arch.set_active_id("arm64" if "arm64" in arches else (arches or [None])[0])
+        grid.attach(self.message, 1, 7, 1, 1)
+        self.fill_repos()
+        self.fill_arches()
         self.show_all()
+
+    def usable_profiles(self):
+        """Profiles from gentoo and the ticked repositories"""
+        return [p for p in self.profiles if p[0] == "gentoo" or p[0] in self.ticked]
 
     def add_repository(self, button):
         """By address or a folder, to Porthole's list for other systems;
-        its profiles appear once it is downloaded"""
+        ticked for this one (the user asked for it), its profiles appear
+        once it is downloaded"""
         from porthole.updater.repospage import AddByAddressDialog, AddFolderDialog
         menu = Gtk.Menu()
         for label, dialog in (("By address…", AddByAddressDialog),
@@ -464,21 +470,22 @@ class NewSystemDialog(Gtk.Dialog):
             self.watch = GLib.timeout_add_seconds(5, self.reload_profiles)
 
     def reload_profiles(self):
-        """Read the repositories and their profiles again; keep looking
-        while one is still being downloaded"""
+        """Read the repositories and their profiles again (one added here
+        is ticked; one renamed to its own name after downloading keeps its
+        tick); keep looking while one is still being downloaded"""
         import os
         from porthole.plugins.crossdev import roots
+        from porthole.updater import repopool
         self.repos = roots.host_repos()
         self.profiles = roots.profiles(self.repos)
-        from porthole.updater import repopool
+        self.ticked |= set(self.repos) - self.known
+        self.ticked &= set(self.repos)
+        self.known = set(self.repos)
         pending = sorted(n for n, r in repopool.repos().items() if r["sync_type"] and
                          not os.path.isfile(os.path.join(r["location"], "profiles",
                                                          "repo_name")))
-        chosen = self.profile.get_active_id()
-        self.fill_profiles()
-        if chosen:
-            self.profile.set_active_id(chosen)
         self.fill_repos()
+        self.fill_arches()
         self.waiting.set_markup("<small>%s</small>" % GLib.markup_escape_text(
             "Downloading %s; its profiles appear here when that's done." % ", ".join(pending)
             if pending else ""))
@@ -499,31 +506,59 @@ class NewSystemDialog(Gtk.Dialog):
         self.named_by_hand = True
         return False
 
+    def fill_repos(self):
+        for child in self.repo_box.get_children():
+            child.destroy()
+        gentoo = Gtk.CheckButton(label="gentoo", active=True, sensitive=False)
+        gentoo.set_tooltip_text("Every system uses Gentoo's own repository")
+        self.repo_box.pack_start(gentoo, False, False, 0)
+        for name in sorted(self.repos):
+            if name == "gentoo":
+                continue
+            check = Gtk.CheckButton(label=name, active=name in self.ticked)
+            check.set_tooltip_text(self.repos[name])
+            check.connect("toggled", self.repo_toggled)
+            self.repo_box.pack_start(check, False, False, 0)
+        self.repo_box.show_all()
+
+    def repo_toggled(self, check):
+        name = check.get_label()
+        (self.ticked.add if check.get_active() else self.ticked.discard)(name)
+        self.fill_arches()
+        # ticking a board's repository: its profile is what the user is after
+        theirs = [p for p in self.usable_profiles() if p[0] == name and p[3] != "exp"]
+        if check.get_active() and theirs:
+            self.arch.set_active_id(theirs[0][1])
+            self.profile.set_active_id("%s:%s" % (theirs[0][0], theirs[0][2]))
+
+    def fill_arches(self):
+        """The architectures of the usable profiles (keeping the choice
+        while it is still there; arm64 first, most boards are)"""
+        from porthole.plugins.crossdev import roots
+        chosen = self.arch.get_active_id()
+        profile = self.profile.get_active_id()
+        arches = sorted({p[1] for p in self.usable_profiles()},
+                        key=lambda a: (a not in ARCHES, ARCHES.index(a) if a in ARCHES else 0, a))
+        mine = roots.host_arch()
+        self.arch.remove_all()
+        for a in arches:
+            self.arch.append(a, "%s (this computer's)" % a if a == mine else a)
+        self.arch.set_active_id(chosen if chosen in arches else
+                                "arm64" if "arm64" in arches else (arches or [None])[0])
+        if profile:
+            self.profile.set_active_id(profile)
+
     def fill_profiles(self):
         arch = self.arch.get_active_id()
         show_exp = self.experimental.get_active()
         self.profile.remove_all()
-        for repo, a, name, status in self.profiles:
+        for repo, a, name, status in self.usable_profiles():
             if a == arch and (show_exp or status != "exp"):
                 label = "%s: %s%s" % (repo, name, "" if status == "stable" else
                                       " (%s)" % status)
                 self.profile.append("%s:%s" % (repo, name), label)
         self.profile.set_active(0)
-
-    def fill_repos(self):
-        for child in self.repo_box.get_children():
-            child.destroy()
-        chosen = (self.profile.get_active_id() or ":").split(":")[0]
-        for name in sorted(self.repos):
-            if name in ("gentoo", chosen):
-                continue
-            check = Gtk.CheckButton(label=name)
-            check.set_tooltip_text(self.repos[name])
-            self.repo_box.pack_start(check, False, False, 0)
-        if not self.repo_box.get_children():
-            self.repo_box.pack_start(Gtk.Label(label="(no other repositories)", xalign=0),
-                                     False, False, 0)
-        self.repo_box.show_all()
+        self.validate()
 
     def validate(self):
         from porthole.updater import targets
@@ -548,9 +583,8 @@ class NewSystemDialog(Gtk.Dialog):
                 self.profile.get_active_id()]
         if self.title_entry.get_text().strip():
             args += ["--title", self.title_entry.get_text().strip()]
-        for check in self.repo_box.get_children():
-            if isinstance(check, Gtk.CheckButton) and check.get_active():
-                args += ["--repo", check.get_label()]
+        for name in sorted(self.ticked):
+            args += ["--repo", name]
         if self.keep_binpkgs.get_active():
             args.append("--keep-binpkgs")
         return args
