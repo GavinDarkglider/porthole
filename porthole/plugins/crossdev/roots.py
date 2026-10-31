@@ -58,9 +58,11 @@ def host_arch():
         return None
 
 
-def foreign_profiles(repos, arch=None):
+def profiles(repos):
     """[(repo, arch, profile, status)] from the repositories' profiles.desc,
-    for architectures other than this computer's (arch), stable first"""
+    any architecture (this computer's too: a root for another PC, or a
+    separate project), board repositories first, stable first, newest
+    first"""
     found = []
     for repo, location in sorted(repos.items()):
         try:
@@ -70,7 +72,7 @@ def foreign_profiles(repos, arch=None):
             continue
         for line in lines:
             words = line.split("#", 1)[0].split()
-            if len(words) >= 3 and words[0] != arch:
+            if len(words) >= 3:
                 found.append((repo, words[0], words[1], words[2]))
     order = {"stable": 0, "dev": 1, "exp": 2}
 
@@ -115,9 +117,55 @@ def _skeleton(root, split_usr):
             os.symlink(to, os.path.join(root, link))
 
 
+BINPKG_BEGIN = "# --- Porthole: binary packages (changed in Porthole) ---"
+BINPKG_END = "# --- end of Porthole's binary package settings ---"
+
+
+def binpkg_block(keep):
+    """The make.conf lines for keeping binary packages of what is built
+    (to install them on the computer it is for, or host them), or not"""
+    return "\n".join([BINPKG_BEGIN] + (
+        ['# keep a binary package of everything built for this system',
+         'FEATURES="${FEATURES} buildpkg"'] if keep else
+        ["# just the system: no binary packages kept"]) + [BINPKG_END])
+
+
+def keeps_binpkgs(target):
+    """Whether a system keeps binary packages (from its make.conf)"""
+    try:
+        with open(os.path.join(target.portage_dir, "make.conf")) as f:
+            text = f.read()
+    except OSError:
+        return False
+    block = text.split(BINPKG_BEGIN, 1)[-1].split(BINPKG_END, 1)[0] \
+        if BINPKG_BEGIN in text else ""
+    return "buildpkg" in block
+
+
+def set_binpkgs(name, keep, roots_dir=None, targets_file=None):
+    """Switch keeping binary packages for a system on or off"""
+    target = made_here(roots_dir, targets_file).get(name)
+    if target is None:
+        raise RootError("No system called %s was made here" % name)
+    path = os.path.join(target.portage_dir, "make.conf")
+    with open(path) as f:
+        text = f.read()
+    block = binpkg_block(keep)
+    if BINPKG_BEGIN in text and BINPKG_END in text:
+        before, rest = text.split(BINPKG_BEGIN, 1)
+        text = before + block + rest.split(BINPKG_END, 1)[1]
+    else:
+        text = text.rstrip("\n") + "\n\n" + block + "\n"
+    with open(path + ".new", "w") as f:
+        f.write(text)
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return keep
+
+
 def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
-           targets_file=None, repos=None, arch=None,
-           binpkgs_dir=None, gentoo_key=None):
+           targets_file=None, repos=None, binpkgs_dir=None, gentoo_key=None,
+           keep_binpkgs=False):
     """Make a new system: its root and config, and its entry in
     targets.conf. Returns its Target."""
     roots_dir, targets_file, binpkgs_dir = _paths(roots_dir, targets_file, binpkgs_dir)
@@ -135,10 +183,9 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
     if os.path.lexists(root):
         raise RootError("%s is there already; move it away first" % root)
     repos = host_repos() if repos is None else repos
-    profiles = foreign_profiles(repos, host_arch() if arch is None else arch)
-    match = [p for p in profiles if p[0] == repo and p[2] == profile]
+    match = [p for p in profiles(repos) if p[0] == repo and p[2] == profile]
     if not match:
-        raise RootError("Not a profile for another architecture: %s:%s" % (repo, profile))
+        raise RootError("Not a profile in %s: %s" % (repo, profile))
     wanted = ["gentoo", repo] + [r for r in extra_repos if r not in ("gentoo", repo)]
     unknown = [r for r in wanted if r not in repos]
     if unknown:
@@ -171,9 +218,10 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
                 'PKGDIR="%s"\n'
                 "# downloads are shared with that computer\n"
                 'DISTDIR="/var/cache/distfiles"\n'
-                "\n"
+                "\n%s\n\n"
                 "# Your own settings below.\n"
-                % (title, name, repo, profile, os.path.join(binpkgs_dir, name)))
+                % (title, name, repo, profile, os.path.join(binpkgs_dir, name),
+                   binpkg_block(keep_binpkgs)))
         if os.path.isfile(gentoo_key):
             keys = os.path.join(root, "usr", "share", "openpgp-keys")
             os.makedirs(keys, mode=0o755, exist_ok=True)

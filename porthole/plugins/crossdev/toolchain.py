@@ -37,6 +37,21 @@ class ToolchainError(Exception):
     pass
 
 
+def host_chost():
+    try:
+        import portage
+        return portage.settings["CHOST"]
+    except Exception:
+        return None
+
+
+def needs_cross(resolved, host=None):
+    """False when the system is for this computer's own CHOST: its own
+    compiler builds for it (crossdev refuses to make one for the same
+    name). Another C library on the same CPU (musl) is another CHOST."""
+    return resolved["tuple"] != (host or host_chost())
+
+
 def resolve(target):
     """{"tuple": CHOST, "parts": [{"part", "cp", "cpv", "version", "repo",
     "location"}]} for a target (a Target), from its own config"""

@@ -95,7 +95,6 @@ class RepositoriesPage(Gtk.Box):
                                       ("address", "Add by address...", self.add_by_address),
                                       ("folder", "Add a folder...", self.add_folder),
                                       ("remove", "Remove...", self.remove),
-                                      ("move", "For other systems only...", self.move),
                                       ("sync", "Sync now", self.sync)):
             button = Gtk.Button(label=label)
             button.connect("clicked", lambda b, c=callback: c())
@@ -140,18 +139,38 @@ class RepositoriesPage(Gtk.Box):
             self.fill_targets()
         self.store.clear()
         local = self.target is None
-        self.use_column.set_visible(not local)
         self.columns[2].set_title("Installed from it" if local else "On this computer")
         self.columns[3].set_visible(local)
         if local:
-            self.target_note.set_markup("")
+            from porthole.updater import repopool
+            self.target_note.set_markup(
+                "<small>Tick what this computer uses. Unticked ones stay downloaded for "
+                "the systems you build for other computers.</small>" if self.systems()
+                or repopool.repos() else "")
             self.repos = system.repositories()
             for r in self.repos:
                 syncs = ("%s %s" % (r["sync_type"], r["sync_uri"])).strip() or "(not synced)"
                 if r.get("missing"):
                     syncs += " (not downloaded yet)" if r["sync_type"] else " (folder missing)"
+                r["pool"] = False
                 self.store.append([r["name"], syncs, str(r["installed"]),
-                                   r["file"] or "(portage's default)", r["main"], True, False])
+                                   r["file"] or "(portage's default)", r["main"], True,
+                                   not r["main"] and bool(r["file"])])
+            mine = {r["name"] for r in self.repos}
+            for name, info in sorted(repopool.repos().items()):
+                if name in mine:
+                    continue
+                syncs = ("%s %s" % (info["sync_type"], info["sync_uri"])).strip() or \
+                    "(a folder, not synced)"
+                row = dict(info, name=name, main=False, installed=0, pool=True,
+                           file=None, missing=False)
+                self.repos.append(row)
+                self.store.append([name, syncs, "", "Porthole's list (not used here)",
+                                   False, False, True])
+            if not (self.systems() or repopool.repos()):
+                self.use_column.set_visible(False)
+            else:
+                self.use_column.set_visible(True)
         else:
             self.repos = self.system_repos(self.target)
             self.target_note.set_markup(
@@ -191,9 +210,37 @@ class RepositoriesPage(Gtk.Box):
         def done(ok, output):
             if not ok:
                 _error(self.get_toplevel(), "That wasn't changed", output or "Cancelled.")
-            self.refresh()
-        run_as_root(service("repo", "drop" if used else "use", name, "--target", target),
-                    done)
+            self.changed()
+        if target:
+            run_as_root(service("repo", "drop" if used else "use", name, "--target", target),
+                        done)
+            return
+        # this computer: enabling puts it in repos.conf, disabling keeps it
+        # downloaded on Porthole's list for the other systems
+        repo = next((r for r in self.repos if r["name"] == name), {})
+        if used:
+            text = "Stop using %s on this computer?" % name
+            detail = ("It stays downloaded, on Porthole's list for the systems you build "
+                      "for other computers. %s" % (
+                          "%d installed package%s came from it; they get no more updates "
+                          "from it." % (repo["installed"], "" if repo["installed"] == 1
+                                         else "s") if repo.get("installed") else ""))
+            button = "Stop using it"
+        else:
+            text = "Use %s on this computer?" % name
+            detail = ("Its packages become available here, as root installs them. A "
+                      "board's repository (made for another computer) changes packages "
+                      "for that board: don't use those here.")
+            button = "Use it"
+        dialog = Gtk.MessageDialog(transient_for=self.get_toplevel(), modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE, text=text)
+        dialog.format_secondary_text(detail.strip())
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, button, Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.OK:
+            run_as_root(service("repo", "disable" if used else "enable", name), done)
 
     def chosen(self):
         model, row = self.view.get_selection().get_selected()
@@ -205,8 +252,6 @@ class RepositoriesPage(Gtk.Box):
         # a system's: only the list's repositories are removed from here
         self.button_remove.set_sensitive(bool(repo) and not repo["main"] and (
             self.target is None or repo.get("pool", False)))
-        self.button_move.set_visible(self.target is None)
-        self.button_move.set_sensitive(bool(repo) and not repo["main"] and bool(repo["file"]))
         self.button_sync.set_sensitive(bool(repo) and bool(repo["sync_type"]))
 
     def changed(self):
@@ -244,35 +289,6 @@ class RepositoriesPage(Gtk.Box):
             RemoveFromListDialog(self.get_toplevel(), repo, self.changed)
         elif repo:
             RemoveDialog(self.get_toplevel(), repo, self.changed)
-
-    def move(self):
-        repo = self.chosen()
-        if not repo:
-            return
-        dialog = Gtk.MessageDialog(
-            transient_for=self.get_toplevel(), modal=True,
-            message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.NONE,
-            text="Use %s only for other systems?" % repo["name"])
-        dialog.format_secondary_text(
-            "This computer stops using it (%s is deleted); it goes on Porthole's list for "
-            "the systems you build for other computers, where you tick which use it. Its "
-            "files stay in %s.%s" % (
-                repo["file"], repo["location"],
-                "\n\n%d installed package%s came from it; they get no more updates from it."
-                % (repo["installed"], "" if repo["installed"] == 1 else "s")
-                if repo["installed"] else ""))
-        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Move it", Gtk.ResponseType.OK)
-        answer = dialog.run()
-        dialog.destroy()
-        if answer != Gtk.ResponseType.OK:
-            return
-
-        def done(ok, output):
-            if not ok:
-                _error(self.get_toplevel(), "%s wasn't moved" % repo["name"],
-                       output or "Cancelled.")
-            self.changed()
-        run_as_root(service("repo", "move", repo["name"], "--systems"), done)
 
     def sync(self):
         repo = self.chosen()

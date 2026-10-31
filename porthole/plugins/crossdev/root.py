@@ -9,10 +9,12 @@
                                                crossdev writes its toolchain
                                                ebuilds into
         plugin crossdev new-root NAME --profile REPO:PROFILE [--title T]
-                                 [--repo R ...]
+                                 [--repo R ...] [--keep-binpkgs]
                                                a new system for another
                                                computer (roots.py)
         plugin crossdev remove-root NAME       queue a job deleting one
+        plugin crossdev binpkgs NAME yes|no    keep binary packages of what is
+                                               built for it, or just the system
         plugin crossdev toolchain NAME         queue a job building the cross
                                                toolchain its profile allows
 
@@ -107,17 +109,35 @@ def new_root(args):
     parser.add_argument("--title", default="")
     parser.add_argument("--repo", action="append", default=[],
                         help="another of this computer's repositories to use")
+    parser.add_argument("--keep-binpkgs", action="store_true",
+                        help="keep binary packages of what is built for it")
     try:
         opts = parser.parse_args(args)
     except SystemExit as e:
         return e.code or 2
     repo, _, profile = opts.profile.partition(":")
     try:
-        target = roots.create(opts.name, opts.title, repo, profile, opts.repo)
+        target = roots.create(opts.name, opts.title, repo, profile, opts.repo,
+                              keep_binpkgs=opts.keep_binpkgs)
     except (roots.RootError, OSError) as e:
         print(e, file=sys.stderr)
         return 1
     print("Created %s in %s" % (target.name, target.root))
+    return 0
+
+
+def binpkgs(args):
+    """plugin crossdev binpkgs NAME yes|no"""
+    from porthole.plugins.crossdev import roots
+    if len(args) != 2 or args[1] not in ("yes", "no"):
+        print("usage: plugin crossdev binpkgs NAME yes|no", file=sys.stderr)
+        return 2
+    try:
+        roots.set_binpkgs(args[0], args[1] == "yes")
+    except (roots.RootError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print("%s %s binary packages" % (args[0], "keeps" if args[1] == "yes" else "doesn't keep"))
     return 0
 
 
@@ -169,6 +189,15 @@ def step_toolchain(runner, job_id, step, log):
     if target is None:
         log("!! No system called %s was made here" % step.get("name"))
         return False
+    try:
+        resolved = tc.resolve(target)
+    except tc.ToolchainError as e:
+        log("!! %s" % e)
+        return False
+    if not tc.needs_cross(resolved):
+        log("%s is for %s, this computer's own: its own compiler builds for it, no "
+            "cross toolchain needed." % (target.title, resolved["tuple"]))
+        return True
     if not shutil.which("crossdev"):
         log("!! crossdev isn't installed (Ready to build for another computer?)")
         return False
@@ -176,11 +205,6 @@ def step_toolchain(runner, job_id, step, log):
     if not output:
         log("!! crossdev's repository isn't there yet (Ready to build for another "
             "computer?, Create it)")
-        return False
-    try:
-        resolved = tc.resolve(target)
-    except tc.ToolchainError as e:
-        log("!! %s" % e)
         return False
     log("The toolchain %s's profile allows, for %s:" % (target.title, resolved["tuple"]))
     for title, version, repo, built in tc.compare(resolved):
@@ -209,5 +233,5 @@ def step_remove_root(runner, job_id, step, log):
 
 
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
-            "remove-root": remove_root, "toolchain": toolchain}
+            "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs}
 STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain}

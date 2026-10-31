@@ -799,6 +799,26 @@ class Runner:
             return False
         return bool(action(self, job_id, step, log))
 
+    def step_repo_name(self, job_id, step, log):
+        """After a sync: if the repository calls itself something else,
+        use its own name (portage ignores it otherwise)"""
+        from porthole.updater import repopool
+        name = step.get("name", "")
+        location = roots_repos().get(name)
+        own = repo_own_name(location) if location else None
+        if not own or own == name:
+            log("%s: name ok" % name)
+            return True
+        log("%s calls itself %s (profiles/repo_name); portage only uses it under that "
+            "name. Renaming it:" % (name, own))
+        try:
+            for path in rename_repo(name, own):
+                log("   " + path)
+        except JobError as e:
+            log("!! %s" % e)
+            return False
+        return True
+
     def step_shell(self, job_id, step, log):
         log("$ " + step["shell"])
         return self.run_logged(job_id, step, log, ["/bin/bash", "-c", step["shell"]])
@@ -1162,11 +1182,77 @@ def submit_repo_sync(name):
             "argv": ["emaint", "sync", "--repo", name]}
     if name in repopool.repos():
         step["env"] = {"PORTAGE_REPOSITORIES": repopool.environment([name])}
-    job = new_job("sync", "Sync %s" % name, [step], recheck=True)
+    job = new_job("sync", "Sync %s" % name,
+                  [step, {"kind": "repo-name", "title": "Check its name", "name": name}],
+                  recheck=True)
     with jobs_state() as state:
         state["jobs"].append(job)
         prune(state)
     return job
+
+
+def repo_own_name(location):
+    """The name a repository gives itself (profiles/repo_name), or None"""
+    try:
+        with open(os.path.join(location, "profiles", "repo_name")) as f:
+            name = f.read().strip()
+    except OSError:
+        return None
+    from porthole.updater import system
+    return name if system._REPO_NAME.match(name) else None
+
+
+def rename_repo(old, new, portage_dir="/etc/portage"):
+    """Call a repository by the name it gives itself, everywhere Porthole
+    wrote it: this computer's repos.conf/<old>.conf (a file of its own),
+    Porthole's list, and the systems' repos.conf. portage ignores an
+    entry whose name differs from the repository's own. The checkout stays
+    where it is. Returns what changed."""
+    import configparser
+    from porthole.updater import repopool, system
+    if not system._REPO_NAME.match(new or "") or old == new:
+        raise JobError("Not a new name: %s" % new)
+    if new in all_repo_names():
+        raise JobError("There already is a repository called %s" % new)
+    changed = []
+    sections = system.repos_conf_sections(portage_dir)
+    if old in sections:
+        path = sections[old]
+        if [n for n, f in sections.items() if f == path and n != old]:
+            raise JobError("%s defines other repositories too; rename [%s] there by hand"
+                           % (path, old))
+        with open(path) as f:
+            text = f.read()
+        text = re.sub(r"^\[%s\]" % re.escape(old), "[%s]" % new, text, flags=re.M)
+        directory = os.path.dirname(path)
+        target_path = os.path.join(directory, new + ".conf") \
+            if os.path.basename(path) == old + ".conf" else path
+        with open(target_path + ".new", "w") as f:
+            f.write(text)
+        os.chmod(target_path + ".new", 0o644)
+        os.replace(target_path + ".new", target_path)
+        if target_path != path:
+            os.unlink(path)
+        changed.append(target_path)
+    pool = repopool.repos()
+    if old in pool:
+        repo = pool[old]
+        repopool.remove(old)
+        repopool.add(new, repo["location"], repo["sync_type"], repo["sync_uri"],
+                     repo["auto_sync"])
+        changed.append(repopool.POOL_FILE)
+    for target in targets.load().values():
+        if target.local:
+            continue
+        names = repopool.target_repos(target.portage_dir)
+        if old in names:
+            parser = configparser.ConfigParser(interpolation=None)
+            parser.read(repopool.target_file(target.portage_dir))
+            locations = {(new if n == old else n): parser.get(n, "location")
+                         for n in names}
+            repopool.write_target_repos(target.portage_dir, locations, target.title)
+            changed.append(repopool.target_file(target.portage_dir))
+    return changed
 
 
 def check_folder(path):
@@ -1207,6 +1293,10 @@ def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=No
         raise JobError("Not a repository name: %s" % name)
     if folder:
         location = check_folder(folder)
+        own = repo_own_name(location)
+        if own and own != name:
+            raise JobError("That repository calls itself %s (profiles/repo_name); portage "
+                           "only uses it under that name" % own)
     else:
         if sync_type not in system.SYNC_TYPES:
             raise JobError("Not a sync type portage knows: %s" % sync_type)
@@ -1257,15 +1347,15 @@ def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=No
     return None if folder else submit_repo_sync(name)
 
 
-def move_repo_to_systems(name):
+def disable_repo(name, portage_dir="/etc/portage"):
     """Stop this computer using a repository and put it on Porthole's list
-    for other systems instead (its checkout stays where it is). Only a
-    repository with a repos.conf file of its own."""
+    for other systems instead (its checkout stays where it is, systems may
+    still use it). Only a repository with a repos.conf file of its own."""
     import configparser
     from porthole.updater import repopool, system
     if not system._REPO_NAME.match(name or "") or name == "gentoo":
         raise JobError("Not a repository Porthole can move: %s" % name)
-    sections = system.repos_conf_sections()
+    sections = system.repos_conf_sections(portage_dir)
     if name not in sections:
         raise JobError("%s isn't in this computer's repos.conf" % name)
     path = sections[name]
@@ -1283,7 +1373,39 @@ def move_repo_to_systems(name):
                  section.get("sync-uri", "").strip() if sync_type else "",
                  section.get("auto-sync", "yes").strip().lower() in ("yes", "true", "1"))
     os.unlink(path)
-    return ["%s is now only for other systems" % name, "removed " + path]
+    return ["This computer no longer uses %s (kept for other systems)" % name,
+            "removed " + path]
+
+
+def enable_repo(name, portage_dir="/etc/portage"):
+    """Let this computer use a repository from Porthole's list: it moves to
+    repos.conf/<name>.conf (systems using it carry on, same path)"""
+    from porthole.updater import repopool, system
+    pool = repopool.repos()
+    if name not in pool:
+        raise JobError("%s isn't on the list for other systems" % name)
+    if name in system.repos_conf_sections(portage_dir) or name == "gentoo":
+        raise JobError("This computer has a repository called %s already" % name)
+    directory = os.path.join(portage_dir, "repos.conf")
+    if os.path.isfile(directory):
+        raise JobError("%s is a single file. Porthole adds each repository in a file of "
+                       "its own: move it into a new directory of that name first."
+                       % directory)
+    repo = pool[name]
+    lines = ["[%s]" % name, "location = %s" % repo["location"]]
+    if repo["sync_type"]:
+        lines += ["sync-type = %s" % repo["sync_type"], "sync-uri = %s" % repo["sync_uri"],
+                  "auto-sync = %s" % ("yes" if repo["auto_sync"] else "no")]
+    else:
+        lines.append("auto-sync = no")
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, name + ".conf")
+    with open(path + ".new", "w") as f:
+        f.write("# Added in Porthole (Settings, Repositories)\n" + "\n".join(lines) + "\n")
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    repopool.remove(name)
+    return ["This computer uses %s now" % name, "wrote " + path]
 
 
 def _system_target(target_name):

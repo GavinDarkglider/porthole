@@ -172,12 +172,17 @@ class SystemsWindow(Gtk.Window):
             "its own Portage settings, from the profile of the computer it is for. "
             "It uses this computer's repositories, synced here.</small>")
         box.pack_start(intro, False, False, 0)
-        self.store = Gtk.ListStore(str, str, str, str)  # name, title, profile, folder
+        # name, title, profile, folder, keeps binary packages
+        self.store = Gtk.ListStore(str, str, str, str, bool)
         self.view = Gtk.TreeView(model=self.store)
         for i, heading in enumerate(("Name", "Computer", "Profile")):
             column = Gtk.TreeViewColumn(heading, Gtk.CellRendererText(), text=i)
             column.set_resizable(True)
             self.view.append_column(column)
+        toggle = Gtk.CellRendererToggle()
+        toggle.connect("toggled", self.binpkgs_toggled)
+        column = Gtk.TreeViewColumn("Keeps packages", toggle, active=4)
+        self.view.append_column(column)
         self.view.set_tooltip_column(3)
         self.view.get_selection().connect("changed", lambda s: self.update_buttons())
         scroller = Gtk.ScrolledWindow(vexpand=True)
@@ -216,9 +221,23 @@ class SystemsWindow(Gtk.Window):
                 profile = link.split("/profiles/", 1)[-1]
             except OSError:
                 profile = "(none)"
-            self.store.append([name, target.title, profile, target.root])
+            self.store.append([name, target.title, profile, target.root,
+                               roots.keeps_binpkgs(target)])
         self.empty.set_visible(len(self.store) == 0)
         self.update_buttons()
+
+    def binpkgs_toggled(self, renderer, path):
+        """Keep binary packages of what is built (to install them on the
+        computer it is for, or host them), or just build the system"""
+        name, keep = self.store[path][0], not self.store[path][4]
+        from porthole.updater.elevate import run_as_root, service
+
+        def done(ok, output):
+            if not ok:
+                self.error("That wasn't changed", output)
+            self.refresh()
+        run_as_root(service("plugin", "crossdev", "binpkgs", name, "yes" if keep else "no"),
+                    done)
 
     def selected(self):
         model, it = self.view.get_selection().get_selected()
@@ -277,6 +296,17 @@ class SystemsWindow(Gtk.Window):
         self.update_buttons()
         if problem:
             self.error("Porthole couldn't work out the toolchain", problem)
+            return False
+        if not tc.needs_cross(resolved):
+            dialog = Gtk.MessageDialog(
+                transient_for=self, modal=True, message_type=Gtk.MessageType.INFO,
+                buttons=Gtk.ButtonsType.CLOSE,
+                text="%s needs no cross toolchain" % target.title)
+            dialog.format_secondary_text(
+                "It is for %s, this computer's own, so this computer's compiler builds "
+                "for it." % resolved["tuple"])
+            dialog.run()
+            dialog.destroy()
             return False
         rows = tc.compare(resolved)
         if all(built == version for _t, version, _r, built in rows):
@@ -345,7 +375,7 @@ class NewSystemDialog(Gtk.Dialog):
         self.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Make it", Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
         self.repos = roots.host_repos()
-        self.profiles = roots.foreign_profiles(self.repos, roots.host_arch())
+        self.profiles = roots.profiles(self.repos)
         grid = Gtk.Grid(row_spacing=8, column_spacing=12, border_width=12)
         self.get_content_area().add(grid)
 
@@ -365,8 +395,9 @@ class NewSystemDialog(Gtk.Dialog):
         self.arch = Gtk.ComboBoxText()
         arches = sorted({p[1] for p in self.profiles},
                         key=lambda a: (a not in ARCHES, ARCHES.index(a) if a in ARCHES else 0, a))
+        mine = roots.host_arch()
         for a in arches:
-            self.arch.append(a, a)
+            self.arch.append(a, "%s (this computer's)" % a if a == mine else a)
         self.arch.connect("changed", lambda c: self.fill_profiles())
         row(2, "Architecture:", self.arch)
         self.profile = Gtk.ComboBoxText()
@@ -392,8 +423,14 @@ class NewSystemDialog(Gtk.Dialog):
         grid.attach(Gtk.Label(label="Also use:", xalign=1, yalign=0), 0, 6, 1, 1)
         self.repo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         grid.attach(self.repo_box, 1, 6, 1, 1)
+        self.keep_binpkgs = Gtk.CheckButton(
+            label="Keep binary packages of what is built for it")
+        self.keep_binpkgs.set_tooltip_text(
+            "To install them on the computer it is for, or host them for it and others. "
+            "Without: just the system. You can change it later.")
+        grid.attach(self.keep_binpkgs, 1, 7, 1, 1)
         self.message = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
-        grid.attach(self.message, 1, 7, 1, 1)
+        grid.attach(self.message, 1, 9, 1, 1)
         # most boards are arm64; a board repository's profiles come first
         self.arch.set_active_id("arm64" if "arm64" in arches else (arches or [None])[0])
         self.show_all()
@@ -432,7 +469,7 @@ class NewSystemDialog(Gtk.Dialog):
         import os
         from porthole.plugins.crossdev import roots
         self.repos = roots.host_repos()
-        self.profiles = roots.foreign_profiles(self.repos, roots.host_arch())
+        self.profiles = roots.profiles(self.repos)
         from porthole.updater import repopool
         pending = sorted(n for n, r in repopool.repos().items() if r["sync_type"] and
                          not os.path.isfile(os.path.join(r["location"], "profiles",
@@ -514,4 +551,6 @@ class NewSystemDialog(Gtk.Dialog):
         for check in self.repo_box.get_children():
             if isinstance(check, Gtk.CheckButton) and check.get_active():
                 args += ["--repo", check.get_label()]
+        if self.keep_binpkgs.get_active():
+            args.append("--keep-binpkgs")
         return args

@@ -29,8 +29,9 @@
         repo add NAME --sync-type T --uri U [--priority N] [--no-auto-sync]
         repo add NAME --folder PATH a folder already here, never synced
         repo use|drop NAME --target S   a system uses a repository or stops
-        repo move NAME --systems    from this computer to the list for other
-                                    systems (the checkout stays)
+        repo enable|disable NAME    this computer uses one from the list for
+                                    other systems, or stops using one (it goes
+                                    on that list; the checkout stays)
                                     (--systems with add/remove: the list for
                                     other systems only, not this computer)
         repo remove NAME [--delete-files]
@@ -492,6 +493,17 @@ class Service:
                 output, ok = output + str(e), False
         if self.log.file:
             self.log.file.write(output)
+        # a repository that calls itself something else is ignored by
+        # portage: use its own name (runner.rename_repo)
+        from porthole.updater import runner
+        for name, location, _s in repos:
+            own = runner.repo_own_name(location)
+            if own and own != name:
+                try:
+                    runner.rename_repo(name, own)
+                    self.log("%s calls itself %s: renamed" % (name, own))
+                except runner.JobError as e:
+                    self.log("%s calls itself %s, not renamed: %s" % (name, own, e))
         now = time.time()
         if ok:
             self.save_state(last_sync=now)
@@ -658,7 +670,7 @@ def main(argv=None):
     prof.add_argument("name", help="e.g. default/linux/amd64/23.0/desktop")
     prof.add_argument("--target", default=None, help="the system (default: this computer)")
     repo = sub.add_parser("repo", help="add, remove or sync a repository")
-    repo.add_argument("action", choices=("add", "remove", "sync", "use", "drop", "move"))
+    repo.add_argument("action", choices=("add", "remove", "sync", "use", "drop", "enable", "disable"))
     repo.add_argument("name")
     repo.add_argument("--sync-type", default="git")
     repo.add_argument("--uri")
@@ -835,10 +847,9 @@ def job_command(args, parser):
                     print("added")
             elif args.action == "remove":
                 print("\n".join(runner.remove_repo(args.name, args.delete_files, target)))
-            elif args.action == "move":
-                if not args.systems:
-                    parser.error("repo move needs --systems")
-                print("\n".join(runner.move_repo_to_systems(args.name)))
+            elif args.action in ("enable", "disable"):
+                print("\n".join((runner.enable_repo if args.action == "enable"
+                                 else runner.disable_repo)(args.name)))
             elif args.action in ("use", "drop"):
                 if not args.target:
                     parser.error("repo %s needs --target" % args.action)
