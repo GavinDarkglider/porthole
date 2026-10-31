@@ -230,6 +230,8 @@ figure
    text-align: center;
    margin: 0.3cm 0;
    color: blue;
+   /* fit beside the contents frame rather than drop below it */
+   overflow: hidden;
   }
 figure img
   {max-width: 100%;
