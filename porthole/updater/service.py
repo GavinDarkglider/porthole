@@ -27,6 +27,12 @@
                                     package (package.use/00-porthole-global)
         profile NAME [--target T]   switch the profile (one profiles.desc lists)
         repo add NAME --sync-type T --uri U [--priority N] [--no-auto-sync]
+        repo add NAME --folder PATH a folder already here, never synced
+        repo use|drop NAME --target S   a system uses a repository or stops
+        repo move NAME --systems    from this computer to the list for other
+                                    systems (the checkout stays)
+                                    (--systems with add/remove: the list for
+                                    other systems only, not this computer)
         repo remove NAME [--delete-files]
         repo sync NAME              add, remove or sync a repository
         binhost add NAME --uri U [--priority N] [--no-verify]
@@ -308,17 +314,68 @@ def _read(path):
         return None
 
 
+def repo_synced(location):
+    """When a repository was last synced (by anyone), or None"""
+    for name in ("metadata/timestamp.chk", "metadata/timestamp.x", ".git/FETCH_HEAD"):
+        path = os.path.join(location, name)
+        if os.path.exists(path):
+            return os.path.getmtime(path)
+    return None
+
+
 def last_repo_sync():
     """Newest repository sync time, including syncs run by hand"""
     import portage
-    times = []
-    for repo in portage.db[portage.root]["vartree"].settings.repositories:
-        for name in ("metadata/timestamp.chk", "metadata/timestamp.x", ".git/FETCH_HEAD"):
-            path = os.path.join(repo.location, name)
-            if os.path.exists(path):
-                times.append(os.path.getmtime(path))
-                break
+    times = [repo_synced(repo.location)
+             for repo in portage.db[portage.root]["vartree"].settings.repositories]
+    times = [t for t in times if t]
     return max(times) if times else None
+
+
+def auto_repos():
+    """[(name, location, for_systems)] of the repositories that sync on the
+    schedule: this computer's with auto-sync on, then Porthole's list for
+    other systems (repopool)"""
+    import portage
+    from porthole.updater import repopool
+    found = []
+    for repo in portage.db[portage.root]["vartree"].settings.repositories:
+        auto = str(getattr(repo, "auto_sync", "yes") or "yes").lower()
+        if repo.sync_type and auto in ("yes", "true", "1"):
+            found.append((repo.name, repo.location, False))
+    for name, repo in repopool.repos().items():
+        if repo["sync_type"] and repo["auto_sync"]:
+            found.append((name, repo["location"], True))
+    return found
+
+
+def due_repos(interval_days, now=None, repos=None):
+    """The scheduled repositories whose turn it is: last synced
+    interval_days ago or more (or never). None synced within the last day,
+    whatever the interval: the mirrors ask for no more."""
+    now = now or time.time()
+    due = []
+    for name, location, for_systems in (auto_repos() if repos is None else repos):
+        last = repo_synced(location)
+        if last is None or (now - last >= max(interval_days * DAY, DAY) - SLACK):
+            due.append((name, location, for_systems))
+    return due
+
+
+def sync_commands(repos):
+    """[(argv, env)] syncing these repositories: this computer's in one
+    emerge --sync, the ones for other systems in another, given only
+    Porthole's list"""
+    from porthole.updater import repopool
+    commands = []
+    mine = [name for name, _l, for_systems in repos if not for_systems]
+    theirs = [name for name, _l, for_systems in repos if for_systems]
+    if mine:
+        commands.append((["emerge", "--sync"] + mine, {}))
+    if theirs:
+        commands.append((["emerge", "--sync"] + theirs,
+                         {"PORTAGE_REPOSITORIES": repopool.environment(theirs)}))
+    return commands
 
 
 # sets only root can work out (see readers/sets.py)
@@ -403,32 +460,36 @@ class Service:
         write_json(STATE_FILE, self.state)
 
     def due(self):
-        """A sync is due interval_days after the last one, whoever ran it"""
-        last = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
-                   default=None)
-        if not last:
-            return True
-        return time.time() - last >= self.config["interval_days"] * DAY - SLACK
+        """A sync is due when any scheduled repository's turn has come
+        (interval_days after its own last sync, whoever ran it)"""
+        try:
+            return bool(due_repos(self.config["interval_days"]))
+        except Exception:
+            last = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
+                       default=None)
+            return not last or time.time() - last >= self.config["interval_days"] * DAY - SLACK
 
     def sync(self, now=False):
-        """Sync unless any repository was synced within the last day, or
-        now (the user asked for it, having been told when it last was)"""
+        """Sync the scheduled repositories whose turn it is (see
+        due_repos), or with now (the user asked, having been told when it
+        last was) all of them"""
         recent = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
                      default=None)
-        if recent and time.time() - recent < DAY - SLACK and not now:
-            self.log("Repositories synced %.1f hours ago; not syncing again yet"
-                     % ((time.time() - recent) / 3600))
+        repos = auto_repos() if now else due_repos(self.config["interval_days"])
+        if not repos:
+            self.log("No repository is due for a sync yet")
             return {"ran": False, "ok": True, "last": recent}
-        self.log("Syncing repositories (emaint sync --auto)...")
-        try:
-            proc = subprocess.run(
-                ["emaint", "sync", "--auto"],
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, timeout=3600,
-            )
-            output, ok = proc.stdout, proc.returncode == 0
-        except (OSError, subprocess.SubprocessError) as e:
-            output, ok = str(e), False
+        self.log("Syncing %s..." % ", ".join(name for name, _l, _s in repos))
+        output, ok = "", True
+        for argv, env in sync_commands(repos):
+            try:
+                proc = subprocess.run(
+                    argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, timeout=3600, env=dict(os.environ, **env))
+                output += proc.stdout
+                ok = ok and proc.returncode == 0
+            except (OSError, subprocess.SubprocessError) as e:
+                output, ok = output + str(e), False
         if self.log.file:
             self.log.file.write(output)
         now = time.time()
@@ -597,7 +658,7 @@ def main(argv=None):
     prof.add_argument("name", help="e.g. default/linux/amd64/23.0/desktop")
     prof.add_argument("--target", default=None, help="the system (default: this computer)")
     repo = sub.add_parser("repo", help="add, remove or sync a repository")
-    repo.add_argument("action", choices=("add", "remove", "sync"))
+    repo.add_argument("action", choices=("add", "remove", "sync", "use", "drop", "move"))
     repo.add_argument("name")
     repo.add_argument("--sync-type", default="git")
     repo.add_argument("--uri")
@@ -606,6 +667,9 @@ def main(argv=None):
     repo.add_argument("--delete-files", action="store_true",
                       help="remove: also delete its checkout (/var/db/repos/NAME only)")
     repo.add_argument("--target", default=None, help="the system (default: this computer)")
+    repo.add_argument("--folder", default=None, help="add: a repository already in this folder")
+    repo.add_argument("--systems", action="store_true",
+                      help="add/remove: for other systems only, not this computer")
     binhost = sub.add_parser("binhost", help="add or remove a binhost")
     binhost.add_argument("action", choices=("add", "remove"))
     binhost.add_argument("name")
@@ -756,15 +820,30 @@ def job_command(args, parser):
             runner.start_runner()
             print(job["id"])
         elif args.command == "repo":
+            target = runner.SYSTEMS if args.systems else args.target
+            if args.systems and args.target:
+                parser.error("--systems or --target, not both")
             if args.action == "add":
-                if not args.uri:
-                    parser.error("repo add needs --uri")
+                if not args.uri and not args.folder:
+                    parser.error("repo add needs --uri or --folder")
                 job = runner.add_repo(args.name, args.sync_type, args.uri, args.priority,
-                                      not args.no_auto_sync, args.target)
-                runner.start_runner()
-                print(job["id"])
+                                      not args.no_auto_sync, target, folder=args.folder)
+                if job:
+                    runner.start_runner()
+                    print(job["id"])
+                else:
+                    print("added")
             elif args.action == "remove":
-                print("\n".join(runner.remove_repo(args.name, args.delete_files, args.target)))
+                print("\n".join(runner.remove_repo(args.name, args.delete_files, target)))
+            elif args.action == "move":
+                if not args.systems:
+                    parser.error("repo move needs --systems")
+                print("\n".join(runner.move_repo_to_systems(args.name)))
+            elif args.action in ("use", "drop"):
+                if not args.target:
+                    parser.error("repo %s needs --target" % args.action)
+                print((runner.use_repo if args.action == "use" else runner.drop_repo)(
+                    args.name, args.target))
             else:
                 job = runner.submit_repo_sync(args.name)
                 runner.start_runner()

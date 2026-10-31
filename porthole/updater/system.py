@@ -598,12 +598,32 @@ def repositories():
         except OSError:
             continue
         counts[name] = counts.get(name, 0) + 1
-    return [{"name": r.name, "location": r.location, "sync_type": r.sync_type or "",
-             "sync_uri": r.sync_uri or "", "priority": r.priority,
-             "auto_sync": str(getattr(r, "auto_sync", "") or ""),
-             "file": files.get(r.name), "main": r.name == main_name,
-             "installed": counts.get(r.name, 0)}
-            for r in sorted(repos, key=lambda r: (r.name != main_name, r.name))]
+    found = [{"name": r.name, "location": r.location, "sync_type": r.sync_type or "",
+              "sync_uri": r.sync_uri or "", "priority": r.priority,
+              "auto_sync": str(getattr(r, "auto_sync", "") or ""),
+              "file": files.get(r.name), "main": r.name == main_name,
+              "installed": counts.get(r.name, 0), "missing": False}
+             for r in sorted(repos, key=lambda r: (r.name != main_name, r.name))]
+    # portage leaves out a repository whose folder isn't there (not synced
+    # yet, or deleted): still listed, so it can be synced or removed
+    import configparser
+    known = {r["name"] for r in found}
+    for name, path in sorted(files.items()):
+        if name in known:
+            continue
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(path)
+            section = parser[name]
+        except (configparser.Error, KeyError):
+            continue
+        found.append({"name": name, "location": section.get("location", "").strip(),
+                      "sync_type": section.get("sync-type", "").strip(),
+                      "sync_uri": section.get("sync-uri", "").strip(),
+                      "priority": section.get("priority", ""),
+                      "auto_sync": section.get("auto-sync", "").strip(), "file": path,
+                      "main": False, "installed": counts.get(name, 0), "missing": True})
+    return found
 
 
 def official_repos(cache_dir=None, max_age=24 * 3600, fetch=True):

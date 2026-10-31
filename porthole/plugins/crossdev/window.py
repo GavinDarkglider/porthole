@@ -13,7 +13,7 @@ import threading
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from porthole.plugins.crossdev import checks
 
@@ -375,11 +375,20 @@ class NewSystemDialog(Gtk.Dialog):
         self.experimental = Gtk.CheckButton(label="Show experimental profiles")
         self.experimental.connect("toggled", lambda b: self.fill_profiles())
         grid.attach(self.experimental, 1, 4, 1, 1)
-        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        hint_row = Gtk.Box(spacing=8)
+        hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=48)
         hint.set_markup("<small>A board's own repository (like the Nintendo Switch "
-                        "overlay) brings its profiles: add it in Settings, Repositories, "
-                        "and it is listed here.</small>")
-        grid.attach(hint, 1, 5, 1, 1)
+                        "overlay) brings its profiles. It is only for the systems you "
+                        "build: this computer doesn't use it.</small>")
+        hint_row.pack_start(hint, True, True, 0)
+        add_repo = Gtk.Button(label="Add a repository…", valign=Gtk.Align.CENTER)
+        add_repo.connect("clicked", self.add_repository)
+        hint_row.pack_end(add_repo, False, False, 0)
+        grid.attach(hint_row, 1, 5, 1, 1)
+        self.waiting = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
+        grid.attach(self.waiting, 1, 8, 1, 1)
+        self.watch = None
+        self.connect("destroy", lambda d: self.watch and GLib.source_remove(self.watch))
         grid.attach(Gtk.Label(label="Also use:", xalign=1, yalign=0), 0, 6, 1, 1)
         self.repo_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         grid.attach(self.repo_box, 1, 6, 1, 1)
@@ -388,6 +397,58 @@ class NewSystemDialog(Gtk.Dialog):
         # most boards are arm64; a board repository's profiles come first
         self.arch.set_active_id("arm64" if "arm64" in arches else (arches or [None])[0])
         self.show_all()
+
+    def add_repository(self, button):
+        """By address or a folder, to Porthole's list for other systems;
+        its profiles appear once it is downloaded"""
+        from porthole.updater.repospage import AddByAddressDialog, AddFolderDialog
+        menu = Gtk.Menu()
+        for label, dialog in (("By address…", AddByAddressDialog),
+                              ("A folder on this computer…", AddFolderDialog)):
+            item = Gtk.MenuItem(label=label)
+            item.connect("activate", lambda i, d=dialog: d(
+                self, set(self.repos), self.repository_added, ["--systems"]))
+            menu.append(item)
+        menu.show_all()
+        menu.popup_at_widget(button, Gdk.Gravity.SOUTH_WEST, Gdk.Gravity.NORTH_WEST, None)
+
+    def repository_added(self, ok, output):
+        if not ok:
+            dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                       message_type=Gtk.MessageType.ERROR,
+                                       buttons=Gtk.ButtonsType.CLOSE,
+                                       text="The repository wasn't added")
+            dialog.format_secondary_text(output or "Cancelled.")
+            dialog.run()
+            dialog.destroy()
+            return
+        self.reload_profiles()
+        if self.watch is None:
+            self.watch = GLib.timeout_add_seconds(5, self.reload_profiles)
+
+    def reload_profiles(self):
+        """Read the repositories and their profiles again; keep looking
+        while one is still being downloaded"""
+        import os
+        from porthole.plugins.crossdev import roots
+        self.repos = roots.host_repos()
+        self.profiles = roots.foreign_profiles(self.repos, roots.host_arch())
+        from porthole.updater import repopool
+        pending = sorted(n for n, r in repopool.repos().items() if r["sync_type"] and
+                         not os.path.isfile(os.path.join(r["location"], "profiles",
+                                                         "repo_name")))
+        chosen = self.profile.get_active_id()
+        self.fill_profiles()
+        if chosen:
+            self.profile.set_active_id(chosen)
+        self.fill_repos()
+        self.waiting.set_markup("<small>%s</small>" % GLib.markup_escape_text(
+            "Downloading %s; its profiles appear here when that's done." % ", ".join(pending)
+            if pending else ""))
+        if not pending:
+            self.watch = None
+            return False
+        return True
 
     def title_changed(self, entry):
         if not self.named_by_hand:

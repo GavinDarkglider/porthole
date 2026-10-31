@@ -805,7 +805,8 @@ class Runner:
 
     def step_argv(self, job_id, step, log):
         """A checked emerge command line, run without a shell"""
-        log("$ " + " ".join("%s=%s" % kv for kv in sorted(step.get("env", {}).items()))
+        log("$ " + " ".join("%s=%s" % (k, "(Porthole's list)" if "\n" in v else v)
+                            for k, v in sorted(step.get("env", {}).items()))
             + (" " if step.get("env") else "") + shlex.join(step["argv"]))
         return self.run_logged(job_id, step, log, step["argv"], step.get("env"))
 
@@ -1120,46 +1121,131 @@ def set_profile(name, target_name=None):
 REPOS_DIR = "/var/db/repos"
 
 
+# the repositories for other systems only (repopool.py), as a target name
+SYSTEMS = "systems"
+
+
+def roots_repos():
+    """{name: location} a system may use: this computer's repositories and
+    the list for other systems"""
+    from porthole.updater import repopool, system
+    import configparser
+    found = {}
+    for name, path in system.repos_conf_sections().items():
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(path)
+            location = parser.get(name, "location", fallback="").strip()
+        except configparser.Error:
+            continue
+        if location:
+            found[name] = location.rstrip("/") or "/"
+    if "gentoo" not in found:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read("/usr/share/portage/config/repos.conf")
+            found["gentoo"] = parser.get("gentoo", "location").strip()
+        except configparser.Error:
+            found["gentoo"] = "/var/db/repos/gentoo"
+    for name, repo in repopool.repos().items():
+        found.setdefault(name, repo["location"])
+    return found
+
+
 def submit_repo_sync(name):
-    """Queue a sync of one repository (re-checks the plan afterwards)"""
-    from porthole.updater import system
+    """Queue a sync of one repository (re-checks the plan afterwards). One
+    for other systems only is synced with emaint given only Porthole's list."""
+    from porthole.updater import repopool, system
     if not system._REPO_NAME.match(name or ""):
         raise JobError("Not a repository name: %s" % name)
-    job = new_job("sync", "Sync %s" % name,
-                  [{"kind": "argv", "title": "Sync %s" % name,
-                    "argv": ["emaint", "sync", "--repo", name]}], recheck=True)
+    step = {"kind": "argv", "title": "Sync %s" % name,
+            "argv": ["emaint", "sync", "--repo", name]}
+    if name in repopool.repos():
+        step["env"] = {"PORTAGE_REPOSITORIES": repopool.environment([name])}
+    job = new_job("sync", "Sync %s" % name, [step], recheck=True)
     with jobs_state() as state:
         state["jobs"].append(job)
         prune(state)
     return job
 
 
-def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=None):
-    """Define a repository in repos.conf/<name>.conf (one file each, the
-    way most people write them) and queue its first sync"""
-    from porthole.updater import system
+def check_folder(path):
+    """A folder already on this computer holding a repository (the user's
+    own checkout): its real path. Porthole never syncs or deletes it."""
+    if not path or not os.path.isabs(path) or "\n" in path:
+        raise JobError("A folder is a full path: %r" % (path or "")[:80])
+    real = os.path.realpath(path)
+    if not os.path.isdir(real) or real == "/":
+        raise JobError("Not a folder: %s" % path)
+    if not os.path.isfile(os.path.join(real, "profiles", "repo_name")) and \
+            not os.path.isfile(os.path.join(real, "metadata", "layout.conf")):
+        raise JobError("%s doesn't look like a repository (no profiles/repo_name or "
+                       "metadata/layout.conf)" % real)
+    return real
+
+
+def all_repo_names(target=None):
+    """Names taken: this computer's, the list for other systems, and the
+    system's own"""
+    from porthole.updater import repopool, system
+    names = set(system.repos_conf_sections()) | set(repopool.repos()) | {"gentoo"}
+    if target is not None and not target.local:
+        names |= set(system.repos_conf_sections(target.portage_dir))
+    return names
+
+
+def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=None,
+             folder=None):
+    """Add a repository and queue its first sync (None for a folder).
+
+    For this computer: repos.conf/<name>.conf (one file each, the way
+    most people write them). For other systems (target_name SYSTEMS, or a
+    system's name, which then uses it): Porthole's own list, never this
+    computer's repos.conf."""
+    from porthole.updater import repopool, system
     if not system._REPO_NAME.match(name or ""):
         raise JobError("Not a repository name: %s" % name)
-    if sync_type not in system.SYNC_TYPES:
-        raise JobError("Not a sync type portage knows: %s" % sync_type)
-    try:
-        system.check_repo_uri(uri)
-    except ValueError as e:
-        raise JobError(str(e))
-    try:
-        target = targets.get(target_name)
-    except KeyError:
-        raise JobError("No such system: %s" % target_name)
-    if name in system.repos_conf_sections(target.portage_dir) or name == "gentoo":
+    if folder:
+        location = check_folder(folder)
+    else:
+        if sync_type not in system.SYNC_TYPES:
+            raise JobError("Not a sync type portage knows: %s" % sync_type)
+        try:
+            system.check_repo_uri(uri)
+        except ValueError as e:
+            raise JobError(str(e))
+        location = os.path.join(REPOS_DIR, name)
+    target = None
+    if target_name != SYSTEMS:
+        try:
+            target = targets.get(target_name)
+        except KeyError:
+            raise JobError("No such system: %s" % target_name)
+    if name in all_repo_names(target):
         raise JobError("There already is a repository called %s" % name)
+    if target is None or not target.local:
+        if not folder and os.path.lexists(location):
+            raise JobError("%s is there already; add it as a folder, or move it away"
+                           % location)
+        try:
+            repopool.add(name, location, "" if folder else sync_type,
+                         "" if folder else uri, auto_sync)
+        except ValueError as e:
+            raise JobError(str(e))
+        if target is not None:
+            use_repo(name, target.name)
+        return None if folder else submit_repo_sync(name)
     directory = os.path.join(target.portage_dir, "repos.conf")
     if os.path.isfile(directory):
         raise JobError("%s is a single file. Porthole adds each repository in a file of "
                        "its own: move it into a new directory of that name first."
                        % directory)
-    lines = ["[%s]" % name, "location = %s" % os.path.join(REPOS_DIR, name),
-             "sync-type = %s" % sync_type, "sync-uri = %s" % uri,
-             "auto-sync = %s" % ("yes" if auto_sync else "no")]
+    if folder:
+        lines = ["[%s]" % name, "location = %s" % location, "auto-sync = no"]
+    else:
+        lines = ["[%s]" % name, "location = %s" % location,
+                 "sync-type = %s" % sync_type, "sync-uri = %s" % uri,
+                 "auto-sync = %s" % ("yes" if auto_sync else "no")]
     if priority is not None:
         lines.append("priority = %d" % int(priority))
     os.makedirs(directory, exist_ok=True)
@@ -1168,7 +1254,79 @@ def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=No
         f.write("# Added in Porthole (Settings, Repositories)\n" + "\n".join(lines) + "\n")
     os.chmod(path + ".new", 0o644)
     os.replace(path + ".new", path)
-    return submit_repo_sync(name)
+    return None if folder else submit_repo_sync(name)
+
+
+def move_repo_to_systems(name):
+    """Stop this computer using a repository and put it on Porthole's list
+    for other systems instead (its checkout stays where it is). Only a
+    repository with a repos.conf file of its own."""
+    import configparser
+    from porthole.updater import repopool, system
+    if not system._REPO_NAME.match(name or "") or name == "gentoo":
+        raise JobError("Not a repository Porthole can move: %s" % name)
+    sections = system.repos_conf_sections()
+    if name not in sections:
+        raise JobError("%s isn't in this computer's repos.conf" % name)
+    path = sections[name]
+    if [n for n, f in sections.items() if f == path and n != name]:
+        raise JobError("%s defines other repositories too; move [%s] out of it by hand"
+                       % (path, name))
+    if name in repopool.repos():
+        raise JobError("%s is on the list for other systems already" % name)
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(path)
+    section = parser[name]
+    location = section.get("location", "").strip() or os.path.join(REPOS_DIR, name)
+    sync_type = section.get("sync-type", "").strip()
+    repopool.add(name, location.rstrip("/"), sync_type,
+                 section.get("sync-uri", "").strip() if sync_type else "",
+                 section.get("auto-sync", "yes").strip().lower() in ("yes", "true", "1"))
+    os.unlink(path)
+    return ["%s is now only for other systems" % name, "removed " + path]
+
+
+def _system_target(target_name):
+    try:
+        target = targets.get(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    if target.local:
+        raise JobError("This computer's repositories are its repos.conf")
+    return target
+
+
+def use_repo(name, target_name):
+    """Let a system use one of this computer's repositories, or one from
+    the list for other systems (at the same path)"""
+    from porthole.updater import repopool
+    target = _system_target(target_name)
+    available = roots_repos()
+    if name not in available:
+        raise JobError("No repository called %s on this computer" % name)
+    current = repopool.target_repos(target.portage_dir)
+    if name in current:
+        return "already used"
+    locations = {n: available[n] for n in current if n in available}
+    locations.setdefault("gentoo", available.get("gentoo", "/var/db/repos/gentoo"))
+    locations[name] = available[name]
+    repopool.write_target_repos(target.portage_dir, locations, target.title)
+    return "used"
+
+
+def drop_repo(name, target_name):
+    """Stop a system using a repository (the repository stays)"""
+    from porthole.updater import repopool
+    target = _system_target(target_name)
+    if name == "gentoo":
+        raise JobError("Every system uses gentoo")
+    current = repopool.target_repos(target.portage_dir)
+    if name not in current:
+        raise JobError("%s doesn't use %s" % (target.title, name))
+    available = roots_repos()
+    locations = {n: available[n] for n in current if n != name and n in available}
+    repopool.write_target_repos(target.portage_dir, locations, target.title)
+    return "dropped"
 
 
 def deletable(location):
@@ -1182,10 +1340,29 @@ def deletable(location):
 def remove_repo(name, delete_files=False, target_name=None):
     """Remove a repository's definition: only a repos.conf file of its own
     (one defining others too is left for the user to edit). delete_files:
-    its checkout too, only if that is directly in /var/db/repos."""
-    from porthole.updater import system
+    its checkout too, only if that is directly in /var/db/repos.
+    target_name SYSTEMS: one from the list for other systems, which every
+    system stops using."""
+    from porthole.updater import repopool, system
     if not system._REPO_NAME.match(name or ""):
         raise JobError("Not a repository name: %s" % name)
+    if target_name == SYSTEMS:
+        pool = repopool.repos()
+        if name not in pool:
+            raise JobError("%s isn't one of the repositories for other systems" % name)
+        removed = []
+        for target in targets.load().values():
+            if not target.local and name in repopool.target_repos(target.portage_dir):
+                drop_repo(name, target.name)
+                removed.append("%s no longer uses it" % target.title)
+        repopool.remove(name)
+        removed.append(repopool.POOL_FILE)
+        real = os.path.realpath(pool[name]["location"])
+        if delete_files and pool[name]["sync_type"] and deletable(real) and os.path.isdir(real):
+            import shutil
+            shutil.rmtree(real)
+            removed.append(real)
+        return removed
     try:
         target = targets.get(target_name)
     except KeyError:

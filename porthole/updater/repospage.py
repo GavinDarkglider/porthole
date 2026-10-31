@@ -2,9 +2,15 @@
     Porthole: Settings > Repositories
 
     The repositories this computer uses, how many installed packages came
-    from each, and adding (from Gentoo's list, or by address), removing and
-    syncing them. Changes are made as root by porthole-update-service
-    (`repo add|remove|sync`), which checks them.
+    from each, and adding (from Gentoo's list, by address, or a folder
+    already here), removing and syncing them. Changes are made as root by
+    porthole-update-service (`repo add|remove|sync|use|drop`), which
+    checks them.
+
+    Once there are systems for other computers, "Repositories of" switches
+    to one of them: it uses this computer's repositories or ones from
+    Porthole's list for other systems only (repopool.py), which this
+    computer never uses.
 
     Copyright (C) 2026 Porthole developers
 
@@ -54,25 +60,42 @@ class RepositoriesPage(Gtk.Box):
     def __init__(self, on_changed=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=12)
         self.on_changed = on_changed
+        self.target = None  # None: this computer, else a system's name
         self.pack_start(_small(
             "Where packages come from. Gentoo's own repository comes first; the others "
             "add packages (or newer versions). Changing these asks for administrator "
             "rights."), False, False, 0)
-        # name, syncs with, installed, defined in, is main
-        self.store = Gtk.ListStore(str, str, str, str, bool)
+        self.target_row = Gtk.Box(spacing=8, no_show_all=True)
+        self.target_row.pack_start(Gtk.Label(label="Repositories of:"), False, False, 0)
+        self.target_combo = Gtk.ComboBoxText()
+        self.target_combo.connect("changed", self.target_changed)
+        self.target_row.pack_start(self.target_combo, False, False, 0)
+        self.target_note = _small("")
+        self.target_row.pack_start(self.target_note, True, True, 0)
+        self.pack_start(self.target_row, False, False, 0)
+        # name, syncs with, installed / where, defined in, is main, used, can untick
+        self.store = Gtk.ListStore(str, str, str, str, bool, bool, bool)
         self.view = Gtk.TreeView(model=self.store)
+        toggle = Gtk.CellRendererToggle()
+        toggle.connect("toggled", self.use_toggled)
+        self.use_column = Gtk.TreeViewColumn("Use", toggle, active=5, activatable=6)
+        self.view.append_column(self.use_column)
+        self.columns = []
         for i, title in enumerate(("Repository", "Syncs with", "Installed from it",
                                    "Defined in")):
             column = Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i)
             column.set_resizable(True)
             self.view.append_column(column)
+            self.columns.append(column)
         scroller = Gtk.ScrolledWindow(vexpand=True)
         scroller.add(self.view)
         self.pack_start(scroller, True, True, 0)
         buttons = Gtk.Box(spacing=6)
         for name, label, callback in (("list", "Add from Gentoo's list...", self.add_from_list),
                                       ("address", "Add by address...", self.add_by_address),
+                                      ("folder", "Add a folder...", self.add_folder),
                                       ("remove", "Remove...", self.remove),
+                                      ("move", "For other systems only...", self.move),
                                       ("sync", "Sync now", self.sync)):
             button = Gtk.Button(label=label)
             button.connect("clicked", lambda b, c=callback: c())
@@ -83,14 +106,94 @@ class RepositoriesPage(Gtk.Box):
         self.repos = []
         self.refresh()
 
-    def refresh(self):
-        self.repos = system.repositories()
+    def systems(self):
+        """{name: Target} of the other systems"""
+        from porthole.updater import targets
+        return {n: t for n, t in targets.load().items() if not t.local}
+
+    def fill_targets(self):
+        systems = self.systems()
+        self.target_combo.handler_block_by_func(self.target_changed)
+        self.target_combo.remove_all()
+        self.target_combo.append("", "This computer")
+        for name, target in sorted(systems.items()):
+            self.target_combo.append(name, target.title)
+        if self.target not in systems:
+            self.target = None
+        self.target_combo.set_active_id(self.target or "")
+        self.target_combo.handler_unblock_by_func(self.target_changed)
+        if systems:
+            for child in self.target_row.get_children():
+                child.show()
+        self.target_row.set_visible(bool(systems))
+
+    def target_changed(self, combo):
+        self.target = combo.get_active_id() or None
+        self.refresh(targets_too=False)
+
+    def where(self):
+        """Service arguments saying whose repository an addition is"""
+        return ["--target", self.target] if self.target else []
+
+    def refresh(self, targets_too=True):
+        if targets_too:
+            self.fill_targets()
         self.store.clear()
-        for r in self.repos:
-            syncs = ("%s %s" % (r["sync_type"], r["sync_uri"])).strip() or "(not synced)"
-            self.store.append([r["name"], syncs, str(r["installed"]),
-                               r["file"] or "(portage's default)", r["main"]])
+        local = self.target is None
+        self.use_column.set_visible(not local)
+        self.columns[2].set_title("Installed from it" if local else "On this computer")
+        self.columns[3].set_visible(local)
+        if local:
+            self.target_note.set_markup("")
+            self.repos = system.repositories()
+            for r in self.repos:
+                syncs = ("%s %s" % (r["sync_type"], r["sync_uri"])).strip() or "(not synced)"
+                if r.get("missing"):
+                    syncs += " (not downloaded yet)" if r["sync_type"] else " (folder missing)"
+                self.store.append([r["name"], syncs, str(r["installed"]),
+                                   r["file"] or "(portage's default)", r["main"], True, False])
+        else:
+            self.repos = self.system_repos(self.target)
+            self.target_note.set_markup(
+                "<small>Tick what it uses. Repositories added here are only for the "
+                "other systems: this computer doesn't use them.</small>")
+            for r in self.repos:
+                syncs = ("%s %s" % (r["sync_type"], r["sync_uri"])).strip() or "(not synced)"
+                self.store.append([r["name"], syncs, r["where"], "", r["main"], r["used"],
+                                   not r["main"]])
         self.selected()
+
+    def system_repos(self, name):
+        """What a system can use, as rows like system.repositories()'s"""
+        from porthole.updater import repopool
+        from porthole.updater.runner import roots_repos
+        target = self.systems()[name]
+        used = set(repopool.target_repos(target.portage_dir))
+        pool = repopool.repos()
+        mine = {r["name"]: r for r in system.repositories()}
+        rows = []
+        for repo, location in sorted(roots_repos().items(),
+                                     key=lambda kv: (kv[0] != "gentoo", kv[0])):
+            info = pool.get(repo) or mine.get(repo) or {}
+            rows.append({"name": repo, "location": location, "main": repo == "gentoo",
+                         "used": repo in used or repo == "gentoo", "pool": repo in pool,
+                         "sync_type": info.get("sync_type", ""),
+                         "sync_uri": info.get("sync_uri", ""), "file": None,
+                         "where": "for other systems only" if repo in pool else
+                         "this computer's"})
+        return rows
+
+    def use_toggled(self, renderer, path):
+        row = self.store[path]
+        name, used = row[0], row[5]
+        target = self.target
+
+        def done(ok, output):
+            if not ok:
+                _error(self.get_toplevel(), "That wasn't changed", output or "Cancelled.")
+            self.refresh()
+        run_as_root(service("repo", "drop" if used else "use", name, "--target", target),
+                    done)
 
     def chosen(self):
         model, row = self.view.get_selection().get_selected()
@@ -99,7 +202,11 @@ class RepositoriesPage(Gtk.Box):
 
     def selected(self, *args):
         repo = self.chosen()
-        self.button_remove.set_sensitive(bool(repo) and not repo["main"])
+        # a system's: only the list's repositories are removed from here
+        self.button_remove.set_sensitive(bool(repo) and not repo["main"] and (
+            self.target is None or repo.get("pool", False)))
+        self.button_move.set_visible(self.target is None)
+        self.button_move.set_sensitive(bool(repo) and not repo["main"] and bool(repo["file"]))
         self.button_sync.set_sensitive(bool(repo) and bool(repo["sync_type"]))
 
     def changed(self):
@@ -110,24 +217,62 @@ class RepositoriesPage(Gtk.Box):
     # -- adding --
 
     def add_from_list(self):
-        AddFromListDialog(self.get_toplevel(), {r["name"] for r in self.repos}, self.added)
+        AddFromListDialog(self.get_toplevel(), {r["name"] for r in self.repos}, self.added,
+                          self.where())
 
     def add_by_address(self):
-        AddByAddressDialog(self.get_toplevel(), {r["name"] for r in self.repos}, self.added)
+        AddByAddressDialog(self.get_toplevel(), {r["name"] for r in self.repos}, self.added,
+                           self.where())
+
+    def add_folder(self):
+        AddFolderDialog(self.get_toplevel(), {r["name"] for r in self.repos}, self.added,
+                        self.where())
 
     def added(self, ok, output):
         if not ok:
             _error(self.get_toplevel(), "The repository wasn't added", output or "Cancelled.")
             return
-        _follow(output)  # its first sync
+        if (output or "").split()[-1:] != ["added"]:
+            _follow(output)  # its first sync
         self.changed()
 
     # -- removing --
 
     def remove(self):
         repo = self.chosen()
-        if repo:
+        if repo and repo.get("pool"):
+            RemoveFromListDialog(self.get_toplevel(), repo, self.changed)
+        elif repo:
             RemoveDialog(self.get_toplevel(), repo, self.changed)
+
+    def move(self):
+        repo = self.chosen()
+        if not repo:
+            return
+        dialog = Gtk.MessageDialog(
+            transient_for=self.get_toplevel(), modal=True,
+            message_type=Gtk.MessageType.QUESTION, buttons=Gtk.ButtonsType.NONE,
+            text="Use %s only for other systems?" % repo["name"])
+        dialog.format_secondary_text(
+            "This computer stops using it (%s is deleted); it goes on Porthole's list for "
+            "the systems you build for other computers, where you tick which use it. Its "
+            "files stay in %s.%s" % (
+                repo["file"], repo["location"],
+                "\n\n%d installed package%s came from it; they get no more updates from it."
+                % (repo["installed"], "" if repo["installed"] == 1 else "s")
+                if repo["installed"] else ""))
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Move it", Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+
+        def done(ok, output):
+            if not ok:
+                _error(self.get_toplevel(), "%s wasn't moved" % repo["name"],
+                       output or "Cancelled.")
+            self.changed()
+        run_as_root(service("repo", "move", repo["name"], "--systems"), done)
 
     def sync(self):
         repo = self.chosen()
@@ -146,9 +291,9 @@ class RepositoriesPage(Gtk.Box):
 class AddFromListDialog(Gtk.Dialog):
     """Gentoo's list of repositories (as eselect repository offers them)"""
 
-    def __init__(self, parent, existing, on_done):
+    def __init__(self, parent, existing, on_done, where=()):
         super().__init__(title="Porthole: add a repository", transient_for=parent, modal=True)
-        self.existing, self.on_done = existing, on_done
+        self.existing, self.on_done, self.where = existing, on_done, list(where)
         self.set_default_size(720, 520)
         area = self.get_content_area()
         area.set_border_width(12)
@@ -246,14 +391,14 @@ class AddFromListDialog(Gtk.Dialog):
         def done(ok, output):
             self.destroy()
             self.on_done(ok, output)
-        run_as_root(service("repo", "add", repo["name"], "--sync-type", kind, "--uri", url),
-                    done)
+        run_as_root(service("repo", "add", repo["name"], "--sync-type", kind, "--uri", url,
+                            *self.where), done)
 
 
 class AddByAddressDialog(Gtk.Dialog):
-    def __init__(self, parent, existing, on_done):
+    def __init__(self, parent, existing, on_done, where=()):
         super().__init__(title="Porthole: add a repository", transient_for=parent, modal=True)
-        self.existing, self.on_done = existing, on_done
+        self.existing, self.on_done, self.where = existing, on_done, list(where)
         area = self.get_content_area()
         area.set_border_width(12)
         area.set_spacing(8)
@@ -304,7 +449,121 @@ class AddByAddressDialog(Gtk.Dialog):
             self.destroy()
             self.on_done(ok, output)
         run_as_root(service("repo", "add", name, "--sync-type", self.kind.get_active_id(),
-                            "--uri", uri), done)
+                            "--uri", uri, *self.where), done)
+
+
+class AddFolderDialog(Gtk.Dialog):
+    """A repository already on this computer (the user's own checkout):
+    used where it is, never synced or deleted by Porthole"""
+
+    def __init__(self, parent, existing, on_done, where=()):
+        super().__init__(title="Porthole: add a folder", transient_for=parent, modal=True)
+        self.existing, self.on_done, self.where = existing, on_done, list(where)
+        area = self.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+        area.pack_start(_small(
+            "A repository you keep yourself, like your own checkout of an overlay you "
+            "work on. Porthole uses it where it is and never syncs or deletes it. Its "
+            "packages are built as root: keep it where only you can change it."),
+            False, False, 0)
+        grid = Gtk.Grid(row_spacing=6, column_spacing=8)
+        self.folder = Gtk.FileChooserButton(title="The repository's folder",
+                                            action=Gtk.FileChooserAction.SELECT_FOLDER,
+                                            hexpand=True)
+        self.folder.connect("file-set", self.folder_set)
+        self.name = Gtk.Entry(placeholder_text="from its profiles/repo_name", hexpand=True)
+        for row, (label, widget) in enumerate((("Folder", self.folder), ("Name", self.name))):
+            grid.attach(Gtk.Label(label=label, xalign=0), 0, row, 1, 1)
+            grid.attach(widget, 1, row, 1, 1)
+        area.pack_start(grid, False, False, 0)
+        self.note = _small("")
+        area.pack_start(self.note, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Add", Gtk.ResponseType.OK)
+        self.connect("response", self.on_response)
+        self.show_all()
+
+    def folder_set(self, button):
+        import os
+        path = button.get_filename() or ""
+        try:
+            with open(os.path.join(path, "profiles", "repo_name")) as f:
+                self.name.set_text(f.read().strip())
+            self.note.set_markup("")
+        except OSError:
+            self.note.set_markup("<small>No profiles/repo_name there: is it a "
+                                 "repository?</small>")
+
+    def on_response(self, dialog, response):
+        if response != Gtk.ResponseType.OK:
+            self.destroy()
+            return
+        name, path = self.name.get_text().strip(), self.folder.get_filename() or ""
+        problem = None
+        if not path:
+            problem = "Choose the folder."
+        elif not system._REPO_NAME.match(name):
+            problem = "The name may use letters, digits, - and _."
+        elif name in self.existing:
+            problem = "There already is a repository called %s." % name
+        if problem:
+            self.note.set_markup("<small><b>%s</b></small>" % GLib.markup_escape_text(problem))
+            return
+        self.set_sensitive(False)
+
+        def done(ok, output):
+            self.destroy()
+            self.on_done(ok, output)
+        run_as_root(service("repo", "add", name, "--folder", path, *self.where), done)
+
+
+class RemoveFromListDialog(Gtk.Dialog):
+    """Removing one of the repositories for other systems: every system
+    stops using it"""
+
+    def __init__(self, parent, repo, on_done):
+        super().__init__(title="Porthole: remove %s" % repo["name"], transient_for=parent,
+                         modal=True)
+        from porthole.updater import repopool, targets
+        from porthole.updater.runner import deletable
+        self.repo, self.on_done = repo, on_done
+        area = self.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+        users = [t.title for t in targets.load().values()
+                 if not t.local and repo["name"] in repopool.target_repos(t.portage_dir)]
+        area.pack_start(_small(
+            ("Used by %s, which stop using it." % ", ".join(users)) if users else
+            "No system uses it."), False, False, 0)
+        self.delete_files = Gtk.CheckButton(label="Also delete its files (%s)" % repo["location"])
+        if repo["sync_type"] and deletable(repo["location"]):
+            self.delete_files.set_active(True)
+            area.pack_start(self.delete_files, False, False, 0)
+        else:
+            area.pack_start(_small("Its files (%s) are kept." % repo["location"]),
+                            False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Remove", Gtk.ResponseType.OK)
+        self.connect("response", self.on_response)
+        self.show_all()
+
+    def on_response(self, dialog, response):
+        if response != Gtk.ResponseType.OK:
+            self.destroy()
+            return
+        self.set_sensitive(False)
+        args = ["repo", "remove", self.repo["name"], "--systems"] + (
+            ["--delete-files"] if self.delete_files.get_active() else [])
+
+        def removed(ok, output):
+            if not ok:
+                self.set_sensitive(True)
+                _error(self, "%s wasn't removed" % self.repo["name"], output or "Cancelled.")
+                return
+            self.destroy()
+            self.on_done()
+        run_as_root(service(*args), removed)
 
 
 class RemoveDialog(Gtk.Dialog):

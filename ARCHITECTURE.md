@@ -24,6 +24,7 @@ settings window covers the system's Portage setup without rewriting
 | Front end (GTK) | `porthole/` (main window, views, dialogs), `porthole/updater/review.py` (plan review), `settings.py`, `repospage.py`, `binpkgpage.py` | user |
 | Resolver | `porthole/updater/analyze.py` (plans), `resolve.py` (Portage depgraph worker), `autopilot.py` (decisions for fully automatic updates) | user, and root to re-check |
 | Runner | `porthole/updater/runner.py` (jobs, one at a time, in a pty), `window.py` (build window, pausing), `ondemand.py` (services a job needs only while it runs: its own distccd on 127.0.0.1, qemu-binfmt) | root |
+| Repositories for other systems | `porthole/updater/repopool.py`: Porthole's own list (`/etc/porthole/repos.conf`) of repositories only the systems built for other computers use, synced with emaint given only that list (`PORTAGE_REPOSITORIES`); this computer's repos.conf never sees them | root |
 | Tray applet | `porthole/updater/notifier.py`, `scripts/porthole-update-notifier` | user |
 
 They meet in `porthole/updater/service.py` (`scripts/porthole-update-service`):

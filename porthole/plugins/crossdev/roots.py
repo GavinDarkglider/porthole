@@ -30,7 +30,6 @@ from porthole.updater import targets
 
 ROOTS_DIR = checks.ROOTS_DIR
 BINPKGS_DIR = "/var/cache/porthole/binpkgs"
-DEFAULT_REPOS = "/usr/share/portage/config/repos.conf"
 GENTOO_KEY = "/usr/share/openpgp-keys/gentoo-release.asc"
 MADE_BY = "crossdev"
 
@@ -44,20 +43,11 @@ def _paths(roots_dir=None, targets_file=None, binpkgs_dir=None):
             binpkgs_dir or BINPKGS_DIR)
 
 
-def host_repos(portage_dir="/etc/portage", defaults=DEFAULT_REPOS):
-    """{name: location} of this computer's repositories, read afresh:
-    repos.conf, and gentoo from portage's defaults if repos.conf doesn't
-    define it"""
-    found = checks.repos(portage_dir)
-    if "gentoo" not in found:
-        parser = configparser.ConfigParser(interpolation=None)
-        try:
-            parser.read(defaults)
-            found["gentoo"] = parser.get("gentoo", "location").strip()
-        except configparser.Error:
-            pass
-    return {name: location.rstrip("/") or "/" for name, location in found.items()
-            if location}
+def host_repos():
+    """{name: location} a system may use, read afresh: this computer's
+    repositories and the ones for other systems only"""
+    from porthole.updater.runner import roots_repos
+    return roots_repos()
 
 
 def host_arch():
@@ -133,6 +123,8 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
     roots_dir, targets_file, binpkgs_dir = _paths(roots_dir, targets_file, binpkgs_dir)
     gentoo_key = gentoo_key or GENTOO_KEY
     title = " ".join((title or "").split())[:80] or name
+    if name == "systems":
+        raise RootError("\"systems\" is taken (Porthole's list of their repositories)")
     if not targets._NAME.match(name or "") or name == targets.LOCAL:
         raise RootError("A name is lower case letters, digits, - and _ (up to 41), "
                         "starting with a letter or digit")
@@ -164,12 +156,8 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
         for r in wanted:
             os.makedirs(os.path.join(root, repos[r].lstrip("/")), mode=0o755, exist_ok=True)
         portage_dir = os.path.join(root, "etc", "portage")
-        os.makedirs(os.path.join(portage_dir, "repos.conf"), mode=0o755)
-        with open(os.path.join(portage_dir, "repos.conf", "porthole.conf"), "w") as f:
-            f.write("# Made by Porthole: this computer's repositories, at the same paths "
-                    "(synced there,\n# not here). Ticked in Porthole for %s.\n" % title)
-            for r in wanted:
-                f.write("\n[%s]\nlocation = %s\nauto-sync = no\n" % (r, repos[r]))
+        from porthole.updater import repopool
+        repopool.write_target_repos(portage_dir, {r: repos[r] for r in wanted}, title)
         os.symlink(profile_dir, os.path.join(portage_dir, "make.profile"))
         with open(os.path.join(portage_dir, "make.conf"), "w") as f:
             f.write(
