@@ -1,58 +1,47 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Finding packages</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
 <body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="mainwindow.html">The main window</a></nav>
 
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
+<h1>Finding packages</h1>
 
-<br>
+<h2>Searching</h2>
+<p>Type part of a package's name in the search box and press Enter. The view
+switches to <b>Search Results</b>: every package whose name contains what you
+typed, in any category. Case doesn't matter. Each search is kept in the list
+on the left while Porthole runs, so you can go back to earlier ones.</p>
+<p>Tick <b>Descriptions</b> next to the search box to search the package
+descriptions too (to find "a PDF viewer" without knowing its name). The
+first such search reads every description, which takes a little while;
+later ones are quick.</p>
+<div class="note">The search term is a pattern: <code>^vim</code> finds names
+starting with vim, <code>office|writer</code> either word. A <code>+</code>
+is taken as itself, so <code>gtk+</code> works as you would expect.</div>
 
-<br>
+<h2>Browsing</h2>
+<p>In <b>All Packages</b> or <b>Installed Packages</b>, choose a category on
+the left to list its packages. Typing while a list has the focus jumps to the
+first entry starting with what you type. Click a column heading to sort by
+it.</p>
 
-<br>
+<h2>What the columns mean</h2>
+<ul>
+  <li><b>Installed</b>: the version on this computer, if any.</li>
+  <li><b>Recommended</b>: the version Portage would install. In brackets:
+    no version can be installed as your settings stand (usually the package
+    is only in testing), so this is the newest one; <i>masked</i>: every
+    version is masked. In <b>Updates Available</b>, the version the update
+    plan installs, in brackets if it is held back.</li>
+  <li><b>Download Size</b>: what installing it would download.</li>
+</ul>
+<p>Which columns show is set in <a href="customize.html#porthole">Settings,
+Porthole, Package list</a>.</p>
 
-<br>
-
-<h1>Find a Package</h1>
-
-<h2>Category Navigation</h2>
-<p>If you know what category the package will be listed under, you can
-select it from the category list, then manually find the package. If
-you start typing while a package or category is selected Porthole will
-quickly skip to the package or category name you seem to be typing.
-Also note that you can click on the headers of the columns in the
-package list to sort the list by that column.</p>
-<h2>Searches</h2>
-<p>To search for a package, enter the name, or part of the name, into
-the search bar, then either press&nbsp;Enter or click on the "Find"
-button to the right of the search bar.</p>
-<p>All packages with the search term in their name will be displayed,
-and if the search term corresponds exactly to a package name, that
-package will be selected. A list of previous searches will replace the
-category list, so you can go back and review the results.</p>
-<p>If you want to search the package descriptions as well as the names,
-select "Search Descriptions" under the "Settings" menu. The first
-search after enabling this may take some time, while Porthole completes updating a
-database of all the descriptions after a sync.</p>
-
-<p>
-
-
-</p>
-<hr>
-<a name="notes">Notes:</a>
-<br>
-
-
-
+<p class="next">Next: <a href="install.html">Installing packages</a></p>
 </body>
 </html>

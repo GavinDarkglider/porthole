@@ -1,211 +1,92 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-  
-  
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>About Porthole</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
-
 <body>
-
-
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
-
-
-<br>
-
-<br>
-
-<br>
-
-<br>
-
+<nav class="pages"><a href="toc.html">Contents</a></nav>
 
 <h1>About Porthole</h1>
 
+<p>Porthole is a graphical front end for Portage, Gentoo's package manager.
+You can browse and search every package, see what is installed and why, and
+install, update and remove software without typing emerge commands. It also
+looks after keeping the computer up to date: it checks for updates on a
+schedule, works out the problems Gentoo updates often run into (settings to
+change, packages blocking each other, rebuilds) before anything is built, and
+shows you a plan to approve.</p>
 
-<h2>What is Porthole</h2>
-
-
-<p>
-Porthole is a GTK-based frontend for Portage (the Gentoo package
-management system, <a target="_blank" href="http://www.gentoo.org/">http://www.gentoo.org</a>).
- &nbsp;It features a hierarchical view of packages and supports
- fast searches and dependency calculations.
- &nbsp;Porthole also supports basic emerge features such as emerge,
-unmerge, and keeping your whole system up to date.
- &nbsp;Porthole is written in Python.
-</p>
-
-
-<h2>License</h2>
-
-
-<p>
-Porthole is released under the GNU General Public License
-(GPL) version 2, see <a target="_blank" href="../COPYING">
-COPYING</a> for details.
-</p>
-
-
-<h2>History</h2>
-
-
-<p>
-Porthole is partially based on an earlier program, called gportage
-(<a target="_blank" href="http://www.stacken.kth.se/%7Efoo/gentoo/">
-http://www.stacken.kth.se/~foo/gentoo/</a>), 
-which has been discontinued
-in favour of Porthole.
-</p>
-
-
-<p>
-For a detailed history of changes, please see <a target="_blank" href="../NEWS">
-NEWS</a>.
-</p>
-
-
-<h2>How to Install Porthole</h2>
-
-
-<p>
-The easiest and recommended way of installing Porthole is by using the
-ebuild that is available from the webpage.
- &nbsp;We assume you know how to
-put ebuilds in the portage overlay.
- &nbsp;If not, please consult the
-documentation and forums on the Gentoo web site (http://www.gentoo.org), or follow the instructions on <a href="http://gentoo-wiki.com/HOWTO_Installing_3rd_Party_Ebuilds">this gentoo-wiki page</a>.
-</p>
-
-
-<p>
-If you don't want to use the ebuild, you can download the tarball
-(porthole-x.x.x.tar.bz2) and install it yourself.
- &nbsp;The following packages must be installed for Porthole to work:
-</p>
-
-
+<h2>What Porthole does for you</h2>
 <ul>
-
-  <li>&gt;=python-2.5
-  </li>
-
-  <li>&gt;=PyGTK-2.4
-  </li>
-
-  <li>&gt;=libglade-2.5.0
-  </li>
-
-	<li>&gt;=sys-devel/gettext-0.14
-	</li>
-
-	<li>&gt;=pygtksourceview-2.4.0
-	</li>
-  <li>and, of course, Portage
-  </li>
-
+  <li><b>Browsing and searching</b>: all packages by category, what is
+    installed, what has updates, package sets, and a search over names and
+    descriptions. See <a href="mainwindow.html">The main window</a>.</li>
+  <li><b>Installing with a plan</b>: packages you choose go into a queue;
+    Porthole works out everything they need together, checks it, and shows
+    you the plan before installing. See <a href="install.html">Installing
+    packages</a>.</li>
+  <li><b>Updates that are worked out first</b>: the setting changes an update
+    needs are proposed and checked with Portage before you see them; what
+    can't be updated yet is explained, with your options. See
+    <a href="update.html">Updates</a>.</li>
+  <li><b>Building when it suits you</b>: approved updates can wait for a
+    time nobody is using the computer, pause if someone comes back, and run
+    by themselves if you choose. See <a href="automation.html">How updates
+    run</a>.</li>
+  <li><b>Settings in plain words</b>: USE flags by what they do, licences,
+    the profile, repositories and binary packages, each change previewed
+    before it is made. Porthole never rewrites your <code>make.conf</code>.
+    See <a href="customize.html">Settings</a>.</li>
 </ul>
 
+<h2>How Porthole is put together</h2>
+<p>Porthole is four parts that work together:</p>
+<table>
+  <tr><th>Part</th><th>What it does</th><th>Runs as</th></tr>
+  <tr><td><b>Porthole</b> (this window)</td>
+      <td>Browsing, searching, choosing, reviewing plans, settings.</td>
+      <td>you</td></tr>
+  <tr><td><b>The resolver</b></td>
+      <td>Works out plans: what to build, which setting changes are needed,
+        what is held back and why. Every change it proposes is checked with
+        Portage before it is shown.</td>
+      <td>you (and root, to check a plan again before carrying it out)</td></tr>
+  <tr><td><b>The runner</b></td>
+      <td>Carries out every change: installs, updates, removals, syncs. Jobs
+        keep running when you close Porthole; the
+        <a href="termwindow.html">job window</a> follows them.</td>
+      <td>root</td></tr>
+  <tr><td><b>The tray icon</b></td>
+      <td>Tells you when updates are waiting, shows how a job is going, and
+        reminds you when updates have waited a while.</td>
+      <td>you</td></tr>
+</table>
+<p>Looking needs no password. Only changing something does: the change is
+handed to the runner through <code>porthole-update-service</code>, which
+checks what it is asked to do before doing it. You can
+<a href="unlock.html">unlock Porthole</a> for a while, so that you type the
+password once instead of for every change.</p>
 
-<p>
-Use the following commands to install Porthole:
-</p>
-
-
-<pre>&gt; tar xvjf porthole-0.6.1.tar.bz2<br>&gt; cd porthole-0.6.1<br>&gt; python setup.py install</pre>
-
-
-<h2>How to Run Porthole</h2>
-
-
-<p>
-From a terminal window enter:
-</p>
-
-
-<pre>&gt; porthole</pre>
-
-
-<p>
-Porthole has three possible command line flags:
-</p>
-
-
+<h2>Where to start</h2>
 <ul>
-
-  <li>-d, --debug (followed by a string will generate extra diagnostic info)
-  eg: "-d ALL" will output all debug text, "-d terminal" will output all text lines that contain "terminal"
-  </li>
-
-  <li>-l, --local (used for a non-emerged copy of Porthole) i.e.  &gt; ./porthole -l
-  </li>
-
-  <li>-h, --help (display the command line options
-  </li>
-
+  <li>The first time Porthole starts, it asks how updates should run. If you
+    aren't sure, choose <i>Tell me, I start updates myself</i>; you can change
+    it later in <a href="customize.html#updates">Settings, Updates</a>.</li>
+  <li>To install something, search for it, select it and press
+    <b>Emerge</b>: <a href="install.html">Installing packages</a>.</li>
+  <li>To update, press <b>Updates</b> on the toolbar:
+    <a href="update.html">Updates</a>.</li>
 </ul>
 
+<h2>About this project</h2>
+<p>Porthole was started in 2003 and has been maintained by many people since;
+see <i>Help, About</i> for who they are. It is free software under the GNU
+General Public License, version 2 or later. Gentoo itself is at
+<a href="https://www.gentoo.org/">www.gentoo.org</a>; its handbook and wiki
+explain Portage in depth.</p>
 
-<p>
-For Gnome users, Porthole will install a menu item under 
-Applications -&gt; System Tools.
-
-</p>
-
-
-<div class="tipright"> 
-<b>Tip!</b> If you run into a problem, try running
- porthole --debug from a terminal.
-</div>
-
-
-<h2>Problem Reporting</h2>
-
-
-<p>
-We absolutely love bug reports!   &nbsp;Please use the bugtracker at
-SourceForge: <a target="_blank" href="http://sourceforge.net/projects/porthole/">
-http://sourceforge.net/projects/porthole/</a>.
-</p>
-
-
-<h2>Contact Information</h2>
-
-
-<ul>
-
-  <li>Webpage: <a href="http://porthole.sourceforge.net">http://porthole.sourceforge.net</a>
-  </li>
-	<li>IRC: channel - #porthole on the  <a href="http://freenode.net/irc_servers.shtml" >Freenode network</a><br>
-      click to open a webchat browser page to <a href="http://webchat.freenode.net/?channels=porthole" target="new" >#porthole</a>
-	</li>
-  <li>Project Admins:
-    
-    <ul>
-      <li>Brian Dolbec - <a href="mailto:dol-sen@users.sourceforge.net">dol-sen@users.sourceforge.net</a>
-      </li>
-
-      <li>Fredrik Arnerup - <a href="mailto:farnerup@users.sourceforge.net">farnerup@users.sourceforge.net</a> (inactive)
-
-      </li>
-  
-    </ul>
-
-  </li>
-
-</ul>
-
-
-<hr>
-Notes:
-
-
+<p class="next">Next: <a href="mainwindow.html">The main window</a></p>
 </body>
 </html>

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>How updates run</title>
+<link rel="stylesheet" href="porthole.css">
+</head>
+<body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="update.html">Updates</a></nav>
+
+<h1>How updates run</h1>
+
+<p>Building updates can take hours on Gentoo. Porthole lets you decide how
+much it does by itself and when building may happen, so a long build never
+starts while you are working. The first time Porthole starts it asks; you can
+change it any time in <a href="customize.html#updates">Settings, Updates</a>.
+These settings are for the whole computer, so changing them asks for the
+administrator password.</p>
+
+<figure>
+  <img src="automation.png" alt="The question Porthole asks on first start: four ways updates can run, and the build window">
+  <figcaption>How should Porthole keep this computer up to date?</figcaption>
+</figure>
+
+<h2>The four ways</h2>
+<dl>
+  <dt><b>Tell me, I start updates myself</b></dt>
+  <dd>Porthole checks for updates on its schedule and the tray tells you.
+    Nothing is built until you press <i>Apply and start update</i>.</dd>
+  <dt><b>I approve updates, they are built in the build window</b></dt>
+  <dd>You review and approve each update; it is then built at a time nobody
+    is working. You can still start one straight away.</dd>
+  <dt><b>Updates with nothing to decide are built in the build window by themselves</b></dt>
+  <dd>If a check finds an update that needs no decision (no setting to
+    change, nothing to approve), it is queued for the build window without
+    asking. Anything that needs a decision waits for you. An update that
+    failed isn't queued again by itself.</dd>
+  <dt><b>Fully automatic</b></dt>
+  <dd>Porthole makes the safe decisions itself and queues the update for the
+    build window. It accepts only changes it has checked, and never on its
+    own: accepting a licence, unmasking, switching the compiler, removing or
+    replacing software, or removing packages nothing needs. What needs those
+    is held back and left for you. Testing versions are accepted only if you
+    tick <i>Allow testing versions</i> under this choice.</dd>
+</dl>
+
+<h2>News about each automatic update</h2>
+<p>With fully automatic updates, every update run gets one item in
+<a href="news.html">News</a>: what was updated, every change Porthole made
+and why, how to undo each one, and what it left for you and why. When the
+build ends, its result (finished, failed or stopped) is added to the same
+item, which is marked unread again. If a check finds nothing it can build on
+its own, it says so once, not at every check.</p>
+
+<h2>The build window</h2>
+<p>The build window is a time range, such as 01:00 to 06:00 (it may run past
+midnight). An approved update waiting for it starts when all of these are
+true:</p>
+<ul>
+  <li>the window is open,</li>
+  <li>the computer is on mains power (if <i>Only on mains power</i> is
+    ticked),</li>
+  <li>nobody has used the keyboard or mouse for the time you set (15 minutes
+    to begin with).</li>
+</ul>
+<p>Anything you start straight away still runs straight away, even while
+another update waits for the window. The tray shows a waiting update and
+why it is waiting.</p>
+
+<h3>When someone comes back</h3>
+<p>If <i>Pause the build while someone uses the computer</i> is ticked, a
+build that started in the window is paused as soon as the keyboard or mouse
+is used, and carries on once nobody has used them for the same time. Nothing
+is lost; the build just stops using the processor meanwhile.</p>
+<p>Watching the build counts as using the computer. To let it run while you
+are there, choose <b>Keep building</b>: in the bar at the top of the job
+window, or in the tray menu. That build then isn't paused again.</p>
+<div class="note">The tray icon is what tells Porthole whether the computer
+is in use. If it isn't running, the time window alone decides.</div>
+
+<h3>Low priority</h3>
+<p><i>Build at low priority</i> runs builds at the lowest processor and disk
+priority, so everything else you do stays responsive. It also applies to
+updates you start yourself.</p>
+
+<h2>Reminders</h2>
+<p>If updates have waited three days without being started, the tray reminds
+you, and every three days after that, more firmly the longer they wait: the
+longer updates wait, the more likely they need fixing by hand.
+<i>Remind me next week</i> on the reminder puts the next one off a week.
+Reminders stop while an update is queued or running. Each person can turn
+them off in <a href="customize.html#updates">Settings, Updates,
+Reminders</a> (no password needed).</p>
+
+<p class="next">Next: <a href="sync.html">Syncing</a></p>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>News</title>
+<link rel="stylesheet" href="porthole.css">
+</head>
+<body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="sync.html">Syncing</a></nav>
+
+<h1>News</h1>
+
+<p>Gentoo publishes news items about changes that need you to do something:
+a profile to switch, a configuration file that moved, a package being
+replaced. Portage shows the ones that apply to this computer. Porthole shows
+them in its News window, along with its own reports about automatic
+updates.</p>
+
+<figure>
+  <img src="news.png" alt="The News window: the list of items, newest first, and the text of the selected one">
+  <figcaption>The News window.</figcaption>
+</figure>
+
+<p>Open it from <i>Porthole, News…</i> or <b>Read news</b> in
+<a href="update.html">Updates</a>, which also shows how many items are unread.
+Unread items are in bold. Select one to read it.</p>
+<p><b>Mark read</b>, <b>Mark unread</b> and <b>Mark all read</b> change
+Portage's record of what you have read, which belongs to the system, so they
+ask for the administrator password (unless Porthole is
+<a href="unlock.html">unlocked</a>).</p>
+
+<div class="note">Read the news before large updates. When Gentoo needs you to
+do something by hand, the news is where it says so, and the update may fail
+or misbehave until you do.</div>
+
+<h2>Porthole's own items</h2>
+<p>With fully automatic updates, Porthole writes one item for each update it
+runs by itself: what it updated, the changes it made and why, how to undo
+them, and what it left for you. See <a href="automation.html">How updates
+run</a>. These come from <i>Porthole</i> rather than from a repository, and
+are kept in <code>/var/lib/porthole/news</code> (the last fifty).</p>
+
+<p class="next">Next: <a href="termwindow.html">The job window and job logs</a></p>
+</body>
+</html>

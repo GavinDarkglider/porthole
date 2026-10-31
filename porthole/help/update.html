@@ -1,104 +1,111 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Updates</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
 <body>
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
-<br><br><br><br>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="unmerge.html">Removing packages</a></nav>
 
-<h1>Update Packages</h1>
+<h1>Updates</h1>
 
-<h2>How updates work</h2>
-<p>Porthole keeps your system up to date in the background. Every few days
-(seven by default) it syncs the package tree and, if you ask it to, checks
-what an update of your whole system (<b>@world</b>, which includes the
-system set and your profile's packages) would do. The check is made the
-way emerge itself would make it, so slots, dependency pins and
-everything your installed packages pull in are taken into account.</p>
+<p>Gentoo updates often need more than "update everything": a USE flag
+changed on a dependency, a testing version accepted, packages that block each
+other, programs rebuilt because a library they use changed. Porthole's update
+assistant works these out before anything is built, checks every change it
+proposes with Portage, and shows you the plan.</p>
+<p>Open it with the <b>Updates</b> button, <i>Porthole, Update Assistant</i>,
+or the tray icon. The plan comes from the last check: the scheduled one
+(see <a href="sync.html">Syncing</a>), or one you start with <b>Check
+now</b>.</p>
 
-<p>When updates are waiting, the Porthole icon in the system tray says so;
-hover over it for a summary. How often the tree is synced, and whether a
-check follows, are set on the Updates page of
-<a href="customize.html">Settings</a>.</p>
+<figure>
+  <img src="review.png" alt="The update assistant with a plan: changes to approve, what happens, and the packages">
+  <figcaption>A plan that needs a few setting changes approved.</figcaption>
+</figure>
 
-<h2>The Update Assistant</h2>
-<p>Click the <b>Updates</b> toolbar button (or choose
-<b>Porthole &rarr; Update Assistant</b>, or the tray icon) to open the
-Update Assistant. It shows the plan: what will be updated, rebuilt or
-removed, and anything that needs your attention first, such as:</p>
+<h2>Reading the plan</h2>
+<p>At the top is a one-line summary ("12 updates; 2 changes need your
+approval") and when the check ran. Below, only the parts that apply:</p>
+<dl>
+  <dt><b>Problems on this system</b></dt>
+  <dd>Things on the computer itself that would make the update fail, found
+    before building: for example a kernel without 32-bit support on a system
+    that builds 32-bit libraries, or <code>/boot</code> not mounted when a
+    kernel is updated. These have to be fixed first.</dd>
+  <dt><b>Changes that need your approval</b></dt>
+  <dd>Setting changes the update needs, each with why it is needed and which
+    file it goes in (Porthole's own, <code>zz-porthole</code>, in the
+    <code>package.*</code> directories). Every one was checked: Portage worked
+    out the whole update with it. Untick one to refuse it; what needed it is
+    then held back instead. Larger steps are listed here too, such as
+    switching to a new GCC version or removing a package that stands in the
+    way.</dd>
+  <dt><b>Held back</b></dt>
+  <dd>Updates that can't go ahead yet, each with the reason in plain words
+    and what you can do: keep the installed version, remove what holds it
+    back, or wait for a fix.</dd>
+  <dt><b>Kept back by your choices</b></dt>
+  <dd>What you chose not to update, each ticked; untick one to undo that
+    choice (then re-plan).</dd>
+  <dt><b>Left for you by the automatic update</b></dt>
+  <dd>Only with fully automatic updates: what Porthole wouldn't decide on its
+    own. See <a href="automation.html">How updates run</a>.</dd>
+  <dt><b>No longer needed</b></dt>
+  <dd>Installed packages nothing needs any more. Tick the ones to remove
+    after the update; none are ticked for you.</dd>
+  <dt><b>What happens</b></dt>
+  <dd>The steps in order, with the exact commands: a compiler update on its
+    own first, then the update, live packages with new upstream commits,
+    removals you ticked, and finally rebuilding programs that still use old
+    libraries.</dd>
+  <dt><b>Notes</b></dt>
+  <dd>Things to do afterwards, such as rebooting after a C library update or
+    rebuilding kernel modules.</dd>
+</dl>
+<p>Finally the packages. The letter says what happens to each:
+<b>U</b> update, <b>N</b> new, <b>NS</b> new slot, <b>R</b> rebuild,
+<b>D</b> downgrade, <b>L</b> live package with new upstream commits. Untick a
+package to leave it at its version.</p>
+
+<h2>Changing the plan</h2>
+<p>Unticking a package or a change, or choosing an option for something held
+back, changes the plan, so it has to be worked out and checked again. A bar
+appears: <b>Re-plan with my choices</b> does that (as you, no password);
+<b>Undo changes</b> goes back. The update can't start until the plan matches
+your choices. Choices are remembered for later checks, until you undo
+them.</p>
+
+<h2>Starting the update</h2>
+<p>Press <b>Apply and start update</b>. You are asked for the administrator
+password (unless Porthole is <a href="unlock.html">unlocked</a>). If a build
+window is set, you can start now or <b>Build</b> in the window: see
+<a href="automation.html">How updates run</a>.</p>
+<p>The runner checks the plan again as root and goes ahead only if it is the
+one you approved. It writes the approved changes, then runs the steps. You can
+close Porthole; the <a href="termwindow.html">job window</a> and the tray
+icon show how it is going. If a step fails, the rest is skipped and the plan
+is checked again, so the review shows what is left.</p>
+
+<h2>The buttons</h2>
 <ul>
-  <li>configuration changes (USE flags, keywords or unmasks) the update
-needs. Porthole only suggests changes it has verified actually let the
-update through;</li>
-  <li>packages that are <b>held back</b>, with the choices for each (for
-example keeping the current version, or accepting the change that lets
-it update);</li>
-  <li>libraries still in use by programs that need rebuilding
-(@preserved-rebuild), and live (-9999) packages with new commits, if you
-turned live rebuilds on;</li>
-  <li>Gentoo news you haven't read;</li>
-  <li>packages <b>no longer needed</b>: installed, but nothing in your
-world set needs them any more (what emerge --depclean would remove).</li>
+  <li><b>Read news</b>: Gentoo news (the number of unread items is shown).
+    Read news before big updates: it often tells you about manual steps.</li>
+  <li><b>Check now</b>: work out the plan again from the package tree you
+    have, without syncing. No password.</li>
+  <li><b>Sync now</b>: update the package tree, then check.</li>
+  <li><b>Show progress</b> and <b>Cancel update</b>: while an update
+    runs.</li>
+  <li><b>Settings</b>: Settings, Updates.</li>
+  <li><b>Unlock</b>: see <a href="unlock.html">Unlock</a>.</li>
 </ul>
-<p>You can untick packages you don't want updated this time, and make
-choices for held-back packages; the plan is worked out again with your
-choices before anything runs. <b>Check now</b> makes a fresh plan from
-the package tree you have, without waiting for the next background
-check; <b>Sync now</b> syncs the tree first (see
-<a href="sync.html">Syncing</a>).</p>
 
-<h3><a name="depclean">Packages no longer needed</a></h3>
-<p>Packages pulled in for something you have since removed or updated
-stay installed until you remove them. The assistant lists them under
-<b>No longer needed</b>, with a box for each; none are ticked to start
-with. Tick the ones to remove (or <b>Tick all</b>), re-plan, and the
-update ends by removing them, before rebuilding anything that used their
-libraries. Only the packages you ticked are removed, and emerge still
-keeps any that something needs by then. With nothing to update, the plan
-just removes them.</p>
-<p>If you use one of them yourself, don't remove it: emerge it (not
-one-shot) so it goes in your world file. What an update itself leaves
-unneeded (an old slot, say) shows up at the next check. You can turn the
-list off in <b>Settings</b> (Packages nothing needs).</p>
+<h2>When the plan is out of date</h2>
+<p>If the package tree was synced or your Portage configuration changed after
+the check, a bar says so and the update can't start: press <b>Check now</b>
+first.</p>
 
-<p>Nothing needs a password until you press <b>Start</b>. The update then
-runs in Porthole's job runner, as root, in the background: you can close
-the assistant, the main window and the job window, and the update keeps
-going. Reopen the job window with <b>Show progress</b> in the tray icon's menu.</p>
-
-<h2>The Updates Available view</h2>
-<p>Choosing <b>Updates Available</b> in the view selector (to the left of
-the search box) lists the same packages as the plan, grouped as:</p>
-<ul>
-  <li><b>System</b> &ndash; packages in the system set;</li>
-  <li><b>Sets</b> &ndash; packages in one of your package sets;</li>
-  <li><b>World</b> &ndash; packages you installed yourself (in the world
-file);</li>
-  <li><b>Dependencies</b> &ndash; everything else the update pulls in;</li>
-  <li><b>Held back</b> &ndash; packages the plan can't update yet. The
-Update Assistant explains why and what you can do.</li>
-</ul>
-<p>The <b>Recommended</b> column shows the version the plan installs. For
-a held-back package it shows, in brackets, the version it is being kept
-from.</p>
-
-<p>To update only some packages, tick them and choose
-<b>Package &rarr; Update Packages</b>. They are added to the
-<a href="install.html">install queue</a> together; packages that aren't
-in your world file are updated one-shot, so they aren't added to it.
-With nothing ticked, Update Packages opens the Update Assistant.</p>
-
-<h2>Running emerge yourself</h2>
-<p>You can still run any emerge command line with
-<b>Porthole &rarr; Run Custom Command</b>
-(see <a href="custcmd.html">Custom Commands</a>), for example
-<b>emerge --update --deep --newuse @world</b>. Installs and removals run in
-the job runner like everything else.</p>
-
+<p class="next">Next: <a href="automation.html">How updates run</a></p>
 </body>
 </html>

@@ -1,72 +1,72 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Installing packages</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
 <body>
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
-<br><br><br><br>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="search.html">Finding packages</a></nav>
 
-<h1>Install a Package</h1>
+<h1>Installing packages</h1>
 
-<h2>Basic install</h2>
-<p>Find the package, by browsing the categories on the left or with the
-search box, select it, then click <b>Emerge</b>. The package is added to
-the <b>install queue</b> and a short note says so; nothing is installed
-yet. Add as many packages as you like.</p>
+<p>Porthole installs the way an experienced Gentoo user would: it works out
+everything the packages need, checks that it will go through, and shows you
+the plan before anything is built.</p>
 
-<p>The arrow next to the Emerge button (and the Package menu, and the
-package list's right-click menu) also offers <b>Emerge one-shot</b>,
-which installs the package without adding it to your world file. Use it
-for packages you only need for now, or that something else will
-depend on.</p>
+<h2>1. Put packages in the install queue</h2>
+<p>Select a package and press <b>Emerge</b> (or right-click it). A short
+message confirms it was added to the install queue; the <b>Queue</b> button
+counts what is in it. Collect as many packages as you like: they are planned
+together, which is faster and avoids conflicts between separate installs.</p>
+<ul>
+  <li><b>Emerge</b> installs the package and adds it to your world file, so
+    updates keep it current.</li>
+  <li><b>Emerge one-shot</b> (the arrow next to Emerge) installs it without
+    adding it to the world file: for something wanted now, or a dependency
+    you are rebuilding.</li>
+  <li><a href="advemerge.html">Advanced Emerge</a> lets you choose the
+    version, USE flags and options first.</li>
+</ul>
 
-<p>Queue one-shot and normal installs together as you like: they are
-planned together, then the one-shot packages are emerged first and the
-others after them, so only the others are added to your world file.</p>
+<figure>
+  <img src="queue.png" alt="The install queue window listing packages, with Process queue">
+  <figcaption>The install queue.</figcaption>
+</figure>
 
-<h2>Processing the queue</h2>
-<p>Click <b>Queue</b> in the toolbar to see what is queued; remove
-anything you changed your mind about, then press <b>Process
-queue</b>. Porthole works out what installing everything together needs:
-dependencies, and any USE flag, keyword or unmask changes, which it
-verifies before suggesting them. This needs no password.</p>
+<h2>2. Process the queue</h2>
+<p>Press <b>Queue</b>, then <b>Process queue</b>. Porthole works out what the
+packages need, as you (no password), and shows the plan in the review window:
+what will be built, any setting changes needed (such as a USE flag on a
+dependency, or accepting a testing version), and anything that can't be done.
+Every change shown has been checked with Portage.</p>
+<p>Nothing is installed yet. You can close the review and come back, or
+remove packages from the queue and process it again.</p>
 
-<p>The plan is shown for review in the same window the Update Assistant
-uses. Only when you press <b>Install</b> there are you asked for your
-password; the install then runs in the background job runner, so closing
-Porthole won't stop it.</p>
+<h2>3. Install</h2>
+<p>Press <b>Install</b>. You are asked for the administrator password (unless
+Porthole is <a href="unlock.html">unlocked</a>). If a build window is set,
+you can choose to build in it instead of now: see
+<a href="automation.html">How updates run</a>.</p>
+<p>The job then runs in the background, as root. Before building, it works
+out the plan again and goes ahead only if it is the plan you approved; if
+something changed in the meantime (a sync, a settings change), it stops and
+asks you to review again. The <a href="termwindow.html">job window</a> shows
+the build; closing it or Porthole doesn't stop the job.</p>
 
-<h2>Versions</h2>
-<p>Packages are installed at the best version portage offers, and are
-not locked to it: later updates move them on as usual. If you want to
-stay on a particular version, choose it in
-<a href="advemerge.html">Advanced Emerge</a> and tick <b>Keep this
-version</b>.</p>
+<h2>If an install stops part way</h2>
+<p>If an install fails or you stop it, what it didn't get to goes back into
+the install queue as <i>Unfinished: ...</i>, minus anything already built.
+Process the queue to carry on, or remove it there.</p>
 
-<h2>Advanced install</h2>
-<p>For control over the version, USE flags, keywords and emerge options,
-select the package and click <b>Adv Emerge</b>. Your choices go into
-the queue with the package and are part of the plan you review. See
-<a href="advemerge.html">Advanced Emerge</a>.</p>
+<h2>Settings changes you chose</h2>
+<p>USE flags and keywords chosen in Advanced Emerge go into the plan as
+setting changes, and are written to Porthole's own files
+(<code>/etc/portage/package.use/zz-porthole</code> and
+<code>package.accept_keywords/zz-porthole</code>), each line with a comment
+saying why, only when you press Install. They stay valid for later versions
+of the package. You can edit or remove those lines like any of your own.</p>
 
-<h2>A particular version</h2>
-<p>Right-click a version in the package's version table (in the Summary
-tab) to emerge that version (or one-shot), reinstall it, open Advanced
-Emerge with it chosen, or unmerge it. The same menu can keep an
-installed version (no updates past it), mask or unmask versions, and
-accept testing keywords. Those changes are made to /etc/portage when you
-choose them and ask for your password; new lines go in the
-<i>zz-porthole</i> file of each package.* directory.</p>
-
-<h2>Changing USE flags</h2>
-<p>For an installed package, right-click it in the package list and
-choose <b>Change USE flags</b> to rebuild it with different flags. The
-rebuild is queued and planned like any other install.</p>
-
+<p class="next">Next: <a href="advemerge.html">Advanced Emerge</a></p>
 </body>
 </html>

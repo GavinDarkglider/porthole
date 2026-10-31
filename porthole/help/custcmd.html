@@ -1,117 +1,46 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-
-
-  
-  
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Custom commands</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
-
 <body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="unlock.html">Unlock</a></nav>
 
+<h1>Custom commands</h1>
 
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
+<p><i>Porthole, Run Custom Command</i> runs any command line in Porthole's
+terminal window, where its output is coloured and its warnings collected like
+emerge's. Use it for things Porthole has no button for: <code>eselect</code>,
+<code>equery</code>, <code>emerge --info</code>, scripts of your own.</p>
 
+<h2>The dialog</h2>
+<p>Type the command, or pick one from the list: first your saved commands
+(set in <a href="customize.html#porthole">Settings, Porthole, Commands</a>),
+then the ones you ran recently. Press <b>Execute</b>.</p>
 
-<br>
-
-
-<br>
-
-
-<br>
-
-
-<br>
-
-
-<h1>Custom Commands</h1>
-
-
-<h2>The Run Custom Command Dialog</h2>
-
-
-<p>
-This dialog interaction is for running emerge with options that are not yet
-integrated into Porthole.  Some combinations of commands may never be fully
-integrated into porthole's GUI interface, and this allows you to run any custom emerge-related tool you may have lying about.
-</p>
-
-
-<div class="warnleft">
-<b>Caution!</b> This dialog is capable of sending <b>any</b> command to porthole's terminal.
-Porthole's terminal does not handle all output formatting and is only intended to handle a limited range of commands.
-</div>
-
-
-<p>
-The dialog opens with a blank command entry box and a drop down history selector.
-The first 6 entries in the history list are "persistent" ones that save you some typing.
-All you need to do is select one, fill in any missing info to complete the command.
-The remaining entries (if any) are the most recent history of commands actually run from the dialog.
-Porthole will remember up to 10 unique entries in total unless you edit your ~.porthole/prefs.xml file
-</p>
-
-<p>
-</p>
-
-<div class="figinline">
-<img src="custcmd.png">
-<br>
-
-
-Figure 1. Run Custom Command Dialog
-</div>
-
-
-
-<h2>Buttons</h2>
-
-
+<h2>What happens to the command</h2>
 <ul>
-
-
-  <li>Entry box down arrow - displays the entry box history selector
-  </li>
-
-  <li>Help - brings up this window
-  </li>
-
-  <li>Cancel - closes window without executing an emerge
-  </li>
-
-  <li>Execute - Uses the command string entered
-and submits it to the terminal window for execution.</li>
-
+  <li><b>Emerge commands that install, update, remove or sync</b> are handled
+    the way Porthole always handles those: installs go through the
+    <a href="install.html">install queue</a> to be planned and checked,
+    removals and syncs become jobs for the runner.</li>
+  <li><b>Everything else runs as you</b>, in the terminal, without
+    administrator rights. Pretend runs and <code>--info</code> are like this
+    too.</li>
+  <li><b>While Porthole is <a href="unlock.html">unlocked</a></b>, Porthole
+    shows you the exact command and asks how to run it: <b>Run as you</b>, or
+    <b>Run as root</b>. As root it runs as a job in the
+    <a href="termwindow.html">job window</a>, and it asks for the password
+    again, even though Porthole is unlocked: Porthole checks everything else
+    it runs as root, but it can't check an arbitrary command for you, so you
+    confirm it yourself.</li>
 </ul>
-<h2>Suggestions</h2>
-<p>Some useful commands to run (as long as you know what they do) are:</p>
-<ul>
-  <li>emerge --update --deep --newuse world (--pretend --verbose)</li>
-  <li>revdep-rebuild</li>
-  <li>emerge metadata</li>
-</ul>
-<p>The following commands are known not to work reliably due to their output formatting:</p>
-<ul>
-  <li>etc-update</li>
-  <li>dispatch-conf</li>
-</ul>
+<div class="warn">A command run as root can change anything. Read it before
+confirming. It runs without a terminal to type into, so commands that ask
+questions won't get answers; give them the options to run on their own.</div>
 
-
-
-<hr>
-<a name="notes">Notes:</a>
-<br>
-
-
-
-
+<p class="next">Next: <a href="customize.html">Settings</a></p>
 </body>
 </html>

@@ -1,323 +1,90 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>The job window and job logs</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
 <body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="news.html">News</a></nav>
 
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
+<h1>The job window and job logs</h1>
 
-<br>
-
-<br>
-
-<br>
-
-<br>
-
-<h1>Terminal Window</h1>
-
-<h2>Introduction</h2>
-
-<p>
-Emerge can produce thousands of lines of output, and the important
-ones are easy to miss. &nbsp;Porthole's terminal window <em>(figure 1)</em>
-picks the warnings, cautions and summary messages out into tabs of
-their own, and colours the different kinds of line, so you can find what
-matters.
-</p>
-
-<p>
-The same window is used in three ways:
-</p>
-
+<p>Emerge can print thousands of lines, and the important ones are easy to
+miss. Porthole's terminal window colours the different kinds of line and
+picks the warnings, cautions and summary messages out into tabs of their own.
+The same window is used in three ways:</p>
 <ul>
-  <li><b>The job window</b> follows the jobs of Porthole's job runner:
-installs, updates, removals and syncs. &nbsp;It opens when you start one
-(and from <u>Show progress</u> in the update assistant or the tray).
-&nbsp;The job runs as root in the background, so <b>closing the window
-doesn't stop the job</b>; it only stops showing it. &nbsp;There is only
-ever one job window.</li>
-  <li><b>The log viewer</b> shows the log of a job that has finished, or
-a log you saved. &nbsp;Nothing runs there, so it has no queue and no Kill
-button. &nbsp;Open it from <u>File -&gt; Job Logs</u> in the main window,
-or <u>Job logs</u> in the tray; the tray's <u>Show what failed</u> opens the
-log of a job that failed.</li>
-  <li><b>The terminal</b> runs what Porthole runs as you, without root:
-pretend runs, emerge --help and --info, and your
-<a href="custcmd.html">custom commands</a>.</li>
+  <li><b>The job window</b> follows the runner's jobs: installs, updates,
+    removals, syncs, and custom commands run as root. It opens when you start
+    one, and from <i>Show progress</i> in Updates or the tray. The job runs as
+    root in the background, so closing the window doesn't stop it; it only
+    stops showing it. There is only ever one job window.</li>
+  <li><b>The log viewer</b> shows the log of a job that has finished, or a
+    log you saved. Nothing runs there. Open it from <i>Porthole, Job
+    Logs…</i> or <i>Job logs</i> in the tray; the tray's <i>Show what
+    failed</i> opens the log of a job that failed.</li>
+  <li><b>The terminal</b> runs what Porthole runs as you, without
+    administrator rights: pretend runs, <code>emerge --help</code> and
+    <code>--info</code>, and custom commands run as you.</li>
 </ul>
 
-<p>
-The tabs only appear when they have something in them: if no warnings
-were found, there is no warnings tab.
-</p>
+<figure>
+  <img src="joblogs.png" alt="The job logs window: earlier jobs with when they ran and how they ended">
+  <figcaption>Job logs: earlier jobs, newest first.</figcaption>
+</figure>
 
-<h2>Menu Bar</h2>
-
-<h3>Process Menu</h3>
-
+<h2>Tabs</h2>
 <ul>
-  <li><u>Kill Process</u> - In the job window: stop the job (see
-<a href="#stopping">Stopping a job</a>). &nbsp;In the terminal: stop the
-running command. &nbsp;The log viewer has none.
-  </li>
-  <li><u>Save Log</u> - Save the contents of the tab you are looking at
-to a file (in your home folder unless you choose another).
- &nbsp;Saving the log also clears the process, caution, warning and
-summary tabs. <i>If they hold a lot, that can take a while.</i>
-  </li>
-  <li><u>Save Log As</u> - Save the contents of the tab you are looking
-at to a file you name.
-  </li>
-  <li><u>Open Log</u> - Open a saved log here (not in the job window).
-  </li>
-  <li><u>Close Window</u> - Close the window. &nbsp;A job keeps running.
-  </li>
+  <li><b>Process</b>: everything the job printed, with line numbers.
+    Commands, the start of each package, warnings, information and errors are
+    coloured (the colours fit your theme; you can choose your own in
+    <a href="customize.html#porthole">Settings, Porthole, Terminal</a>).</li>
+  <li><b>Warnings</b> and <b>Cautions</b>: just those lines, each with the
+    package it came from. Double-click a line to jump to it in the Process
+    tab, where the lines around it often explain more.</li>
+  <li><b>Summary</b>: messages to read after a build, such as instructions
+    from a package or reminders to update configuration files. Read it when a
+    build finishes.</li>
+  <li><b>Emerge queue</b>: the jobs the window has followed, or the commands
+    you ran.</li>
+</ul>
+<p>Tabs only appear when they have something in them.</p>
+
+<h2>A paused build</h2>
+<p>A build in the build window pauses while someone uses the computer (see
+<a href="automation.html">How updates run</a>). The job window then shows a
+bar saying so, with <b>Keep building</b>: watching a build counts as using
+the computer, so choose it to let the build run while you are there.</p>
+
+<h2>Stopping a job</h2>
+<p>The <b>Kill</b> button (or <i>Process, Kill Process</i>) in the job
+window asks what to do:</p>
+<ul>
+  <li><b>Keep running</b>: nothing changes. This is the default.</li>
+  <li><b>Stop, finish later</b>: the package being built is stopped; packages
+    already installed stay installed. What an install didn't get to goes back
+    in the install queue as <i>Unfinished: ...</i>; processing the queue plans
+    it again, leaving out anything built meanwhile.</li>
+  <li><b>Stop, drop the rest</b>: the same, but the rest isn't put back in the
+    queue. If the job had already replaced libraries other programs still use,
+    Porthole offers to rebuild those programs as a job of its own.</li>
+</ul>
+<p>Jobs that aren't installs (updates, syncs, removals) have <b>Keep
+running</b> and <b>Stop</b>. Stopping asks for the administrator password,
+like starting.</p>
+
+<h2>Menus</h2>
+<ul>
+  <li><i>Process</i>: <b>Kill Process</b> (above); <b>Save Log</b> and
+    <b>Save Log As</b> save the tab you are looking at; <b>Open Log</b> opens a
+    saved log in the log viewer; <b>Close Window</b> (a job keeps
+    running).</li>
+  <li><i>Edit</i>: <b>Copy</b>, and <b>Clear</b>, which empties the tabs.</li>
+  <li><i>Queue</i>: move or remove entries. In the job window, removing an
+    entry only stops showing that job; it doesn't cancel it.</li>
 </ul>
 
-<div class="figright">
-<img src="termwindow.png">
-<br>
-
-Figure 1. Porthole Terminal Window
-</div>
-
-<h3>Edit Menu</h3>
-
-<ul>
-  <li><u>Copy</u> - Copy the selected text.</li>
-  <li><u>Clear</u> - Empty the process, caution, warning and summary tabs.
-    <i>If they hold a lot, that can take a while.</i>
-  </li>
-</ul>
-
-<h3>Queue Menu</h3>
-
-<p>
-The queue lists what the window has shown or is showing: the jobs it
-followed, or the commands you ran. &nbsp;The log viewer has no queue.
-</p>
-
-<ul>
-  <li><u>Move Top</u>, <u>Move Up</u>, <u>Move Down</u>,
-<u>Move Bottom</u> - Move the selected entry (terminal: one that
-hasn't run yet).
-  </li>
-  <li><u>Remove</u> - Remove the entry from the list. &nbsp;In the job
-window this only stops showing that job; it doesn't cancel it.
-  </li>
-  <li><u>Clear Queue</u> - Empty the list, once nothing is running.
-  </li>
-</ul>
-
-<p>
-In the terminal (not the job window) the queue can also be paused, so
-the next command doesn't start until you press play. &nbsp;The job
-window has no pause or play: the job runner runs jobs one after another
-by itself, and a build can't be paused part way.
-</p>
-
-<h2><a name="stopping">Stopping a job</a></h2>
-
-<p>
-The <u>Kill</u> button (or <u>Process -&gt; Kill Process</u>) in the job
-window asks what to do:
-</p>
-
-<ul>
-  <li><u>Keep running</u> - Nothing changes. &nbsp;This is the default.</li>
-  <li><u>Stop, finish later</u> - The package being built is stopped;
-packages already installed stay installed. &nbsp;What the install didn't get
-to goes back in Porthole's <a href="install.html">install queue</a> as
-"Unfinished: ...". &nbsp;Processing the queue plans it again, leaving out
-anything built in the meantime (by this job or by an update since).</li>
-  <li><u>Stop, drop the rest</u> - The same, but the rest is not put back
-in the queue. &nbsp;If the job had already replaced libraries that other
-programs still use, Porthole offers to rebuild those programs
-(emerge @preserved-rebuild) as a job of its own.</li>
-</ul>
-
-<p>
-Jobs that aren't installs (updates, syncs, removals) just have
-<u>Keep running</u> and <u>Stop</u>. &nbsp;Stopping a job asks for your
-password, like starting one.
-</p>
-
-<h2>Process Tab</h2>
-
-<p>
-The process tab <em>(figure 1)</em> holds the raw emerge command output.
- &nbsp;The Kill button below the tabs does the same as Process -&gt;
-Kill Process.
- &nbsp;Each line of output is numbered for reference in the summary
-and warning tabs.
-</p>
-<p>
-Color coding is applied to certain lines to highlight the
- following situations:
-</p>
-
-<ul>
-
-  <li>The beginning of each command.
-    <br>
-E.G.
- <span class="command">*** emerge --nospinner =dev-dotnet/pnetc-0.6.2 ***</span>
-  </li>
-  <li>The beginning of each emerge.
-    <br>
-E.G.
- <span class="emerge">&gt;&gt;&gt; emerge (3 of 4) dev-dotnet/pnetlib-0.6.2 to /</span>
-    <div class="tipright">
-TIP! You can change the color coding scheme, 
- see the help section on "Customizing Porthole".
-    </div>
-
-  </li>
-  <li>Warning messages.
-    <br>
-E.G.
- <span class="warning">cg_arith.tc:360: warning: dereferencing type-punned pointer will break strict-aliasing rules
-    </span>
-  </li>
-  <li>Informational text.
-    <br>
-E.G.
-  <span class="info"> * Use /etc/init.d/dotnet to register your runtime</span></li>
-  <li>Error messages.
-    <br>
-E.G.
-  <span class="error">!!! Error calculating dependencies. Please correct.</span></li>
-  <li>Porthole generated notes.
-    <br>
-E.G.
-  <span class="appnote">*** Based on the build history of these packages on
- your system, I can estimate that emerging them usually takes, on average, 
-0 days, 0 hrs, 0 mins, and 39 secs
-    </span></li>
-</ul>
-
-<p>Note that when you run a emerge --pretend, Porthole will look through the emerge
-history and try to find how long it will take to emerge
-that package.
- &nbsp;That information will be highlighted in the note color.
-</p>
-
-<p>
-</p>
-<div class="figright">
-<img src="warningtab.png">
-<br>
-
-Figure 2. Warning tab
-</div>
-
-<h2>Warning/Caution Tab</h2>
-
-<p>
-Porthole will filter out any warnings/cautions and place them into the 
-corresponding tab <em>(figure 2)</em>.
- &nbsp;In addition to warnings/cautions these tabs also
-display the command and emerge information lines using
-the color coding scheme.
- &nbsp;This allows you to identify which package the messages originated from.
-</p>
-
-<p>
-One of the really useful features of this tab is the ability to jump
- directly to the message location in the process terminal by simply
-double-clicking on the line in question.
- &nbsp;When you do this Porthole will switch to the process tab and 
-bring the desired line into focus near the center of the tab's window.
- &nbsp; When you find an error it is good to check the process window
- because there may be additional lines associated with the error that
-were not picked up by the filter.
-</p>
-<div class="figright">
-<img src="summarytab.png">
-<br>
-
-Figure 3. Summary Tab
-</div>
-
-<h2>Summary Tab</h2>
-
-<p>
-Like the warning/caution tab, the summary tab <em>(figure 3)</em> is a filtered view of the 
-process window.
- &nbsp;Unlike the others though, it displays not only informational mesages
-but major error messages as well.
-</p>
-
-<div class="tipleft">
-TIP! Carefully review the summary tab after the emerge is complete
-for important instructions!
-</div>
-
-<p>Porthole also attempts to filter messages that direct you to perform
-additional actions after the emerge is complete like the reminder to 
-run etc-update.
-</p>
-
-<p>
-It also displays the command and emerge information lines using
-the color coding scheme so you can identify the origin of the message.
-</p>
-
-<p>
-The summary tab also supports double-clicking on the line number to open
-the process window.
-</p>
-<div class="figright">
-<img src="queuetab.png">
-<br>
-
-Figure 4. Queue tab
-</div>
-
-<h2>Queue Tab</h2>
-
-<p>
-The queue <em>(figure 4)</em> lists the jobs the job window followed (or,
-in the terminal, the commands it ran), with each one's status.
-&nbsp;Each line shows its name, then the command: for a job, the emerge
-command the job runner is running.
-</p>
-
-<p>
-The status icons depend on your icon theme, so yours may look different
-from figure 4:
-</p>
-
-<ul>
-  <li>Finished - a check mark
-  </li>
-  <li>Failed - a red circle with a white X
-  </li>
-  <li>Stopped (killed) - a red X
-  </li>
-  <li>Running - a gear
-  </li>
-  <li>Waiting - no icon
-  </li>
-</ul>
-
-<p>
-Note: the pictures on this page show an older version of the window.
-</p>
-
-<hr>
-<a name="notes">Notes:</a>
-<br>
-
-
-
+<p class="next">Next: <a href="unlock.html">Unlock and administrator rights</a></p>
 </body>
 </html>

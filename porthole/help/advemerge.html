@@ -1,120 +1,59 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Advanced Emerge</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
 <body>
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc"><iframe src="toc.html" frameborder="0" height="400" width="240"></iframe></div>
-<br>
-<br>
-<br>
-<br>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="install.html">Installing packages</a></nav>
+
 <h1>Advanced Emerge</h1>
-<h2>Introduction</h2>
-<p>
-Advanced Emerge installs one package your way: a version of your
-choosing, with the USE flags and keyword you pick, and emerge options of
-your own. &nbsp;Open it from the package's right-click menu, or from the
-version table in the summary tab (it then starts at that version).
-</p>
-<p>
-<b>Execute</b> doesn't install straight away. &nbsp;The package goes into
-Porthole's <a href="install.html">install queue</a>, with your settings.
-&nbsp;When you process the queue, Porthole works out what the install
-needs (as you, without a password) and shows you the plan, including the
-lines it will add to your Portage settings. &nbsp;Only when you approve
-it is root asked for, and the job runner saves the settings and installs.
-</p>
-<div class="figinline">
-<img style="width: 614px; height: 477px;" alt="Advanced emerge dialog image." src="advemerge.png"><br>
-Figure 1. Advanced Emerge Dialog (an older version)
-</div>
-<h2>Emerge Options</h2>
-<p>
-The emerge options change what emerge does with the package:
-</p>
+
+<p>Advanced Emerge installs a package with choices made first: which
+version, which USE flags, whether to accept a testing version, and emerge's
+options. Open it with the <b>Adv Emerge</b> button, from the Package menu, or
+by right-clicking a package.</p>
+
+<figure>
+  <img src="advemerge.png" alt="Advanced Emerge: emerge options, the version, USE flags, and the command it will run">
+  <figcaption>Advanced Emerge for one package.</figcaption>
+</figure>
+
+<h2>The parts of the window</h2>
 <ul>
-  <li>Hover over an option for its help, taken from the emerge manual.</li>
-  <li>Options that conflict switch each other off: e.g. choosing quiet
-switches verbose off.</li>
-  <li>The emerge options chosen in Porthole's settings start out set here.</li>
+  <li><b>Version</b>: the recommended version is chosen; pick another to
+    install that one instead. <b>Keep this version</b> stops updates from
+    moving past it (it adds a <code>package.mask</code> line for newer
+    versions); leave it unticked and later updates move on as usual.</li>
+  <li><b>USE flags</b>: each flag the version has, with what it does. Tick
+    <i>+</i> to turn a flag on or <i>-</i> to turn it off for this package.
+    Combinations the package doesn't allow (its REQUIRED_USE rules) are
+    pointed out, and Execute stays greyed out until they are fixed.</li>
+  <li><b>Keywords</b>: for a version only in testing on your architecture,
+    accept its testing keyword for this package.</li>
+  <li><b>Emerge options</b>: emerge's own options, for those who know them.
+    Most people need none of them.</li>
+  <li><b>The command</b> at the bottom shows what will be run.</li>
 </ul>
-<p>
-<b>--oneshot</b> installs the package without adding it to your world
-file, so updates won't keep it unless something else needs it.
-</p>
-<h2>Package Options</h2>
-<div class="noteright">
-Note: Changing the version resets the USE flags and keywords sections
-to that version's.
-</div>
-<h3>Emerge or Unmerge</h3>
-<p>
-"emerge" installs the chosen version; "unmerge" removes it (as a job of
-the job runner, after your password; see <a href="unmerge.html">Remove a
-Package</a>).
-</p>
-<h3>Version List</h3>
-<p>
-All the versions of the package, oldest first<a href="#notes"><span class="note">1</span></a>,
-with each one's slot and masking, and which is installed and which
-Portage recommends. &nbsp;The recommended version is chosen to start with.
-</p>
-<p>
-<b>Keep this version</b> stops updates from moving past the chosen
-version: Porthole adds a package.mask line for the versions after it.
-&nbsp;Leave it unticked and the next update moves on as usual.
-</p>
-<h3>USE Flags</h3>
-<p>
-USE flags choose the features built into the package. &nbsp;Hover over a
-flag for what it does. &nbsp;The flags you change are saved for the package
-in package.use (Porthole's own file, /etc/portage/package.use/zz-porthole),
-so later versions are built the same way.
-</p>
-<p>
-If the flags break the package's rules (its REQUIRED_USE), the command
-preview says which rule fails and Execute stays greyed out until you fix
-it.
-</p>
-<p>
-To change the USE flags of something already installed, use <u>Change
-USE flags</u> in the package's right-click menu: it opens this dialog on
-the installed version, and rebuilds it with --oneshot.
-</p>
-<h3>Keyword to Accept</h3>
-<p>
-A version marked as testing ("~amd64", say) has to be accepted before it
-can be installed. &nbsp;Choose its keyword here and Porthole adds a
-package.accept_keywords line for the package (in zz-porthole), so its
-later testing versions can be installed too. &nbsp;Only that package is
-affected: its dependencies stay on stable unless they need otherwise, and
-the plan will tell you if they do.
-</p>
-<h2>Command Preview</h2>
-<p>
-Shows the emerge command the install will run, and under it each line
-that will be added to your Portage settings (package.use,
-package.accept_keywords, package.mask).
-</p>
-<h2>Buttons</h2>
-<ul>
-  <li>Help - this page.</li>
-  <li>Cancel - close the dialog; nothing is queued.</li>
-  <li>Execute - add the package, with these settings, to the install
-queue (or remove it, for unmerge).</li>
-</ul>
-<hr>
-<a name="notes">Notes:</a>
-<br>
-<ol>
-  <li>We are somewhat at the mercy of the developers who seem to
-be able
-to create new and increasingly difficult numbering schemes faster
-than we can figure out how to sort them.
-  </li>
-</ol>
+
+<h2>What Execute does</h2>
+<p>Installing goes through the <a href="install.html">install queue</a> like
+any other install: the package and your choices are added to the queue, and
+the plan you review shows the setting changes. The USE flags and keyword you
+chose are saved for the package, not just this version, so the next version
+keeps them; they go in Porthole's own files
+(<code>package.use/zz-porthole</code>,
+<code>package.accept_keywords/zz-porthole</code>) when you press Install.</p>
+<p>Unmerging (the emerge/unmerge list at the left) removes the version you
+chose, as described in <a href="unmerge.html">Removing packages</a>.</p>
+
+<h2>Changing the USE flags of an installed package</h2>
+<p>Right-click an installed package and choose <b>Change USE flags…</b>.
+Advanced Emerge opens on the installed version with only the USE flags to
+change; the package is rebuilt with them, one-shot (your world file is left
+as it is).</p>
+
+<p class="next">Next: <a href="unmerge.html">Removing packages</a></p>
 </body>
 </html>

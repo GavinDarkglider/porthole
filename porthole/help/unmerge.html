@@ -1,68 +1,46 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-
-
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Removing packages</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
 <body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="advemerge.html">Advanced Emerge</a></nav>
 
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
+<h1>Removing packages</h1>
 
-<br>
+<h2>Removing a package</h2>
+<p>Select the package and press <b>Unmerge</b> on the toolbar (or use its
+right-click menu, or <i>Package, Unmerge Package</i>). Removing needs
+administrator rights, so Porthole asks for the password (unless it is
+<a href="unlock.html">unlocked</a>) and hands the removal to the runner,
+which does it in the background; the <a href="termwindow.html">job window</a>
+shows it.</p>
+<p>In the Updates Available, Deprecated and Sets views, the packages you tick
+are removed together, as one job.</p>
+<div class="warn">Removing a package doesn't check whether something else
+needs it. If another program stops working afterwards, reinstall what you
+removed.</div>
 
-<br>
+<h2>Removing one version</h2>
+<p>If several versions are installed (in different slots) and you want to
+remove one, right-click it in the version table on the package's Summary tab
+and choose <b>Unmerge this version</b>. Advanced Emerge can do the same:
+choose <i>unmerge</i> and the version.</p>
 
-<br>
+<h2>Removing what nothing needs any more</h2>
+<p>Removing a package leaves behind what was installed only because it needed
+it. <a href="update.html">Updates</a> lists such packages after each check,
+under <i>No longer needed</i>, and removes only the ones you tick, after the
+update. After removing something, press <b>Check now</b> there to see what it
+left behind.</p>
 
-<br>
+<h2>Packages from a repository you remove</h2>
+<p>When you remove a repository in <a href="customize.html#repositories">Settings,
+Repositories</a>, Porthole lists the packages installed from it and asks
+whether to keep them (they get no more updates) or remove them too.</p>
 
-<h1>Remove a Package</h1>
-
-<h2>Basic Removal</h2>
-<p>To remove a package, select it in the package list and click
-"Unmerge" in the toolbar (or use <u>Unmerge</u> in its right-click menu, or
-<u>Package -&gt; Unmerge Package</u>). &nbsp;Removing needs root, so Porthole asks
-for your password and hands the removal to its job runner, which runs it
-in the background; the <a href="termwindow.html">job window</a> shows
-it.</p>
-<p>In the Updates, Deprecated and Sets views, the packages you tick are
-removed together, as one job.</p>
-<p>Removing a package doesn't remove the packages that were installed
-because it needed them. &nbsp;See <a href="#depclean">Removing what is no
-longer needed</a> below.</p>
-<p>If another package complains afterwards about something missing,
-reinstall <i>the package that complains</i>.</p>
-<h2>Removing a Specific Version</h2>
-<p>If you have more than one version of a package installed (in different
-slots, say) and want to remove just one, right-click that version in the
-version table of the package's summary tab and choose <u>Unmerge this
-version</u>. &nbsp;<a href="advemerge.html">Advanced Emerge</a> can do the
-same: choose "unmerge" and the version.</p>
-<h2><a name="depclean">Removing what is no longer needed</a></h2>
-<p>The easy way: the <a href="update.html#depclean">Update Assistant</a>
-lists the packages nothing needs any more after each check (press
-<b>Check now</b> after removing something), and removes the ones you tick.</p>
-<p>By hand: to see which packages nothing needs any more, run the
-<a href="custcmd.html">custom command</a> "emerge --pretend --depclean".
-&nbsp;A pretend run changes nothing, so it runs as you, without a password,
-in the terminal. &nbsp;Read its list, and its warnings, carefully.</p>
-<p>When you are sure, run the custom command "emerge --depclean".
-&nbsp;Porthole asks for your password and the job runner removes them. &nbsp;To
-stop it part way, press <u>Kill</u> in the job window and choose
-<u>Stop</u>; what was already removed stays removed.</p>
-<p>
-</p>
-<hr>
-<a name="notes">Notes:</a>
-<br>
-
-
-
+<p class="next">Next: <a href="update.html">Updates</a></p>
 </body>
 </html>

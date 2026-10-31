@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unlock and administrator rights</title>
+<link rel="stylesheet" href="porthole.css">
+</head>
+<body>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="termwindow.html">The job window</a></nav>
+
+<h1>Unlock and administrator rights</h1>
+
+<p>Porthole runs as you. Looking at packages, searching, working out plans and
+checking for updates need no password. Changing the system does: installing,
+updating, removing, syncing, and settings for the whole computer. Each such
+change is handed to Porthole's runner through
+<code>porthole-update-service</code>, run as root with <code>sudo</code> (or,
+if sudo isn't allowed, <code>pkexec</code>). Your sudo rules decide whether a
+password is asked.</p>
+
+<h2>Unlocking</h2>
+<p>To avoid typing the password for every change, press <b>Unlock</b> on the
+toolbar (or in Updates) and type it once. Until the time is up, changes go
+through without asking. The button shows the time left and reads
+<b>Lock</b>; press it to lock again straight away. How long an unlock lasts
+(15 minutes, an hour, or until Porthole closes) is your own setting, in
+<a href="customize.html#porthole">Settings, Porthole, General</a>.</p>
+
+<h2>What unlocking also gives you</h2>
+<ul>
+  <li><b>Check now</b> works out the plan as root, which also sees programs
+    still using old libraries, so their rebuild is in the plan.</li>
+  <li>The Sets view shows <code>@preserved-rebuild</code> as it is now.</li>
+  <li><a href="custcmd.html">Custom commands</a> can run as root (each one
+    still asks for the password, see below).</li>
+</ul>
+
+<h2>How it works, and what it guards against</h2>
+<p>Unlocking starts <code>porthole-update-service session</code> as root for
+this Porthole only. It talks to Porthole through a private pipe, with no
+network socket and no file anyone else could reach, and runs only the
+service's own checked commands, the same ones Porthole uses when locked. It
+stops when you lock, when the time is up, or when Porthole closes.</p>
+<ul>
+  <li>While unlocked, no other program, not even one running as you, can
+    attach to Porthole or reach that pipe.</li>
+  <li>A custom command as root always asks for the password again, even
+    while unlocked: a command line is the one thing the service can't check
+    for you.</li>
+  <li>Everything the service is asked to do is checked as root: which
+    files may be changed, which emerge options are allowed, that names are
+    real package names. A plan you approved is worked out again as root
+    before anything is built.</li>
+</ul>
+<div class="warn">If Porthole runs from a folder your account can change (a
+copy of its source, for example), a bar at the top of the window says so:
+anything it runs as root comes from there, so any program you run could
+change what root runs. That is fine for working on Porthole; for everyday
+use, install it.</div>
+
+<p class="next">Next: <a href="custcmd.html">Custom commands</a></p>
+</body>
+</html>

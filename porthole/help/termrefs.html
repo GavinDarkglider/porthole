@@ -1,114 +1,125 @@
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-<title>Porthole Help</title>
-<link rel="stylesheet" type="text/css" media="screen" href="porthole.css" />
+<meta charset="utf-8">
+<title>Words used in Porthole and Gentoo</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
 <body>
-<img style='float:left;' src='../pixmaps/porthole-about.png'>
-<div class='toc'>
-<iframe src='toc.html' height=400 width=240 frameborder=0></iframe>
-</div>
-<br>
-<br>
-<br>
-<br>
-<h1>Terms & References</h1>
-<h2>Terms Defined</h2>
+<nav class="pages"><a href="toc.html">Contents</a></nav>
+
+<h1>Words used in Porthole and Gentoo</h1>
+
 <dl>
-<dt>Arch(itecture)</dt>
-<dd>
-Type of system.
- &nbsp;Generally, a hardware specific distinction such as 64-bit processor or
-a mainframe.
- &nbsp;Supported architectures are documented in <a target='_blank' 
-href='/usr/portage/profiles/arch.list'>/usr/portage/profiles/arch.list</a>
-</dd>
-<dt>Ebuild</dt>
-<dd>The script that installs a package,
- specifies package dependencies, use flags and architectures that it supports or
-is unstable on.
- &nbsp;See <i>Masked</i>.
-</dd>
-<dt>Keyword</dt>
-<dd>The architecture supported.  If it is masked it will be preceded by
- a tilde (~).
- &nbsp;Supported keywords are documented in <a target='_blank' 
-href='/usr/portage/profiles/keywords.desc'>/usr/portage/profiles/keywords.desc</a>
-</dd>
-<dt>Masked</dt>
-<dd>
-A package that for some reason should not be installed
-without first examining it's deficiencies.
- &nbsp;Masks can be for all architectures or just for specific architectures.
- &nbsp;Packages can be masked for several reasons:
-<ul>
-<li>Basic software is not stable (in other words, buggy)
-<li>Problems with the ebuild
-<li>Depends on obsolete/unstable packages
-<li>Not supported under a particular architecture
-</ul>
- &nbsp;Masks can be set in one of the following locations:
-<ul>
-<li>Ebuild - Set by author
-<li><a target='_blank' href='/usr/portage/profiles/package.mask'>
-/usr/portage/profiles/package.mask</a> - Set by Gentoo package manager
-<li><a target='_blank' href='/etc/'>/etc/portage/package.keywords</a>
- - Maintained by user.
-</ul>
-</dd>
-<dt>Package</dt>
-<dd>
-The aggregate files and settings used to install a set of software.
- &nbsp;Package information is stored in <a target='_blank'
- href='/usr/portage'>/usr/portage</a>.
-</dd>
-<dt>Use Flag</dt>
-<dd>
-Use flags exist to provide a customized installation of packages.
- &nbsp;Two of the most commony used flags are kde and gnome.
- &nbsp;When set, these tell the package to provide custom support
-for gnome and/or kde.
- &nbsp;You can set use flags permanently in <a target = '_blank'
- href='/etc/make.conf'>/etc/make.conf</a>. 
- &nbsp;Use flags descriptions and purpose are documented in:
-<ul>
-<li><a target='_blank' href='/usr/portage/profiles/use.desc'>
-/usr/portage/profiles/use.desc</a> (global)
-<li><a target='_blank' href='/usr/portage/profiles/use.desc'>
-/usr/portage/profiles/use.local.desc</a> (package specific)
-</ul> 
-</dd>
-</dl> 
-<h2>References</h2>
-<h3>Portage &amp; Gentoo</h3>
-<ol>
-<li>Gentoo Handbook Chapter 2 - Working with Gentoo (
-<a target='_blank' href='http://www.gentoo.org/doc/en/handbook/handbook-x86.xml?part=2'>
-http://www.gentoo.org/doc/en/handbook/handbook-x86.xml?part=2</a>
-) - excellent resource on
- use flags and portage in general.
-<li>Emerge Manual - run &quot;man emerge&quot; or &quot;info 
-emerge&quot; from a terminal
-<li>Package Database Web Site (
-<a target='_blank' href='http://packages.gentoo.org'>http://packages.gentoo.org</a>
-)
+  <dt><b>Architecture (arch)</b></dt>
+  <dd>The kind of processor a system is built for, such as amd64 or arm64.</dd>
 
-</ol>
+  <dt><b>Binary package, binhost</b></dt>
+  <dd>A package already built, downloaded instead of compiled; a binhost is a
+    server that offers them. Portage uses one only if it was built with your
+    USE flags. See <a href="customize.html#binary">Settings, Binary
+    packages</a>.</dd>
 
-<h3>Development Components</h3>
+  <dt><b>Build window</b></dt>
+  <dd>The hours in which approved updates may be built, when nobody is using
+    the computer. See <a href="automation.html">How updates run</a>.</dd>
 
-<ol>
-<li>Python (<a target='_blank' href='http://www.python.org/'>http://www.python.org</a>)
- - The language Porthole was developed in.
-<li>pyGTK (<a target='_blank' href='http://www.pygtk.org/'>http://www.pygtk.org/</a>)
- - The GUI library used to build the interface.
-<li>Glade (<a target='_blank' href='http://glade.gnome.org/'>http://glade.gnome.org/</a>)
- - GUI tool used to design the interface.
-<li>Regular expressions (<a target='_blank'
- href='http://sitescooper.org/tao_regexps.html'>http://sitescooper.org/tao_regexps.html</a>)
-</ol>
+  <dt><b>Ebuild</b></dt>
+  <dd>The script that tells Portage how to build one version of a package:
+    where to get it, what it depends on, its USE flags and keywords.</dd>
 
+  <dt><b>Emerge</b></dt>
+  <dd>Portage's command for installing, updating and removing packages.
+    Porthole runs it for you.</dd>
 
+  <dt><b>Keyword (stable, testing)</b></dt>
+  <dd>Whether a version is considered ready on an architecture: <i>amd64</i>
+    means stable, <i>~amd64</i> testing. Portage installs only stable
+    versions unless you accept testing ones, for a package
+    (<code>package.accept_keywords</code>) or for everything.</dd>
+
+  <dt><b>Licence group</b></dt>
+  <dd>A named set of licences, such as @FREE or @EULA, used to say which
+    licences are acceptable. See <a href="customize.html#system">Settings,
+    System, Licences</a>.</dd>
+
+  <dt><b>Live package (-9999)</b></dt>
+  <dd>A package built from the newest source in its upstream repository
+    rather than a release. Porthole can rebuild live packages when upstream
+    has new commits.</dd>
+
+  <dt><b>Mask</b></dt>
+  <dd>A version Portage won't install: because it is known to be broken or
+    unsafe, not yet ready, or because you masked it
+    (<code>package.mask</code>). A mask can be lifted
+    (<code>package.unmask</code>), but there is usually a reason for it.</dd>
+
+  <dt><b>News item</b></dt>
+  <dd>A notice from Gentoo about something you may need to do. See
+    <a href="news.html">News</a>.</dd>
+
+  <dt><b>Package, atom</b></dt>
+  <dd>A package is named <i>category/name</i>, such as
+    <code>sys-process/htop</code>. An atom is a package name with a version
+    condition, such as <code>&gt;=sys-process/htop-3.5</code>.</dd>
+
+  <dt><b>Plan</b></dt>
+  <dd>What Porthole worked out for an update or install: what is built, in
+    which order, which setting changes are needed, and what is held back.
+    See <a href="update.html">Updates</a>.</dd>
+
+  <dt><b>Portage</b></dt>
+  <dd>Gentoo's package manager. Its settings are in
+    <code>/etc/portage</code>: <code>make.conf</code>, the
+    <code>package.*</code> files, <code>repos.conf</code> and more.</dd>
+
+  <dt><b>Preserved libraries</b></dt>
+  <dd>Old versions of libraries kept because programs still use them after an
+    update. Those programs are rebuilt (<code>@preserved-rebuild</code>) so
+    the old libraries can go; Porthole does this at the end of an update.</dd>
+
+  <dt><b>Profile</b></dt>
+  <dd>The base settings a system starts from: default USE flags, which
+    packages make up the system, the init system. See
+    <a href="customize.html#system">Settings, System</a>.</dd>
+
+  <dt><b>Repository (overlay)</b></dt>
+  <dd>A collection of ebuilds. Gentoo's own is <code>gentoo</code>, kept in
+    <code>/var/db/repos/gentoo</code>; others (often called overlays) add
+    packages. See <a href="customize.html#repositories">Settings,
+    Repositories</a>.</dd>
+
+  <dt><b>Resolver, runner</b></dt>
+  <dd>The parts of Porthole that work out plans, and that carry them out as
+    root. See <a href="index.html">About Porthole</a>.</dd>
+
+  <dt><b>Set</b></dt>
+  <dd>A named group of packages, written with @: <code>@world</code>,
+    <code>@system</code>, <code>@preserved-rebuild</code>, or your own.</dd>
+
+  <dt><b>Slot</b></dt>
+  <dd>Versions of a package in different slots can be installed side by
+    side, such as two major versions of a compiler or library.</dd>
+
+  <dt><b>Sync</b></dt>
+  <dd>Bringing the repositories up to date. See <a href="sync.html">Syncing</a>.</dd>
+
+  <dt><b>Unlock</b></dt>
+  <dd>Typing the administrator password once for a while instead of for every
+    change. See <a href="unlock.html">Unlock</a>.</dd>
+
+  <dt><b>USE flag</b></dt>
+  <dd>A switch for an optional feature, such as <code>bluetooth</code> or
+    <code>pulseaudio</code>. Set for everything (in <code>make.conf</code>,
+    the profile, or Porthole's settings) or for single packages
+    (<code>package.use</code>). Groups of flags for one subject, such as
+    <code>VIDEO_CARDS</code>, are called USE_EXPAND variables.</dd>
+
+  <dt><b>World, world file</b></dt>
+  <dd>The packages you asked for yourself (<code>@world</code>), listed in
+    <code>/var/lib/portage/world</code>. Updates keep them and what they need
+    up to date; a package installed one-shot isn't added to it.</dd>
+</dl>
 
 </body>
 </html>

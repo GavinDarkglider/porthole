@@ -1,43 +1,46 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Porthole Help</title>
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
+<meta charset="utf-8">
+<title>Syncing</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
 <body>
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc">
-<iframe src="toc.html" frameborder="0" height="400" width="240"></iframe>
-</div>
-<br><br><br><br>
+<nav class="pages"><a href="toc.html">Contents</a> <a href="automation.html">How updates run</a></nav>
 
-<h1>Sync Portage Tree</h1>
+<h1>Syncing</h1>
 
-<h2>Automatic syncing</h2>
-<p>Portage keeps a record of every package available to you, the package
-tree, which needs updating every so often to see new versions. Porthole
-does this for you in the background: by default it syncs every seven
-days, then checks for updates. Change how often on the Updates page of
-<a href="customize.html">Settings</a>, where you can also turn off the
-check after a sync, or skip syncing while the computer runs on
-battery.</p>
+<p>Portage keeps a copy of every package available to you, the package tree,
+which has to be brought up to date (synced) to see new versions. Porthole
+does this for you.</p>
 
-<p>Hover over the <b>Updates</b> toolbar button to see when the tree was
-last synced, along with a summary of the latest update check.</p>
+<h2>On a schedule</h2>
+<p>Porthole's update service runs every hour and syncs when it is due: every
+seven days to begin with, counted from the last sync, including ones you ran
+yourself. After syncing it checks for updates, and the tray tells you if
+there are some. It syncs every repository whose <code>auto-sync</code> is on
+(<code>emaint sync --auto</code>). Change how often, whether to check after a
+sync, and whether to skip syncing on battery, in
+<a href="customize.html#updates">Settings, Updates</a>.</p>
+<p>Hover over the <b>Updates</b> button to see when the tree was last synced
+and what the last check found.</p>
 
 <h2>Syncing now</h2>
-<p>To sync straight away, press <b>Sync now</b> in the Update Assistant,
-or choose it from the tray icon's menu. It asks for your password, then
-syncs and checks for updates in the background; the job window shows
-how it goes, and the assistant shows the new plan when it is done.
-Gentoo's mirrors ask that you sync at most once a day, so if the tree
-was synced within the last day Porthole says so and asks first.</p>
+<p>Press <b>Sync now</b> in <a href="update.html">Updates</a>, or choose it in
+the tray icon's menu. It asks for the password (unless Porthole is
+<a href="unlock.html">unlocked</a>), then syncs and checks in the background;
+the <a href="termwindow.html">job window</a> shows how it goes.</p>
+<div class="note">Gentoo's mirrors ask that you sync at most once a day; syncing
+more often can get you refused for a while. If the tree was synced within the
+last day, Porthole says so and asks first.</div>
+<p>To sync just one repository, use <b>Sync now</b> in
+<a href="customize.html#repositories">Settings, Repositories</a>.</p>
 
-<p><b>Check now</b> is different: it makes a fresh update plan straight
-away, without a password, from the package tree you already have.</p>
+<h2>Check now is not a sync</h2>
+<p><b>Check now</b> works out a fresh update plan from the package tree you
+already have, without syncing and without a password. Use it after changing
+settings, or to see the plan again after doing something by hand.</p>
 
-<p>Syncs use whatever your repositories are set up for in
-/etc/portage/repos.conf (rsync, git or emerge-webrsync).</p>
-
+<p class="next">Next: <a href="news.html">News</a></p>
 </body>
 </html>

@@ -1,155 +1,135 @@
-<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <title>Porthole Help</title>
-
-
-  <link rel="stylesheet" type="text/css" media="screen" href="porthole.css">
-
+<meta charset="utf-8">
+<title>Settings</title>
+<link rel="stylesheet" href="porthole.css">
 </head>
-
 <body>
+<nav class="pages"><a href="toc.html">Contents</a>
+  <a href="#porthole">Porthole</a> <a href="#system">System</a>
+  <a href="#repositories">Repositories</a> <a href="#binary">Binary packages</a>
+  <a href="#updates">Updates</a></nav>
 
-<img style="float: left;" src="../pixmaps/porthole-about.png">
-<div class="toc"><iframe src="toc.html" frameborder="0" height="400" width="240"></iframe></div>
+<h1>Settings</h1>
 
-<br>
+<p>Open Settings from <i>Porthole, Settings…</i>. The first page,
+<b>Porthole</b>, is your own: how Porthole looks and behaves for you, saved
+without a password. The others are settings of the computer itself: changing
+them asks for the administrator password (unless Porthole is
+<a href="unlock.html">unlocked</a>), and only what you changed is saved.
+<b>Apply</b> saves and keeps the window open; <b>OK</b> saves and closes it.</p>
 
-<br>
+<div class="note">Porthole never rewrites your <code>make.conf</code>. What it
+changes for you goes in files of its own, named so you can find them, each
+undone by deleting it:
+<code>package.use/00-porthole-global</code> (USE flags for every package),
+<code>package.license/00-porthole-licences</code> (which licences are fine),
+<code>package.*/zz-porthole</code> (changes for single packages, each with a
+comment saying why), and one file per repository or binhost it added.</div>
 
-<br>
-
-<br>
-
-<h1>Customizing Porthole</h1>
-
-<h2>Porthole's Configuration Dialog</h2>
-
-<p>To configure many features of Porthole, select "Configure
-Porthole" from the "Settings" menu. Click on one of the&nbsp;tabs
-on the left-hand side of the window to access specific settings. If
-you're not sure what a particular setting will do, hover the mouse
-cursor over it for an explanatory tool-tip.</p>
-
-<h2 style="font-weight: bold;">"General" Tab</h2>
-
-<p>This tab holds settings applicable to more than one part
-of&nbsp;Porthole, or those that don't fit in any of the other tabs.</p>
-
-<p>Your current CPU architecture will be displayed at the top,
-for reference. This is determined by Portage and cannot be changed.</p>
-
-<p>Below this is the "Enable Archlist" setting. There are some
-parts of Porthole where it is possible to see information displayed for
-<span style="font-weight: bold;">CPU architectures other
-than your own</span> (such as in the version table in the package
-summary). Enable this, and select which architectures to display
-information for if you wish to see this extra information. This setting
-is disabled by default.</p>
-
-<p>If Porthole is not opening your <span style="font-weight: bold;">preferred web browser</span>
-when you click on the help buttons, or the home page link in the
-package summary, then you can either set your <span style="font-weight: bold;">BROWSER</span> environment variable
-or set it here. Select the "<span style="font-weight: bold;">Use Custom Browser</span>" radio button, then type
-the command used to start your browser in the text box below it. It will usualy be
-sufficient to simply type the name of your browser (for example, "firefox") into this box. If you want to
-specify the exact command to open the browser, use "%s" where you want
-the webpage or help-file location to be substituted in as well as any other options you desire.  
-In most cases simply entering 'firefox' will will get the pre-defined python <span style="font-weight: bold;">Firefox</span>
-webbrowser module with its default options.
-If it does not find a pre-configured webbrowser module it will create a generic module with the '%s' url parameter added for you.</p>
-
-<p>If you want to use the <span style="font-weight: bold;">emerge-webrsync</span>
-command to sync your portage tree, select "emerge-webrsync" from the
-list box labelled "Sync Method".</p>
-
-<h2>"Main Window" Tab</h2>
-
+<h2 id="porthole">Porthole</h2>
+<figure><img src="settings-porthole.png" alt="Settings, Porthole page"></figure>
 <ul>
-
-  <li>
-    <h4>Font and Colours Tab<br>
-
-    </h4>
-
-    <p>Here you can select the <span style="font-weight: bold;">colours</span> used to
-indicate packages that Portage recommends <span style="font-weight: bold;">updating</span> or <span style="font-weight: bold;">downgrading</span>.</p>
-
-  </li>
-
-  <li>
-    <h4>Summary View Tab</h4>
-
-    <p>Here you can choose which <span style="font-weight: bold;">items will be displayed in the
-summary view</span>. There is be a small amount of redundancy in
-the information presented by default.</p>
-
-  </li>
-
+  <li><b>General</b>: how long <a href="unlock.html">Unlock</a> lasts.</li>
+  <li><b>Package list</b>: which columns show, and the colours of packages
+    with an update or a downgrade. <i>Match the theme</i> works the colours
+    out from your theme so they read well on it; pick a colour to use your
+    own instead.</li>
+  <li><b>Package details</b>: what the Summary tab shows, and which other
+    architectures get a keyword column in the version table.</li>
+  <li><b>Terminal</b>: the font and colours of the terminal and job window,
+    and emerge's output options (verbose, no spinner). Colours you haven't
+    chosen follow your theme.</li>
+  <li><b>Commands</b>: saved commands offered in
+    <a href="custcmd.html">Run Custom Command</a>.</li>
 </ul>
 
-<h2>"Emerge" Tab</h2>
-
-<p>The <span style="font-weight: bold;">emerge
-options</span> selected at the top will be passed onto emerge
-whenever you emerge or unmerge a package with Porthole. Hover the mouse
-cursor over the options to get a quick explanation of what they do.</p>
-
-<p>Under <span style="font-weight: bold;">advanced
-emerge options</span>, you can enable the "Commit to make.conf"
-button in the Advanced Emerge dialog. WARNING! This will allow Porthole
-to directly modify your make.conf file, which is <span style="font-style: italic;">very important</span> for
-the continued operation of your Gentoo system. <span style="font-weight: bold; font-style: italic;">Make sure you
-back up this file</span> (usually /etc/make.conf) before letting Porthole modify it! This
-feature has <span style="font-style: italic;">not</span>
-been fully tested, and we cannot accept any responsibility if Porthole
-somehow messes your&nbsp;system up :).</p>
-
-<p>The remaining text boxes are the first five commands that will
-be offered as options in the <span style="font-weight: bold;">run
-custom command</span> dialog. If you use this feature regularly,
-consider changing some of these to make your life easier.</p>
-
-<h2>"Terminal" Tab</h2>
-
+<h2 id="system">System</h2>
+<figure><img src="settings-system.png" alt="Settings, System page, USE flags by category"></figure>
+<p>This computer's Portage setup, as it is written, with notes on what to
+look at. Changes go in Porthole's own files, never in <code>make.conf</code>,
+and each is previewed before it is made.</p>
 <ul>
+  <li><b>Overview</b>: the profile, processor and memory, and <i>Worth a
+    look</i>: flags no package has (setting them does nothing), flags set
+    twice, <code>CPU_FLAGS_X86</code> compared with what the processor
+    really has, and <code>MAKEOPTS</code> compared with its threads and
+    memory. <b>Change profile…</b> lists the profiles you can switch to,
+    with warnings for the risky ones (changing the init system, switching to
+    no-multilib, to or from hardened).</li>
+  <li><b>USE flags</b>: every flag set in <code>make.conf</code>, by what it
+    does (Desktop, Graphics, Audio, Networking...), or as
+    <code>make.conf</code> groups them. Hover a flag for what it does and
+    where it is set; click it to switch it for every package. <i>Include the
+    profile's defaults</i> adds the flags your profile turns on.</li>
+  <li><b>Hardware</b>: video cards, input devices and CPU flags, with
+    <i>Use what cpuid2cpuflags finds</i>.</li>
+  <li><b>Build options</b>: compiler flags and parallel builds, with a
+    suggested <code>-j</code> for this machine (advice only).</li>
+  <li><b>Licences</b>: which licences are fine on this computer: free
+    software only; also software that may be shared (firmware, some
+    drivers); also software with an agreement you accept by using it; every
+    licence; or as <code>make.conf</code> and the profile say. Packages under
+    other licences are held back; Updates asks before accepting one for a
+    single package, and fully automatic updates never do.</li>
+</ul>
+<p>Changing USE flags, CPU flags or the profile shows a bar with <b>Preview
+rebuild</b> (works out what the change would rebuild, on a copy of the
+configuration, without changing anything), <b>Apply</b> and <b>Discard</b>.
+Apply saves the change, then opens Updates to work out the rebuild for you to
+review and start.</p>
 
-  <li>
-    <h4>Text Font and Colours Tab</h4>
-
-    <div class="tipright"> <b>Tip!</b> If you
-click on a colour selector with the right mouse button, that colour
-will follow the default foreground or background colour as applicable.
-    </div>
-
-    <p>Here you can modify the <span style="font-weight: bold;">font used for Porthole's terminal</span>
-(a good choice is "monospace" to retain the intended formatting of
-emerge's output, but it's not generally the most satisfying), and the <span style="font-weight: bold;">highlighting colours used in the
-terminal</span>. Note that the colours you select will only be
-applied in the "Process" tab of the terminal window, not the "Warning"
-or "Summary" tabs. The exception is the "Caution" colour, which is also
-used in the Sumamry tab to bring your attention to lines where it looks
-like emerge is telling you to perform some important action, and the
-"Line Number" colour, which is used in all tabs.</p>
-
-  </li>
-
-  <li>
-    <h4>More Colours Tab</h4>
-
-    <p>Even more colours! If you want you can change the <span style="font-weight: bold;">colours used for emerge output</span>,
-you can do it here. The defaults are set to be readable on a white
-background, but they're not very stylish.</p>
-
-  </li>
-
+<h2 id="repositories">Repositories</h2>
+<figure><img src="settings-repositories.png" alt="Settings, Repositories page"></figure>
+<p>Where packages come from: each repository, how it syncs, how many
+installed packages came from it, and the file that defines it.</p>
+<ul>
+  <li><b>Add from Gentoo's list…</b>: the repositories Gentoo lists (as
+    <code>eselect repository</code> offers them), marked official or
+    community. Gentoo doesn't check what community repositories contain: add
+    only ones you trust.</li>
+  <li><b>Add by address…</b>: one that isn't listed.</li>
+  <li><b>Remove…</b>: lists the packages installed from it, to keep (they get
+    no more updates) or remove as well, and offers to delete its files.</li>
+  <li><b>Sync now</b>: that repository alone.</li>
 </ul>
 
-<p>
-</p>
+<h2 id="binary">Binary packages</h2>
+<figure><img src="settings-binary.png" alt="Settings, Binary packages page"></figure>
+<p>A binary package is one someone already built, downloaded instead of
+compiled. Portage uses one only if it was built with your USE flags;
+everything else is still built here.</p>
+<ul>
+  <li><b>Using binary packages</b>: the switch; your binhosts, whether each
+    runs on this processor, and whether signatures are checked; and a check
+    of how many of your installed packages have a matching build. If you tune
+    builds for your processor (<code>-march=</code>), each downloaded package
+    replaces a tuned build with a generic one.</li>
+  <li><b>Building and hosting</b>: keep a binary package of everything built
+    here; the package directory; rebuilding its index, cleaning out old
+    packages, and uploading it to a server; and the lines to add to a web
+    server so other computers can use it as their binhost (Porthole doesn't
+    run a web server itself).</li>
+</ul>
 
-<hr><a name="notes">Notes:</a>
-<br>
+<h2 id="updates">Updates</h2>
+<figure><img src="settings-updates.png" alt="Settings, Updates page"></figure>
+<ul>
+  <li><b>Automatic sync</b>: how often to sync (every few days, at most once a
+    day), whether to check for updates after it, and not on battery. See
+    <a href="sync.html">Syncing</a>.</li>
+  <li><b>Live packages</b>: rebuild live (-9999) packages whose upstream has
+    new commits, except the ones you list.</li>
+  <li><b>Packages nothing needs</b>: list them in Updates, to remove the ones
+    you tick.</li>
+  <li><b>How updates are run</b>: the four ways, the build window, mains
+    power, how long nobody must have used the computer, pausing, low
+    priority. See <a href="automation.html">How updates run</a>.</li>
+  <li><b>Reminders</b> (your own, no password): be reminded when updates have
+    waited a few days.</li>
+</ul>
 
+<p class="next">Next: <a href="termrefs.html">Words used in Porthole and Gentoo</a></p>
 </body>
 </html>
