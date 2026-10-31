@@ -476,6 +476,13 @@ class Service:
         last was) all of them"""
         recent = max(filter(None, [last_repo_sync(), self.state.get("last_sync")]),
                      default=None)
+        # portage can't sync (or use) a repository listed under another
+        # name than its own: those whose checkout is there are renamed first
+        from porthole.updater import runner
+        for name, location, _s in auto_repos():
+            if runner.own_name_first(name) != name:
+                self.log("%s calls itself %s (profiles/repo_name): renamed"
+                         % (name, runner.repo_own_name(location)))
         repos = auto_repos() if now else due_repos(self.config["interval_days"])
         if not repos:
             self.log("No repository is due for a sync yet")

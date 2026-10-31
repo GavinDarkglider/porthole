@@ -1178,6 +1178,9 @@ def submit_repo_sync(name):
     from porthole.updater import repopool, system
     if not system._REPO_NAME.match(name or ""):
         raise JobError("Not a repository name: %s" % name)
+    # portage won't even find a repository listed under another name than
+    # its own, so a checkout that is there already gets its name first
+    name = own_name_first(name)
     step = {"kind": "argv", "title": "Sync %s" % name,
             "argv": ["emaint", "sync", "--repo", name]}
     if name in repopool.repos():
@@ -1200,6 +1203,20 @@ def repo_own_name(location):
         return None
     from porthole.updater import system
     return name if system._REPO_NAME.match(name) else None
+
+
+def own_name_first(name):
+    """The repository's name after calling it by its own (if its checkout
+    is there and says otherwise); the name as it was if that can't be done"""
+    location = roots_repos().get(name)
+    own = repo_own_name(location) if location else None
+    if own and own != name:
+        try:
+            rename_repo(name, own)
+            return own
+        except JobError:
+            pass
+    return name
 
 
 def rename_repo(old, new, portage_dir="/etc/portage"):
