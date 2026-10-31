@@ -21,6 +21,8 @@
         submit update|install ... --later   wait for the build window
         cancel [JOB]                cancel queued jobs, stop the running one
         keep-building [JOB]         don't pause this build while someone works
+        licences POLICY [--target T]   which licences are fine (free,
+                                    redistributable, eula, all, system)
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -556,6 +558,9 @@ def main(argv=None):
     keep = sub.add_parser("keep-building",
                           help="carry on a paused build and don't pause it again")
     keep.add_argument("job", nargs="?", help="the job (default: the running one)")
+    lic = sub.add_parser("licences", help="set which licences are fine for a system")
+    lic.add_argument("policy", choices=("free", "redistributable", "eula", "all", "system"))
+    lic.add_argument("--target", default=None, help="the system (default: this computer)")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -666,6 +671,8 @@ def job_command(args, parser):
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
+        elif args.command == "licences":
+            print(runner.set_licence_policy(args.policy, args.target))
         elif args.command == "keep-building":
             print(runner.keep_building(args.job))
         elif args.command == "cancel":

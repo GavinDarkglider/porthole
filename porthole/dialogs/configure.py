@@ -76,34 +76,109 @@ class ConfigDialog:
         # set widget values to values in prefs
         self.set_widget_values()
 
-        self.add_unlock_setting()
-
-        # the update service's settings (updater.conf, saved as root)
-        from porthole.updater.settings import UpdaterSettingsPage
-        self.updates_page = UpdaterSettingsPage()
+        # three pages: Porthole (your own preferences), System and Updates
+        # (the computer's, saved as root)
         notebook = self.builder.get_object("primary_nb")
-        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
-        scroller.add(self.updates_page)
-        index = notebook.append_page(scroller, Gtk.Label(label=_("Updates")))
+        self.regroup_porthole_page(notebook)
+        from porthole.updater.settings import SystemSettingsPage, UpdaterSettingsPage
+        self.system_page = SystemSettingsPage()
+        self.updates_page = UpdaterSettingsPage()
+        indexes = {}
+        for name, title, widget in (("system", _("System"), self.system_page),
+                                    ("updates", _("Updates"), self.updates_page)):
+            scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+            scroller.add(widget)
+            indexes[name] = notebook.append_page(scroller, Gtk.Label(label=title))
 
         self.window.show_all()
-        if page == "updates":
-            notebook.set_current_page(index)
+        if page in indexes:
+            notebook.set_current_page(indexes[page])
 
     #-----------------------------------------------
     # GUI Callback function definitions start here
     #-----------------------------------------------
 
-    def add_unlock_setting(self):
-        """How long Unlock lasts: the user's own Porthole setting, on the
-        Global page"""
+    def regroup_porthole_page(self, notebook):
+        """The old Global, Main Window, Emerge and Terminal pages become
+        tabs of one Porthole page: your own preferences, apart from the
+        computer's settings. The widgets are the same ones (their saving
+        code is unchanged), only moved."""
+        old = [notebook.get_nth_page(i) for i in range(notebook.get_n_pages())]
+        globals_page, mainwindow_nb, emerge_page, terminal_nb = old[:4]
+        for page in old[:4]:
+            notebook.remove_page(notebook.page_num(page))
+        main_pages = [mainwindow_nb.get_nth_page(i) for i in range(3)]
+        for page in main_pages:
+            mainwindow_nb.remove_page(mainwindow_nb.page_num(page))
+        colours_page, summary_page, view_page = main_pages
+
+        tabs = Gtk.Notebook()
+        tabs.set_border_width(6)
+
+        def tab(title, *widgets):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12, border_width=12,
+                          valign=Gtk.Align.START)
+            for widget in widgets:
+                # the old pages asked to fill their notebook tab: stack them instead
+                widget.set_vexpand(False)
+                widget.set_valign(Gtk.Align.START)
+                box.pack_start(widget, False, False, 0)
+            scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+            scroller.add(box)
+            tabs.append_page(scroller, Gtk.Label(label=title))
+
+        # only the update/downgrade colours are used; the rest never were
+        for name in ("normal_fg", "normal_bg", "use_plus_fg", "use_minus_fg",
+                     "label18", "label39", "label47", "label48"):
+            widget = self.builder.get_object(name)
+            widget.set_no_show_all(True)
+            widget.hide()
+        self.builder.get_object("label19").set_markup(
+            _("<b>Colours in the package list</b>"))
+        self.builder.get_object("label16").set_label(_("Packages with an update"))
+        self.builder.get_object("label17").set_label(_("Packages Portage would downgrade"))
+        view_page.get_children()[0].set_markup(_("<b>Columns in the package list</b>"))
+        self.builder.get_object("label14").set_markup(
+            _("<b>Shown in the package details</b> (Summary tab)"))
+        for label in (view_page.get_children()[0], self.builder.get_object("label19"),
+                      self.builder.get_object("label14")):
+            label.set_xalign(0)
+        tab(_("Package list"), view_page, colours_page)
+        # the arch list chooses the keyword columns of the version table
+        viewport = self.builder.get_object("viewport1")
+        arch_grid = viewport.get_child()
+        viewport.remove(arch_grid)
+        self.builder.get_object("globals_enable_archlist").set_label(
+            _("Show keyword columns for other architectures"))
+        self.builder.get_object("label6").set_markup(
+            _("<b>Architectures</b> shown in the version table"))
+        tab(_("Package details"), summary_page, arch_grid)
+        tab(_("Terminal"), terminal_nb)
+        # emerge output options and saved custom commands; the old warning
+        # about the advanced emerge dialog has no option left to warn about
+        frames = emerge_page.get_children()
+        for frame in frames:
+            emerge_page.remove(frame)
+        frames[1].destroy()
+        frames[0].set_label(_("Emerge output"))
+        frames[2].set_label(_("Saved custom commands"))
+        self.builder.get_object("emerge_verbose").set_label(_("Verbose (more detail)"))
+        self.builder.get_object("emerge_nospinner").set_label(
+            _("No spinner (quieter output)"))
+        self.builder.get_object("label57").set_label(
+            _("Offered when you run a custom command (Porthole, Run Custom Command):"))
+        tab(_("Commands"), frames[0], frames[2])
+        tab(_("General"), self.unlock_setting())
+        globals_page.destroy()
+        notebook.insert_page(tabs, Gtk.Label(label=_("Porthole")), 0)
+
+    def unlock_setting(self):
+        """How long Unlock lasts: the user's own Porthole setting"""
         from porthole.updater.session import TIMEOUTS, unlock_minutes
-        grid = self.builder.get_object("viewport1").get_child()
-        top = max(grid.child_get_property(c, "top-attach") + grid.child_get_property(c, "height")
-                  for c in grid.get_children())
-        heading = Gtk.Label(xalign=0, margin_top=12)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        heading = Gtk.Label(xalign=0)
         heading.set_markup("<b>%s</b>" % _("Unlocking"))
-        grid.attach(heading, 0, top, 2, 1)
+        box.pack_start(heading, False, False, 0)
         row = Gtk.Box(spacing=12)
         row.pack_start(Gtk.Label(label=_("Unlock Porthole for"), xalign=0), False, False, 0)
         self.unlock_time = Gtk.ComboBoxText()
@@ -111,12 +186,13 @@ class ConfigDialog:
             self.unlock_time.append(str(minutes), _(label))
         self.unlock_time.set_active_id(str(unlock_minutes()))
         row.pack_start(self.unlock_time, False, False, 0)
-        grid.attach(row, 0, top + 1, 2, 1)
+        box.pack_start(row, False, False, 0)
         hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=60)
         hint.set_markup("<small>%s</small>" % _(
             "Unlock (on the toolbar) asks for your password once; until this time "
             "is up, changes need no password. Used from the next unlock."))
-        grid.attach(hint, 0, top + 2, 2, 1)
+        box.pack_start(hint, False, False, 0)
+        return box
 
     def on_config_response(self, dialog_widget, response_id):
         """ Parse dialog response (ok, cancel, apply or help clicked) """
@@ -124,7 +200,7 @@ class ConfigDialog:
         if response_id == self.RESPONSE_OK:
             debug.dprint("CONFIGDIALOG: on_config_response(): OK response_id '%s'" % response_id)
             self.apply_widget_values()
-            self.updates_page.save(self.updates_saved)
+            self.save_computer_settings(close=True)
             self.window.hide()
         elif response_id == self.RESPONSE_CANCEL:
             debug.dprint("CONFIGDIALOG: on_config_response(): Cancel response_id '%s'" % response_id)
@@ -132,7 +208,7 @@ class ConfigDialog:
         elif response_id == self.RESPONSE_APPLY:
             debug.dprint("CONFIGDIALOG: on_config_response(): Apply response_id '%s'" % response_id)
             self.apply_widget_values()
-            self.updates_page.save(lambda ok, msg: self.updates_saved(ok, msg, close=False))
+            self.save_computer_settings(close=False)
         elif response_id == self.RESPONSE_HELP:
             debug.dprint("CONFIGDIALOG: on_config_response(): Help response_id '%s'" % response_id)
             #Display help file with web browser
@@ -187,6 +263,19 @@ class ConfigDialog:
     #------------------------------------------
     # Support function definitions start here
     #------------------------------------------
+
+    def save_computer_settings(self, close):
+        """System, then Updates (each as root, only if changed)"""
+        def system_saved(ok, message):
+            if not ok:
+                dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
+                                           buttons=Gtk.ButtonsType.CLOSE,
+                                           text=_("The system settings weren't saved"))
+                dialog.format_secondary_text(message or _("Cancelled."))
+                dialog.run()
+                dialog.destroy()
+            self.updates_page.save(lambda ok, msg: self.updates_saved(ok, msg, close=close))
+        self.system_page.save(system_saved)
 
     def updates_saved(self, ok, message, close=True):
         """After saving the update settings (as root, so it may be refused)"""

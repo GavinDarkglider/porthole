@@ -304,6 +304,13 @@ class PortholePreferences:
             except XMLManagerError:
                 value = default
             setattr(self.views, option, value)
+        # the old light-theme colours are unreadable on a dark theme: use
+        # lighter ones there, unless the user picked their own
+        if theme_is_dark():
+            for option, light, dark in (("upgradable_fg", "#0000FF", "#7AA2F7"),
+                                        ("downgradable_fg", "#FA0000", "#F7768E")):
+                if same_value(getattr(self.views, option), light):
+                    setattr(self.views, option, dark)
 
         summaryoptions = [ \
             ['showtable', True],
@@ -374,6 +381,11 @@ class PortholePreferences:
                 debug.dprint("PREFERENCES: DEFAULT VALUE: %s = %s" %(option,str(value)))
             setattr(self.globals, option, value)
             debug.dprint("PREFERENCES: PortholePreferences; setting globals.%s = %s" %(option, str(value)))
+        # a missing value can read back as an empty list: never save that
+        try:
+            self.globals.unlock_minutes = int(self.globals.unlock_minutes)
+        except (TypeError, ValueError):
+            self.globals.unlock_minutes = 15
         # create a keyworded archlist
         self.globals.keyworded_archlist = []
         for arch in self.globals.archlist:

@@ -104,7 +104,9 @@ class PackageNotebook(object):
 
     def notebook_changed(self, widget, pointer, index):
         """Catch when the user changes the notebook"""
-        package = self.package
+        package = getattr(self, "package", None)
+        if package is None:
+            return  # no package chosen yet: nothing to fill in
         debug.dprint("PackageNotebook notebook_changed(); self.summary.ebuild " +self.summary.ebuild +
                                     " self.loaded_version['deps'] : " + str(self.loaded_version["deps"]))
         if index == 1:

@@ -389,3 +389,98 @@ def _error(parent, title, text):
     dialog.format_secondary_text(text)
     dialog.run()
     dialog.destroy()
+
+
+# -- System: settings of the system itself (root's) ---------------------------------
+
+LICENCE_CHOICES = (
+    ("free", "Free software only",
+     "Software anyone may use, study, change and share (Gentoo's @FREE)."),
+    ("redistributable", "Free software, and software that may be shared",
+     "Adds firmware and drivers that aren't free but may be passed on "
+     "(@BINARY-REDISTRIBUTABLE). What most people want."),
+    ("eula", "Also software with an agreement you accept by using it",
+     "Adds software whose licence is an agreement (@EULA): read what you install."),
+    ("all", "Every licence",
+     "Nothing is held back for its licence."),
+    ("system", "As make.conf and the profile say",
+     "Porthole doesn't set a policy; ACCEPT_LICENSE decides."),
+)
+
+
+class SystemSettingsPage(Gtk.Grid):
+    """Settings of the system itself (now: which licences are fine).
+    Saving asks for administrator rights."""
+
+    def __init__(self, target=None):
+        super().__init__(row_spacing=8, column_spacing=12, border_width=12)
+        from porthole.updater.runner import read_licence_policy
+        self.target = target
+        self.saved = read_licence_policy(target)
+        row = 0
+        heading = Gtk.Label(xalign=0)
+        heading.set_markup("<b>Licences</b>")
+        self.attach(heading, 0, row, 1, 1)
+        row += 1
+        intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+        intro.set_markup(
+            "<small>Which licences are fine on this computer. Packages under other "
+            "licences are held back; Updates asks before accepting one, and fully "
+            "automatic updates never do. You can still accept a licence for one "
+            "package when Porthole asks.</small>")
+        self.attach(intro, 0, row, 1, 1)
+        row += 1
+        self.choices = {}
+        group = None
+        for value, title, explanation in LICENCE_CHOICES:
+            button = Gtk.RadioButton.new_with_label_from_widget(group, title)
+            group = group or button
+            self.choices[value] = button
+            self.attach(button, 0, row, 1, 1)
+            row += 1
+            hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=70, margin_start=26)
+            if value == "system":
+                explanation += " Now: %s" % _effective_licences()
+            hint.set_markup("<small>%s</small>" % GLib.markup_escape_text(explanation))
+            self.attach(hint, 0, row, 1, 1)
+            row += 1
+        if self.saved == "custom":
+            note = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+            note.set_markup("<small><i>The policy file was edited by hand; choosing "
+                            "here replaces it.</i></small>")
+            self.attach(note, 0, row, 1, 1)
+            row += 1
+        self.choices.get(self.saved, self.choices["system"]).set_active(True)
+        foot = Gtk.Label(xalign=0, wrap=True, max_width_chars=70, margin_top=8)
+        foot.set_markup("<small>Kept in /etc/portage/package.license/00-porthole-licences. "
+                        "Changing it asks for administrator rights; check for updates "
+                        "afterwards to see what it changes.</small>")
+        self.attach(foot, 0, row, 1, 1)
+
+    def value(self):
+        return next(v for v, b in self.choices.items() if b.get_active())
+
+    def save(self, callback=None):
+        """Save if changed; callback(ok, message)"""
+        value = self.value()
+        if value == self.saved:
+            if callback:
+                callback(True, "")
+            return
+        args = ["licences", value] + (["--target", self.target] if self.target else [])
+
+        def done(ok, output):
+            if ok:
+                self.saved = value
+            if callback:
+                callback(ok, output)
+        run_as_root(service(*args), done)
+
+
+def _effective_licences():
+    """ACCEPT_LICENSE as portage sees it now (make.conf and profile)"""
+    try:
+        import portage
+        return portage.settings.get("ACCEPT_LICENSE", "").strip() or "(not set)"
+    except Exception:
+        return "(unknown)"

@@ -956,6 +956,70 @@ def submit_command(line):
     return job
 
 
+# -- licence policy ------------------------------------------------------------
+
+# which licences are fine, as Settings > System offers them: written as
+# "*/* ..." in a package.license file of Porthole's own, read first, so
+# per-package exceptions (the user's, or approved fixes) still apply.
+# "system": no file, ACCEPT_LICENSE from make.conf and the profile decides
+LICENCE_POLICIES = {
+    "free": "-* @FREE",
+    "redistributable": "-* @FREE @BINARY-REDISTRIBUTABLE",
+    "eula": "-* @FREE @BINARY-REDISTRIBUTABLE @EULA",
+    "all": "*",
+    "system": None,
+}
+LICENCE_FILE = "00-porthole-licences"
+
+
+def licence_policy_path(target_name=None):
+    return os.path.join(targets.get(target_name).portage_dir,
+                        CONFIG_DIRS["licenses"], LICENCE_FILE)
+
+
+def read_licence_policy(target_name=None):
+    """The policy Porthole set for a target, or "system" (none)"""
+    try:
+        with open(licence_policy_path(target_name)) as f:
+            lines = [l.split(None, 1) for l in f if l.strip() and not l.startswith("#")]
+    except OSError:
+        return "system"
+    groups = " ".join(l[1].strip() for l in lines if l[0] == "*/*" and len(l) > 1)
+    return next((k for k, v in LICENCE_POLICIES.items() if v == groups), "custom")
+
+
+def set_licence_policy(policy, target_name=None):
+    """Write (or with "system", remove) the licence policy of a target"""
+    if policy not in LICENCE_POLICIES:
+        raise JobError("Not a licence policy: %s (one of %s)"
+                       % (policy, ", ".join(LICENCE_POLICIES)))
+    try:
+        path = licence_policy_path(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    directory = os.path.dirname(path)
+    if os.path.isfile(directory):
+        raise JobError(
+            "%s is a single file. Porthole keeps its policy in its own file, so it "
+            "needs %s to be a directory. Move the file into a new directory of that "
+            "name and try again." % (directory, directory))
+    if LICENCE_POLICIES[policy] is None:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        return policy
+    os.makedirs(directory, exist_ok=True)
+    with open(path + ".new", "w") as f:
+        f.write("# Which licences are fine for this system: set in Porthole, Settings,\n"
+                "# System. Porthole replaces this file; per-package exceptions belong in\n"
+                "# other files of this directory (they still apply).\n"
+                "*/* %s\n" % LICENCE_POLICIES[policy])
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return policy
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
