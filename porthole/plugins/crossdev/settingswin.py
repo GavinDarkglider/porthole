@@ -1,0 +1,721 @@
+"""
+    Porthole crossdev plugin: a system's settings window
+
+    Everything the system will be built with, before anything is built:
+    profile, compiler, USE flags, hardware, build options, and its Portage
+    files. It starts from the profile's values; changes are written in
+    Porthole's block of the system's own make.conf (conf.py), as root.
+
+    Copyright (C) 2026 Porthole developers
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+"""
+
+import json
+import threading
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import GLib, Gtk
+
+from porthole.plugins.crossdev import conf
+from porthole.updater.settings import _facts, _flags, _heading, _small
+
+TABS = (("overview", "Overview"), ("compiler", "Compiler"), ("use", "USE flags"),
+        ("hardware", "Hardware"), ("build", "Build options"), ("files", "Files"))
+
+
+def _cpu_flags_var(arch):
+    return {"amd64": "CPU_FLAGS_X86", "x86": "CPU_FLAGS_X86", "arm": "CPU_FLAGS_ARM",
+            "arm64": "CPU_FLAGS_ARM", "ppc": "CPU_FLAGS_PPC",
+            "ppc64": "CPU_FLAGS_PPC"}.get(arch)
+
+
+class SystemSettingsWindow(Gtk.Window):
+    def __init__(self, name, parent=None, on_changed=None):
+        super().__init__(title="Porthole: settings of %s" % name)
+        if parent:
+            self.set_transient_for(parent)
+        self.name, self.on_changed = name, on_changed
+        self.set_default_size(820, 640)
+        self.info = None
+        self.pending = {}  # VAR: value, or None (Porthole doesn't set it)
+        self.search = ""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
+        self.bar = Gtk.InfoBar(message_type=Gtk.MessageType.QUESTION, no_show_all=True)
+        self.bar_label = Gtk.Label(xalign=0, wrap=True, max_width_chars=90)
+        self.bar.get_content_area().add(self.bar_label)
+        self.bar.add_button("Discard", 1)
+        self.bar.add_button("Save", 2)
+        self.bar.connect("response", self.on_bar)
+        box.pack_start(self.bar, False, False, 0)
+        self.notebook = Gtk.Notebook()
+        self.tabs, self.tab_numbers = {}, {}
+        for key, title in TABS:
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=12,
+                            valign=Gtk.Align.START)
+            inner.pack_start(_small("Reading the settings..."), False, False, 0)
+            self.tabs[key] = inner
+            if key == "files":
+                page = inner
+                inner.set_valign(Gtk.Align.FILL)
+            else:
+                page = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+                page.add(inner)
+            self.tab_numbers[key] = self.notebook.append_page(page, Gtk.Label(label=title))
+        box.pack_start(self.notebook, True, True, 0)
+        buttons = Gtk.Box(spacing=8)
+        close = Gtk.Button(label="Close")
+        close.connect("clicked", lambda b: self.close())
+        buttons.pack_end(close, False, False, 0)
+        box.pack_start(buttons, False, False, 0)
+        self.add(box)
+        self.connect("delete-event", self.on_delete)
+        self.show_all()
+        self.reload()
+
+    # -- reading --
+
+    def reload(self):
+        self.pending = {}
+        self.update_bar()
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self):
+        from porthole.plugins.crossdev import roots, toolchain
+        from porthole.updater import system
+        info = {}
+        try:
+            target = roots.made_here().get(self.name)
+            if target is None:
+                raise conf.ConfError("No system called %s was made here" % self.name)
+            info = conf.read(target)
+            info["target"] = target
+            locations = info["locations"]
+            info["descriptions"], info["local"] = system.flag_descriptions(locations)
+            info["global"] = system.global_flags(locations)
+            info["iuse"] = system.all_iuse(locations)
+            info["values"] = {n: system.expand_values(n, locations) for n in conf.HARDWARE}
+            chost = conf.effective(info, "CHOST")
+            info["cpus"] = conf.cpus(chost, toolchain.host_chost()) if chost else None
+            info["needs_cross"] = chost != toolchain.host_chost()
+            info["toolchain"] = None
+            if info["needs_cross"]:
+                try:
+                    info["toolchain"] = toolchain.compare(toolchain.resolve(target))
+                except toolchain.ToolchainError as e:
+                    info["toolchain"] = str(e)
+            info["files"] = conf.files(target)
+            info["repos"] = roots.used_repos(target)
+            import os
+            link = os.path.realpath(os.path.join(target.portage_dir, "make.profile"))
+            info["profile_name"] = next(
+                ("%s:%s" % (r, link.split(loc.rstrip("/") + "/profiles/", 1)[1])
+                 for r, loc in info["repos"].items()
+                 if link.startswith(loc.rstrip("/") + "/profiles/")), link)
+        except Exception as e:
+            info = {"error": "%s: %s" % (type(e).__name__, e)}
+        GLib.idle_add(self._show, info)
+
+    def _show(self, info):
+        if "error" in info:
+            self._clear("overview")
+            self.tabs["overview"].pack_start(_small("Couldn't read the settings: "
+                                                    + info["error"]), False, False, 0)
+            self.tabs["overview"].show_all()
+            return False
+        self.info = info
+        self.set_title("Porthole: settings of %s" % info["target"].title)
+        for key, _title in TABS:
+            self._clear(key)
+        self._overview()
+        self._compiler()
+        self._use()
+        self._hardware()
+        self._build()
+        self._files()
+        for key in self.tabs:
+            self.tabs[key].show_all()
+        return False
+
+    def _clear(self, key):
+        for child in self.tabs[key].get_children():
+            child.destroy()
+
+    def _redraw(self, *keys):
+        for key in keys:
+            self._clear(key)
+            getattr(self, "_" + key)()
+            self.tabs[key].show_all()
+
+    # -- changes --
+
+    def values(self):
+        """Porthole's block as it would be with the pending changes"""
+        values = dict(self.info["porthole"])
+        for name, value in self.pending.items():
+            if value is None:
+                values.pop(name, None)
+            else:
+                values[name] = value
+        return values
+
+    def get(self, name):
+        return conf.effective(self.info, name, self.values())
+
+    def set(self, name, value):
+        """Set Porthole's value of a variable (None: leave it to the profile)"""
+        if value is not None:
+            value = " ".join(value.split())
+            if value == "" and conf.incremental(name):
+                value = None
+        saved = self.info["porthole"].get(name)
+        if value == saved:
+            self.pending.pop(name, None)
+        else:
+            self.pending[name] = value
+        self.update_bar()
+
+    def update_bar(self):
+        if not self.pending:
+            self.bar.hide()
+            return
+        parts = []
+        for name, value in sorted(self.pending.items()):
+            parts.append("%s back to the profile's" % name if value is None
+                         else '%s="%s"' % (name, value))
+        self.bar_label.set_markup(
+            "<b>Not saved yet:</b> %s\n<small>Saved in Porthole's block of the system's own "
+            "make.conf. Nothing is built until you build the system.</small>"
+            % GLib.markup_escape_text(", ".join(parts)))
+        self.bar.show()
+        self.bar_label.show()
+
+    def on_bar(self, bar, response):
+        if response == 1:
+            self.pending = {}
+            self.update_bar()
+            self._show(self.info)
+        elif response == 2:
+            self.save()
+
+    def save(self, then=None):
+        from porthole.updater.elevate import run_as_root, service
+        values = self.values()
+        try:
+            for name, value in values.items():
+                conf.check_value(name, value)
+        except conf.ConfError as e:
+            self.error("That can't be saved", str(e))
+            return
+        self.bar.set_sensitive(False)
+
+        def done(ok, output):
+            self.bar.set_sensitive(True)
+            if not ok:
+                self.error("The settings weren't saved", output)
+                return
+            self.changed()
+            if then:
+                then()
+        run_as_root(service("plugin", "crossdev", "settings", self.name, json.dumps(values)),
+                    done)
+
+    def changed(self):
+        self.reload()
+        if self.on_changed:
+            self.on_changed()
+
+    def on_delete(self, *args):
+        if not self.pending:
+            return False
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE,
+                                   text="Save the changes to %s?" % self.info["target"].title)
+        dialog.add_buttons("Discard", Gtk.ResponseType.NO, "Cancel", Gtk.ResponseType.CANCEL,
+                           "Save", Gtk.ResponseType.YES)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer == Gtk.ResponseType.NO:
+            return False
+        if answer == Gtk.ResponseType.YES:
+            self.save(then=self.destroy)
+        return True
+
+    def error(self, text, detail):
+        dialog = Gtk.MessageDialog(transient_for=self, modal=True,
+                                   message_type=Gtk.MessageType.ERROR,
+                                   buttons=Gtk.ButtonsType.CLOSE, text=text)
+        dialog.format_secondary_text(detail or "Cancelled.")
+        dialog.run()
+        dialog.destroy()
+
+    def go_to(self, key):
+        self.notebook.set_current_page(self.tab_numbers[key])
+
+    # -- Overview --
+
+    def _overview(self):
+        box, info = self.tabs["overview"], self.info
+        target = info["target"]
+        box.pack_start(_heading(target.title), False, False, 0)
+        parts = info["toolchain"]
+        if not info["needs_cross"]:
+            toolchain = "Not needed: this computer's own compiler builds for it"
+        elif isinstance(parts, str):
+            toolchain = "Couldn't be worked out: " + parts
+        elif not any(built for _t, _w, _r, built in parts):
+            toolchain = "Not built yet (Systems window: Build its toolchain)"
+        else:
+            # one toolchain per CHOST: another system may have built other versions
+            other = ["%s %s (built: %s)" % (title, wanted, built or "none")
+                     for title, wanted, _repo, built in parts if built != wanted]
+            toolchain = ("Built, the versions its profile allows" if not other else
+                         "Built for another system with the same CHOST; this one wants "
+                         + ", ".join(other))
+        box.pack_start(_facts([("Name", target.name), ("Folder", target.root),
+                               ("Profile", info["profile_name"]),
+                               ("Repositories", ", ".join(info["repos"]) or "?"),
+                               ("Cross toolchain", toolchain)]), False, False, 0)
+        change = Gtk.Button(label="Change profile…", halign=Gtk.Align.START, margin_start=6)
+        change.connect("clicked", lambda b: self.change_profile())
+        box.pack_start(change, False, False, 0)
+
+        box.pack_start(_heading("Before building"), False, False, 0)
+        box.pack_start(_small(
+            "The profile's values are only where the settings start: look through each "
+            "tab and set what this system should be."), False, False, 0)
+        grid = Gtk.Grid(column_spacing=10, row_spacing=4, margin_start=6)
+        for i, (tab, done, text) in enumerate(conf.checklist(info, self.values())):
+            mark = Gtk.Label(label="✓" if done else "✗", xalign=0)
+            grid.attach(mark, 0, i, 1, 1)
+            grid.attach(Gtk.Label(label=text, xalign=0, wrap=True, max_width_chars=80),
+                        1, i, 1, 1)
+            go = Gtk.Button(label="Change")
+            go.set_relief(Gtk.ReliefStyle.NONE)
+            go.connect("clicked", lambda b, t=tab: self.go_to(t))
+            grid.attach(go, 2, i, 1, 1)
+        box.pack_start(grid, False, False, 0)
+
+    def change_profile(self):
+        def switch(choice):
+            from porthole.updater.elevate import run_as_root, service
+
+            def done(ok, output):
+                if not ok:
+                    self.error("The profile wasn't changed", output)
+                    return
+                self.changed()
+            run_as_root(service("plugin", "crossdev", "profile", self.name, choice), done)
+        if self.pending:
+            self.error("Save or discard the changes first",
+                       "A new profile changes where the settings start.")
+            return
+        ProfileDialog(self, self.info, switch)
+
+    # -- Compiler --
+
+    def _compiler(self):
+        box, info = self.tabs["compiler"], self.info
+        chost = self.get("CHOST")
+        box.pack_start(_small(
+            "Always set for this system's own CPU: never \"native\" (that is the CPU of "
+            "the computer doing the build) and not only the kind of CPU (generic), or "
+            "packages run slower or not at all on the system."), False, False, 0)
+        box.pack_start(_heading("CPU"), False, False, 0)
+        row = Gtk.Box(spacing=6, margin_start=6)
+        if info["cpus"]:
+            combo = Gtk.ComboBoxText.new_with_entry()
+            for cpu in info["cpus"]:
+                combo.append_text(cpu)
+            current = conf.tuning(self.get("CFLAGS"))[0]
+            combo.get_child().set_text(current or "")
+            row.pack_start(Gtk.Label(label="Build for:"), False, False, 0)
+            row.pack_start(combo, False, False, 0)
+            use = Gtk.Button(label="Set it in the flags")
+            use.set_tooltip_text("Replace -mcpu/-march/-mtune in CFLAGS with %s=<cpu>"
+                                 % conf.cpu_option(chost))
+            use.connect("clicked", lambda b: self._set_cpu(combo.get_child().get_text()))
+            row.pack_start(use, False, False, 0)
+            box.pack_start(row, False, False, 0)
+            box.pack_start(_small("The CPUs %s's gcc knows." % chost), False, False, 0)
+        else:
+            box.pack_start(_small(
+                "The list of CPUs comes from the system's own compiler: build its toolchain "
+                "first, or write the CPU options in the flags below."), False, False, 0)
+        self.compiler_entries = {}
+        grid = Gtk.Grid(column_spacing=8, row_spacing=2, margin_start=6, margin_top=6)
+        row = 0
+        for name in conf.COMPILER:
+            label = Gtk.Label(label=name, xalign=0)
+            label.set_tooltip_text(conf.NOTES.get(name, ""))
+            grid.attach(label, 0, row, 1, 1)
+            entry = Gtk.Entry(hexpand=True, text=self.get(name))
+            entry.connect("changed", lambda e, n=name: self._entry_changed(n, e))
+            grid.attach(entry, 1, row, 1, 1)
+            back = Gtk.Button(label="Profile's")
+            back.set_tooltip_text("Back to what the profile says")
+            back.connect("clicked", lambda b, n=name, e=entry: e.set_text(
+                self.info["profile"].get(n, "")))
+            grid.attach(back, 2, row, 1, 1)
+            self.compiler_entries[name] = entry
+            note = Gtk.Label(xalign=0, wrap=True, max_width_chars=80)
+            grid.attach(note, 1, row + 1, 2, 1)
+            entry.note = note
+            self._entry_note(name, entry)
+            row += 2
+        box.pack_start(grid, False, False, 0)
+        box.pack_start(_small(
+            "${CFLAGS} in CXXFLAGS and the others means the same as CFLAGS. MAKEOPTS is how "
+            "many files build at once (-jN), wherever the system is built."), False, False, 0)
+
+    def _set_cpu(self, cpu):
+        cpu = cpu.strip()
+        if not cpu:
+            return
+        entry = self.compiler_entries["CFLAGS"]
+        entry.set_text(conf.set_cpu(entry.get_text(), self.get("CHOST"), cpu))
+
+    def _entry_changed(self, name, entry):
+        text = entry.get_text()
+        profile = self.info["profile"].get(name)
+        own = self.info["own"].get(name)
+        if own is None and " ".join(text.split()) == " ".join((profile or "").split()) \
+                and name not in self.info["porthole"] and name not in ("CHOST", "CFLAGS"):
+            self.set(name, None)
+        else:
+            self.set(name, text)
+        self._entry_note(name, entry)
+        self._redraw("overview")
+
+    def _entry_note(self, name, entry):
+        parts = []
+        profile = self.info["profile"].get(name)
+        parts.append("Profile: %s" % (profile if profile else "(not set)"))
+        if name in self.info["own"]:
+            parts.append("Your own line in make.conf sets %s; it wins over this "
+                         "(Files tab)" % name)
+        if name in ("CFLAGS", "CXXFLAGS"):
+            text = entry.get_text()
+            if name == "CXXFLAGS" and text.strip() in ("${CFLAGS}", "$CFLAGS"):
+                pass
+            else:
+                problem = conf.tuning(text)[1]
+                if problem:
+                    parts.append("⚠ " + problem)
+        entry.note.set_markup("<small>%s</small>" % GLib.markup_escape_text(
+            ". ".join(parts)))
+
+    # -- words of incremental variables (USE, VIDEO_CARDS, ...) --
+
+    def word_on(self, name, word):
+        return word in self.get(name).split()
+
+    def toggle(self, name, word):
+        """Switch one word of an incremental variable in Porthole's block;
+        back to what the profile says takes Porthole's word away"""
+        want = not self.word_on(name, word)
+        words = [w for w in (self.values().get(name) or "").split()
+                 if w.lstrip("-") != word]
+        without = dict(self.values())
+        without[name] = " ".join(words)
+        if (word in conf.effective(self.info, name, without).split()) != want:
+            words.append(word if want else "-" + word)
+        self.set(name, " ".join(words))
+        self._redraw(*{"USE": ("use", "overview")}.get(name, ("hardware", "overview")))
+
+    def changed_words(self, name):
+        """(words Porthole's block sets, words not saved yet)"""
+        now = set((self.values().get(name) or "").split())
+        saved = set((self.info["porthole"].get(name) or "").split())
+        return {w.lstrip("-") for w in now}, {w.lstrip("-") for w in now ^ saved}
+
+    def source(self, name, word):
+        if word in {w.lstrip("-") for w in self.info["own"].get(name, "").split()}:
+            return "Set by your own line in make.conf (it wins; Files tab)"
+        if word in {w.lstrip("-") for w in (self.values().get(name) or "").split()}:
+            return "Set here" + ("" if name not in self.pending else ", not saved yet")
+        return "From the profile"
+
+    # -- USE flags --
+
+    def _use(self):
+        from porthole.updater.system import categorise, category_order
+        box, info = self.tabs["use"], self.info
+        prefixes = tuple(n.lower() + "_" for n in info["expand"] + info["hidden"])
+        arch = info["arch"]
+
+        def plain(flag):
+            return not flag.startswith(prefixes) and flag != arch and flag
+
+        box.pack_start(_small(
+            "Click a flag to switch it for every package on this system; hover for what it "
+            "does. Dimmed: off. •: set here rather than by the profile."), False, False, 0)
+        find = Gtk.SearchEntry(placeholder_text="Find a flag to add (name or what it does)",
+                               text=self.search)
+        find.connect("search-changed", self._search_changed)
+        box.pack_start(find, False, False, 0)
+        mine, pending = self.changed_words("USE")
+        on = {w for w in self.get("USE").split() if plain(w)}
+        if self.search:
+            needle = self.search.lower()
+            shown = {f for f, d in info["descriptions"].items()
+                     if plain(f) and (needle in f.lower() or needle in d.lower())}
+            if len(shown) > 400:
+                box.pack_start(_small("%d flags match; showing the first 400." % len(shown)),
+                               False, False, 0)
+                shown = set(sorted(shown)[:400])
+        else:
+            shown = on | mine
+            box.pack_start(_small(
+                "Showing the flags that are on (%d) and the ones set here. Find others above."
+                % len(on)), False, False, 0)
+        groups = {}
+        for flag in shown:
+            groups.setdefault(categorise(flag, info["descriptions"], info["local"]),
+                              []).append(flag)
+        for title in category_order():
+            if groups.get(title):
+                box.pack_start(_heading(title), False, False, 0)
+                box.pack_start(_flags(
+                    sorted(groups[title]), info["descriptions"], info["iuse"],
+                    on_click=lambda f: self.toggle("USE", f),
+                    state=lambda f: self.word_on("USE", f), changed=mine, pending=pending,
+                    source=lambda f: self.source("USE", f),
+                    packages={f: p for f, p in info["local"].items()
+                              if f not in info["global"]}), False, False, 0)
+
+    def _search_changed(self, entry):
+        self.search = entry.get_text().strip()
+        self._clear("use")
+        self._use()
+        self.tabs["use"].show_all()
+        for child in self.tabs["use"].get_children():
+            if isinstance(child, Gtk.SearchEntry):
+                child.grab_focus_without_selecting()
+                child.set_position(-1)
+
+    # -- Hardware --
+
+    def _hardware(self):
+        box, info = self.tabs["hardware"], self.info
+        box.pack_start(_small(
+            "What the computer this system is for has: packages build support for exactly "
+            "these. Nothing is found out here (this isn't that computer): choose them. "
+            "Click to switch one; hover for what it is."), False, False, 0)
+        names = ["VIDEO_CARDS", "INPUT_DEVICES"]
+        cpu_flags = _cpu_flags_var(info["arch"])
+        if cpu_flags:
+            names.append(cpu_flags)
+        names += ["L10N"]
+        for name in names:
+            values = dict(info["values"].get(name) or {})
+            on = self.get(name).split()
+            for word in on:
+                values.setdefault(word, "")
+            mine, pending = self.changed_words(name)
+            flow = _flags(sorted(values), values, None,
+                          on_click=lambda w, n=name: self.toggle(n, w),
+                          state=lambda w, n=name: self.word_on(n, w), changed=mine,
+                          pending=pending, source=lambda w, n=name: self.source(n, w))
+            title = "%s: %s" % (name, " ".join(on) or "none")
+            if name == "L10N":
+                expander = Gtk.Expander(label="%s (languages, %d)" % (title, len(values)))
+                expander.add(flow)
+                box.pack_start(expander, False, False, 0)
+            else:
+                box.pack_start(_heading(title), False, False, 0)
+                box.pack_start(flow, False, False, 0)
+        if cpu_flags:
+            box.pack_start(_small(
+                "%s: what the CPU can do beyond the basics. On the computer itself "
+                "cpuid2cpuflags (app-portage/cpuid2cpuflags) lists them." % cpu_flags),
+                False, False, 0)
+
+    # -- Build options --
+
+    def _build(self):
+        box, info = self.tabs["build"], self.info
+        arch = info["arch"]
+        box.pack_start(_heading("Package versions"), False, False, 0)
+        testing = "~" + arch in self.get("ACCEPT_KEYWORDS").split()
+        stable = Gtk.RadioButton.new_with_label(None, "Stable only (%s)" % arch)
+        test = Gtk.RadioButton.new_with_label_from_widget(stable, "Testing too (~%s)" % arch)
+        (test if testing else stable).set_active(True)
+        test.connect("toggled", lambda b: self._testing(b.get_active()))
+        for widget in (stable, test):
+            widget.set_margin_start(6)
+            box.pack_start(widget, False, False, 0)
+        if "ACCEPT_KEYWORDS" in info["own"]:
+            box.pack_start(_small("Your own line in make.conf sets ACCEPT_KEYWORDS too."),
+                           False, False, 0)
+        for name, text in (
+                ("FEATURES", "How portage builds (distcc, -pid-sandbox, ...): changes to the "
+                             "profile's, like \"distcc -pid-sandbox\"."),
+                ("ACCEPT_LICENSE", "Which licences are fine: changes to the profile's "
+                                   "(\"%s\"), like \"@BINARY-REDISTRIBUTABLE\"."
+                                   % info["profile"].get("ACCEPT_LICENSE", ""))):
+            box.pack_start(_heading(name), False, False, 0)
+            box.pack_start(_small(text), False, False, 0)
+            entry = Gtk.Entry(text=self.values().get(name) or "", margin_start=6)
+            entry.connect("changed", lambda e, n=name: (self.set(n, e.get_text()),
+                                                        self._redraw("overview")))
+            box.pack_start(entry, False, False, 0)
+            box.pack_start(_small("Now: " + (self.get(name) or "(none)")), False, False, 0)
+        box.pack_start(_small(
+            "Binary packages: \"Keeps packages\" in the Systems window.", margin_top=6),
+            False, False, 0)
+
+    def _testing(self, on):
+        words = [w for w in (self.values().get("ACCEPT_KEYWORDS") or "").split()
+                 if w.lstrip("-") != "~" + self.info["arch"]]
+        if on:
+            words.append("~" + self.info["arch"])
+        self.set("ACCEPT_KEYWORDS", " ".join(words))
+        self._redraw("overview")
+
+    # -- Files --
+
+    def _files(self):
+        box = self.tabs["files"]
+        box.pack_start(_small(
+            "The system's own Portage files, for anything the other tabs don't cover. "
+            "Porthole's block in make.conf is what the tabs write; leave it to them."),
+            False, False, 0)
+        row = Gtk.Box(spacing=6)
+        self.file_combo = Gtk.ComboBoxText()
+        for path in self.info["files"]:
+            self.file_combo.append(path, path)
+        row.pack_start(self.file_combo, False, False, 0)
+        new = Gtk.Button(label="New file…")
+        new.connect("clicked", lambda b: self.new_file())
+        row.pack_start(new, False, False, 0)
+        self.file_save = Gtk.Button(label="Save this file")
+        self.file_save.connect("clicked", lambda b: self.save_file())
+        row.pack_end(self.file_save, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        self.file_view = Gtk.TextView(monospace=True, wrap_mode=Gtk.WrapMode.NONE)
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.add(self.file_view)
+        box.pack_start(scroller, True, True, 0)
+        self.file_combo.connect("changed", lambda c: self.open_file(c.get_active_id()))
+        self.file_combo.set_active_id("make.conf")
+
+    def open_file(self, relative):
+        import os
+        if not relative:
+            return
+        try:
+            with open(conf.file_path(self.info["target"], relative)) as f:
+                text = f.read()
+        except (OSError, conf.ConfError):
+            text = ""
+        self.file_view.get_buffer().set_text(text)
+        self.file_view.get_buffer().set_modified(False)
+        self.file_relative = relative
+
+    def save_file(self):
+        from porthole.updater.elevate import run_as_root, service
+        if self.pending:
+            self.error("Save or discard the changes above first",
+                       "They are written to make.conf too.")
+            return
+        buf = self.file_view.get_buffer()
+        text = buf.get_text(buf.get_start_iter(), buf.get_end_iter(), False)
+        relative = getattr(self, "file_relative", None)
+        if not relative:
+            return
+
+        def done(ok, output):
+            if not ok:
+                self.error("%s wasn't saved" % relative, output)
+                return
+            self.changed()
+        run_as_root(service("plugin", "crossdev", "write-file", self.name, relative,
+                            json.dumps(text)), done)
+
+    def new_file(self):
+        dialog = Gtk.Dialog(title="New settings file", transient_for=self, modal=True)
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Create", Gtk.ResponseType.OK)
+        area = dialog.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(6)
+        folder = Gtk.ComboBoxText()
+        for name in conf.FILE_DIRS:
+            folder.append(name, name)
+        folder.set_active(0)
+        entry = Gtk.Entry(placeholder_text="file name, like porthole or desktop")
+        area.pack_start(Gtk.Label(label="In:", xalign=0), False, False, 0)
+        area.pack_start(folder, False, False, 0)
+        area.pack_start(Gtk.Label(label="Name:", xalign=0), False, False, 0)
+        area.pack_start(entry, False, False, 0)
+        dialog.show_all()
+        answer = dialog.run()
+        relative = "%s/%s" % (folder.get_active_id(), entry.get_text().strip())
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+        try:
+            conf.file_path(self.info["target"], relative)
+        except conf.ConfError as e:
+            self.error("That file can't be made", str(e))
+            return
+        if relative not in self.info["files"]:
+            self.info["files"].append(relative)
+            self.file_combo.append(relative, relative)
+        self.file_combo.set_active_id(relative)
+        self.file_view.get_buffer().set_text("")
+
+
+class ProfileDialog(Gtk.Dialog):
+    """Another profile from the repositories the system uses"""
+
+    def __init__(self, parent, info, on_chosen):
+        super().__init__(title="Porthole: profile of %s" % info["target"].title,
+                         transient_for=parent, modal=True)
+        from porthole.plugins.crossdev import roots
+        self.set_default_size(600, 480)
+        self.info, self.on_chosen = info, on_chosen
+        area = self.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+        area.pack_start(_small(
+            "The profile is where this system's settings start (Porthole's own settings "
+            "stay as they are), and which packages make up its base. Now: %s"
+            % info["profile_name"]), False, False, 0)
+        self.all = roots.profiles(info["repos"])
+        self.store = Gtk.ListStore(str, str, str)
+        self.view = Gtk.TreeView(model=self.store)
+        for i, title in enumerate(("Profile", "Architecture", "Status")):
+            self.view.append_column(Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i))
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.add(self.view)
+        area.pack_start(scroller, True, True, 0)
+        self.everything = Gtk.CheckButton(label="Also other architectures and dev/exp profiles")
+        self.everything.connect("toggled", lambda b: self.fill())
+        area.pack_start(self.everything, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Switch", Gtk.ResponseType.OK)
+        self.fill()
+        self.show_all()
+        answer = self.run()
+        model, row = self.view.get_selection().get_selected()
+        choice = model[row][0] if row else None
+        self.destroy()
+        if answer == Gtk.ResponseType.OK and choice and choice != info["profile_name"]:
+            on_chosen(choice)
+
+    def fill(self):
+        self.store.clear()
+        everything = self.everything.get_active()
+        for repo, arch, profile, status in self.all:
+            name = "%s:%s" % (repo, profile)
+            if everything or (arch == self.info["arch"] and status == "stable") \
+                    or name == self.info["profile_name"]:
+                row = self.store.append([name, arch, status])
+                if name == self.info["profile_name"]:
+                    self.view.get_selection().select_iter(row)

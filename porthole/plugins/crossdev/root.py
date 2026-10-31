@@ -17,6 +17,14 @@
                                                built for it, or just the system
         plugin crossdev toolchain NAME         queue a job building the cross
                                                toolchain its profile allows
+        plugin crossdev settings NAME JSON     Porthole's settings block in its
+                                               make.conf ({VAR: value}, conf.py)
+        plugin crossdev write-file NAME FILE JSON
+                                               save one of its Portage files
+                                               (make.conf, package.*, env/*;
+                                               JSON: the text as a string)
+        plugin crossdev profile NAME REPO:PROFILE
+                                               point it at another profile
 
     Job steps (kind "plugin", plugin "crossdev"):
 
@@ -263,6 +271,73 @@ def step_remove_root(runner, job_id, step, log):
         return False
 
 
+def _system(name):
+    from porthole.plugins.crossdev import roots
+    target = roots.made_here().get(name)
+    if target is None:
+        print("No system called %s was made here" % name, file=sys.stderr)
+    return target
+
+
+def settings(args):
+    """plugin crossdev settings NAME JSON"""
+    from porthole.plugins.crossdev import conf
+    if len(args) != 2:
+        print("usage: plugin crossdev settings NAME JSON", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    try:
+        values = json.loads(args[1])
+        if not isinstance(values, dict) or not all(
+                isinstance(k, str) and (v is None or isinstance(v, str))
+                for k, v in values.items()):
+            raise ValueError("expected {VAR: value}")
+        conf.write(target, values)
+    except (ValueError, conf.ConfError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print("Saved %s's settings" % target.title)
+    return 0
+
+
+def write_file(args):
+    """plugin crossdev write-file NAME FILE JSON"""
+    from porthole.plugins.crossdev import conf
+    if len(args) != 3:
+        print("usage: plugin crossdev write-file NAME FILE JSON", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    try:
+        text = json.loads(args[2])
+        if not isinstance(text, str):
+            raise ValueError("expected the text as a JSON string")
+        print(conf.write_file(target, args[1], text))
+    except (ValueError, conf.ConfError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    return 0
+
+
+def profile(args):
+    """plugin crossdev profile NAME REPO:PROFILE"""
+    from porthole.plugins.crossdev import roots
+    if len(args) != 2 or ":" not in args[1]:
+        print("usage: plugin crossdev profile NAME REPO:PROFILE", file=sys.stderr)
+        return 2
+    repo, _, name = args[1].partition(":")
+    try:
+        print(roots.set_profile(args[0], repo, name))
+    except (roots.RootError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    return 0
+
+
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
-            "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs}
+            "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs,
+            "settings": settings, "write-file": write_file, "profile": profile}
 STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain}

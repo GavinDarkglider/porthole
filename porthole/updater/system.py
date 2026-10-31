@@ -105,7 +105,11 @@ def read_make_conf(portage_dir="/etc/portage"):
 
 # -- what flags mean ---------------------------------------------------------------
 
-def _repo_profiles():
+def _repo_profiles(locations=None):
+    """The profiles folders of the repositories (this computer's, or the
+    given repository locations: another system's)"""
+    if locations is not None:
+        return [os.path.join(l, "profiles") for l in locations]
     try:
         import portage
         return [os.path.join(r.location, "profiles")
@@ -114,11 +118,11 @@ def _repo_profiles():
         return ["/var/db/repos/gentoo/profiles"]
 
 
-def flag_descriptions():
+def flag_descriptions(locations=None):
     """{flag: description} for global flags, and {flag: [cat/pkg...]} for
     flags only some packages use (use.local.desc)"""
     descriptions, local = {}, {}
-    for profiles in _repo_profiles():
+    for profiles in _repo_profiles(locations):
         for line in _lines(os.path.join(profiles, "use.desc")):
             flag, sep, text = line.partition(" - ")
             if sep:
@@ -132,10 +136,10 @@ def flag_descriptions():
     return descriptions, local
 
 
-def global_flags():
+def global_flags(locations=None):
     """Flags Gentoo describes as global (use.desc): many packages use them"""
     flags = set()
-    for profiles in _repo_profiles():
+    for profiles in _repo_profiles(locations):
         for line in _lines(os.path.join(profiles, "use.desc")):
             flag, sep, _text = line.partition(" - ")
             if sep:
@@ -143,7 +147,7 @@ def global_flags():
     return flags
 
 
-def all_iuse():
+def all_iuse(locations=None):
     """Every flag some package in the repositories has (its IUSE): from
     the metadata cache where a repository has one, else from the
     ebuilds. Description files aren't enough: overlays often don't
@@ -152,7 +156,8 @@ def all_iuse():
     flags = set()
     try:
         import portage
-        repos = [r.location for r in portage.settings.repositories]
+        repos = locations if locations is not None else [
+            r.location for r in portage.settings.repositories]
     except Exception:
         repos = ["/var/db/repos/gentoo"]
     iuse_line = re.compile(r"^IUSE=(.*)$", re.M)
@@ -174,10 +179,10 @@ def all_iuse():
     return flags
 
 
-def expand_values(name):
+def expand_values(name, locations=None):
     """{value: description} a USE_EXPAND variable may take"""
     values = {}
-    for profiles in _repo_profiles():
+    for profiles in _repo_profiles(locations):
         for line in _lines(os.path.join(profiles, "desc", name.lower() + ".desc")):
             value, sep, text = line.partition(" - ")
             if sep:

@@ -194,6 +194,13 @@ class SystemsWindow(Gtk.Window):
         new = Gtk.Button(label="New system…")
         new.connect("clicked", lambda b: self.new_system())
         buttons.pack_start(new, False, False, 0)
+        self.settings_button = Gtk.Button(label="Settings…")
+        self.settings_button.set_tooltip_text(
+            "Everything it is built with: profile, compiler, USE flags, hardware, "
+            "build options and its Portage files")
+        self.settings_button.connect("clicked", lambda b: self.open_settings(self.selected()))
+        buttons.pack_start(self.settings_button, False, False, 0)
+        self.view.connect("row-activated", lambda v, p, c: self.open_settings(self.selected()))
         self.toolchain_button = Gtk.Button(label="Build its toolchain…")
         self.toolchain_button.set_tooltip_text(
             "The cross compiler for it: the versions of gcc, binutils, the C library and "
@@ -245,6 +252,7 @@ class SystemsWindow(Gtk.Window):
 
     def update_buttons(self):
         self.remove_button.set_sensitive(self.selected() is not None)
+        self.settings_button.set_sensitive(self.selected() is not None)
         self.toolchain_button.set_sensitive(self.selected() is not None)
 
     def error(self, text, detail):
@@ -271,7 +279,16 @@ class SystemsWindow(Gtk.Window):
             if not ok:
                 self.error("The system wasn't made", output)
             self.refresh()
+            if ok:
+                # set it up before anything is built
+                self.open_settings(args[1])
         run_as_root(service("plugin", "crossdev", *args), done)
+
+    def open_settings(self, name):
+        if not name:
+            return
+        from porthole.plugins.crossdev.settingswin import SystemSettingsWindow
+        SystemSettingsWindow(name, self, on_changed=self.refresh)
 
     def build_toolchain(self):
         """Show what its profile allows (worked out as the user), then

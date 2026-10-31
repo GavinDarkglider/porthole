@@ -163,6 +163,23 @@ def set_binpkgs(name, keep, roots_dir=None, targets_file=None):
     return keep
 
 
+def _fill_from_profile(name, root):
+    """Porthole's settings block, with the compiler settings the profile
+    has written in (they must always be set, and the user changes them
+    there); nothing if portage can't read the new system yet"""
+    from porthole.plugins.crossdev import conf
+    target = targets.Target(name, name, root, root)
+    try:
+        profile = conf.profile_values(target)[0]
+    except Exception:
+        profile = {}
+    values = {v: profile[v] for v in ("CHOST", "CFLAGS", "CXXFLAGS", "LDFLAGS")
+              if profile.get(v)}
+    if values.get("CXXFLAGS") == values.get("CFLAGS"):
+        values["CXXFLAGS"] = "${CFLAGS}"
+    conf.write(target, values)
+
+
 def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
            targets_file=None, repos=None, binpkgs_dir=None, gentoo_key=None,
            keep_binpkgs=False):
@@ -210,9 +227,10 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
             f.write(
                 "# Made by Porthole for %s (%s), profile %s:%s\n"
                 "#\n"
-                "# CHOST, CFLAGS and USE come from the profile. CBUILD isn't set here:\n"
-                "# cross builds on the computer that built this system set it\n"
-                "# themselves, and in the emulator the system builds for itself.\n"
+                "# Settings start from the profile's; Porthole's own are in its block\n"
+                "# below. CBUILD isn't set here: cross builds on the computer that built\n"
+                "# this system set it themselves, and in the emulator the system builds\n"
+                "# for itself.\n"
                 "\n"
                 "# packages built for this system, kept apart from that computer's own\n"
                 'PKGDIR="%s"\n'
@@ -222,6 +240,7 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
                 "# Your own settings below.\n"
                 % (title, name, repo, profile, os.path.join(binpkgs_dir, name),
                    binpkg_block(keep_binpkgs)))
+        _fill_from_profile(name, root)
         if os.path.isfile(gentoo_key):
             keys = os.path.join(root, "usr", "share", "openpgp-keys")
             os.makedirs(keys, mode=0o755, exist_ok=True)
@@ -244,6 +263,33 @@ def create(name, title, repo, profile, extra_repos=(), roots_dir=None,
         shutil.rmtree(root, ignore_errors=True)
         raise
     return targets.load(targets_file)[name]
+
+
+def used_repos(target, repos=None):
+    """{name: location} of the repositories a system uses"""
+    from porthole.updater import repopool
+    repos = host_repos() if repos is None else repos
+    return {r: repos[r] for r in repopool.target_repos(target.portage_dir) if r in repos}
+
+
+def set_profile(name, repo, profile, roots_dir=None, targets_file=None, repos=None):
+    """Point a system at another profile of the repositories it uses"""
+    target = made_here(roots_dir, targets_file).get(name)
+    if target is None:
+        raise RootError("No system called %s was made here" % name)
+    usable = used_repos(target, repos)
+    if repo not in usable:
+        raise RootError("%s doesn't use the repository %s; tick it for %s in "
+                        "Repositories first" % (target.title, repo, target.title))
+    if not [p for p in profiles({repo: usable[repo]}) if p[2] == profile]:
+        raise RootError("Not a profile in %s: %s" % (repo, profile))
+    profile_dir = os.path.join(usable[repo], "profiles", profile)
+    if not os.path.isdir(profile_dir):
+        raise RootError("No such profile directory: %s" % profile_dir)
+    link = os.path.join(target.portage_dir, "make.profile")
+    os.symlink(profile_dir, link + ".new")
+    os.replace(link + ".new", link)
+    return "%s:%s" % (repo, profile)
 
 
 def mounts_under(path, mounts_file="/proc/self/mounts"):
