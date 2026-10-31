@@ -242,6 +242,12 @@ class PortholePreferences:
             ['history_length', 10]
         ]
 
+        # the settings window: big enough for its pages, then as left
+        preflist['settings'] = [
+            ['width', 860],
+            ['height', 660],
+        ]
+
         for window_name in list(preflist.keys()):
             setattr(self, window_name, OptionsClass()) # construct self.main etc.
             for pref_name, default_value in preflist[window_name]:
@@ -468,6 +474,8 @@ class PortholePreferences:
             for i, item in enumerate(('forecolor', 'backcolor', 'fontweight')):
                 if not same_value(format_list[i], self.TAG_DEFAULTS[key][i]):
                     dom.additem('/window/terminal/tag/' + key + '/' + item, format_list[i])
+        dom.additem('/window/settings/width', self.settings.width)
+        dom.additem('/window/settings/height', self.settings.height)
         dom.additem('/window/run_dialog/width', self.run_dialog.width)
         dom.additem('/window/run_dialog/height', self.run_dialog.height)
         dom.additem('/window/run_dialog/history', self.run_dialog.history)

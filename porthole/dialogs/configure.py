@@ -90,6 +90,7 @@ class ConfigDialog:
             scroller.add(widget)
             indexes[name] = notebook.append_page(scroller, Gtk.Label(label=title))
 
+        self.restore_size()
         self.window.show_all()
         if page in indexes:
             notebook.set_current_page(indexes[page])
@@ -97,6 +98,25 @@ class ConfigDialog:
     #-----------------------------------------------
     # GUI Callback function definitions start here
     #-----------------------------------------------
+
+    def restore_size(self):
+        """Open at the size it was left at (at first: big enough to use),
+        never bigger than the screen"""
+        try:
+            width, height = int(config.Prefs.settings.width), int(config.Prefs.settings.height)
+        except (AttributeError, TypeError, ValueError):
+            width, height = 860, 660
+        display = Gdk.Display.get_default()
+        monitor = display.get_primary_monitor() or display.get_monitor(0) if display else None
+        if monitor:
+            area = monitor.get_workarea()
+            width, height = min(width, area.width - 40), min(height, area.height - 40)
+        self.window.set_default_size(max(width, 600), max(height, 400))
+
+        def remember(window, event):
+            config.Prefs.settings.width, config.Prefs.settings.height = window.get_size()
+            return False
+        self.window.connect("configure-event", remember)
 
     def regroup_porthole_page(self, notebook):
         """The old Global, Main Window, Emerge and Terminal pages become
