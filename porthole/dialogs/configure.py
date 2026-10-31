@@ -84,11 +84,11 @@ class ConfigDialog:
         self.system_page = SystemSettingsPage()
         self.updates_page = UpdaterSettingsPage()
         indexes = {}
-        for name, title, widget in (("system", _("System"), self.system_page),
-                                    ("updates", _("Updates"), self.updates_page)):
-            scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
-            scroller.add(widget)
-            indexes[name] = notebook.append_page(scroller, Gtk.Label(label=title))
+        # System has tabs of its own, each scrolling
+        indexes["system"] = notebook.append_page(self.system_page, Gtk.Label(label=_("System")))
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(self.updates_page)
+        indexes["updates"] = notebook.append_page(scroller, Gtk.Label(label=_("Updates")))
 
         self.restore_size()
         self.window.show_all()

@@ -408,9 +408,9 @@ LICENCE_CHOICES = (
 )
 
 
-class SystemSettingsPage(Gtk.Grid):
-    """Settings of the system itself (now: which licences are fine).
-    Saving asks for administrator rights."""
+class LicencesPage(Gtk.Grid):
+    """Which licences are fine (System > Licences). Saving asks for
+    administrator rights."""
 
     def __init__(self, target=None):
         super().__init__(row_spacing=8, column_spacing=12, border_width=12)
@@ -484,3 +484,194 @@ def _effective_licences():
         return portage.settings.get("ACCEPT_LICENSE", "").strip() or "(not set)"
     except Exception:
         return "(unknown)"
+
+
+class SystemSettingsPage(Gtk.Notebook):
+    """System: the Portage settings of this computer, as written in its
+    make.conf and profile, with facts about the machine. Shown as they
+    are (make.conf is never rewritten); licences can be set."""
+
+    def __init__(self, target=None):
+        super().__init__(border_width=6)
+        self.target = target
+        self.licences = LicencesPage(target)
+        self.tabs = {}
+        for name, title in (("overview", "Overview"), ("use", "USE flags"),
+                            ("hardware", "Hardware"), ("build", "Build options")):
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10,
+                          border_width=12, valign=Gtk.Align.START)
+            box.pack_start(_small("Reading the settings..."), False, False, 0)
+            self.tabs[name] = box
+            self._append(box, title)
+        self._append(self.licences, "Licences")
+        import threading
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _append(self, widget, title):
+        scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(widget)
+        self.append_page(scroller, Gtk.Label(label=title))
+
+    def save(self, callback=None):
+        self.licences.save(callback)
+
+    def _read(self):
+        """The slow part (all packages' flags, gcc, cpuid2cpuflags), not
+        in the main loop"""
+        from porthole.updater import system
+        info = {}
+        try:
+            info["conf"] = system.read_make_conf()
+            info["profile"] = system.profile()[0]
+            info["profile_use"] = system.profile_use()
+            info["machine"] = system.machine()
+            info["descriptions"], _local = system.flag_descriptions()
+            info["iuse"] = system.all_iuse()
+            info["findings"] = system.findings(info["conf"], info["machine"], info["iuse"])
+            info["expand"] = {name: system.expand_values(name) for name in system.EXPAND}
+        except Exception as e:
+            info["error"] = "%s: %s" % (type(e).__name__, e)
+        GLib.idle_add(self._show, info)
+
+    def _show(self, info):
+        for box in self.tabs.values():
+            for child in box.get_children():
+                child.destroy()
+        if "error" in info:
+            self.tabs["overview"].pack_start(
+                _small("Couldn't read the settings: " + info["error"]), False, False, 0)
+            self.show_all()
+            return False
+        self._overview(info)
+        self._use(info)
+        self._hardware(info)
+        self._build(info)
+        self.show_all()
+        return False
+
+    # -- the tabs --
+
+    def _overview(self, info):
+        box, m = self.tabs["overview"], info["machine"]
+        box.pack_start(_heading("This computer"), False, False, 0)
+        facts = [("Profile", info["profile"] or "?"),
+                 ("CPU", "%s (%d threads)" % (m["cpu"] or "?", m["threads"])),
+                 ("Memory", "%s GB" % (m["memory_gb"] or "?"))]
+        box.pack_start(_facts(facts), False, False, 0)
+        box.pack_start(_heading("Worth a look"), False, False, 0)
+        if not info["findings"]:
+            box.pack_start(_small("Nothing stands out."), False, False, 0)
+        for title, detail in info["findings"]:
+            item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=6)
+            label = Gtk.Label(xalign=0, wrap=True, max_width_chars=80)
+            label.set_markup("\u2022 <b>%s</b>" % GLib.markup_escape_text(title))
+            item.pack_start(label, False, False, 0)
+            item.pack_start(_small(detail, margin_start=14), False, False, 0)
+            box.pack_start(item, False, False, 0)
+        box.pack_start(_small(
+            "These are notes, not changes: Porthole doesn't touch make.conf here.",
+            margin_top=6), False, False, 0)
+
+    def _use(self, info):
+        box = self.tabs["use"]
+        conf, described, iuse = info["conf"], info["descriptions"], info["iuse"]
+        box.pack_start(_small(
+            "Your USE flags as make.conf groups them, each with its comment. Hover a "
+            "flag for what it does. Struck through: no package has the flag, so it "
+            "does nothing."), False, False, 0)
+        mine = set()
+        for group in conf["use_groups"]:
+            box.pack_start(_heading(group["title"]), False, False, 0)
+            for note in group["notes"]:
+                box.pack_start(_small(note), False, False, 0)
+            box.pack_start(_flags(group["flags"], described, iuse), False, False, 0)
+            mine.update(f.lstrip("-+") for f in group["flags"])
+        inherited = sorted(f for f in info["profile_use"]
+                           if f.lstrip("-") not in mine and "_" not in f.lstrip("-"))
+        expander = Gtk.Expander(label="From the profile (%s): %d more"
+                                % (info["profile"] or "?", len(inherited)))
+        expander.add(_flags(inherited, described, iuse))
+        box.pack_start(expander, False, False, 0)
+
+    def _hardware(self, info):
+        box, conf = self.tabs["hardware"], info["conf"]
+        box.pack_start(_small(
+            "What make.conf says about the hardware. Packages build support for exactly "
+            "these."), False, False, 0)
+        for name in ("VIDEO_CARDS", "INPUT_DEVICES", "CPU_FLAGS_X86"):
+            var = conf["vars"].get(name)
+            box.pack_start(_heading(name), False, False, 0)
+            for note in (var or {}).get("notes") or []:
+                box.pack_start(_small(note), False, False, 0)
+            if not var:
+                box.pack_start(_small("Not set in make.conf (the profile decides)."),
+                               False, False, 0)
+                continue
+            values = info["expand"].get(name) or {}
+            box.pack_start(_flags(var["text"].split(), values,
+                                  set(values) or None), False, False, 0)
+        cpu = info["machine"].get("cpu_flags")
+        if cpu is not None:
+            box.pack_start(_small("cpuid2cpuflags finds: " + " ".join(cpu)), False, False, 0)
+
+    def _build(self, info):
+        box, conf, m = self.tabs["build"], info["conf"], info["machine"]
+        from porthole.updater.system import jobs_advice
+
+        def value(name):
+            return (conf["vars"].get(name) or {}).get("text") or "(not set)"
+        box.pack_start(_heading("Compiler"), False, False, 0)
+        box.pack_start(_facts([
+            ("COMMON_FLAGS", value("COMMON_FLAGS")),
+            ("CFLAGS", value("CFLAGS")),
+            ("CXXFLAGS", value("CXXFLAGS")),
+            ("-march=native here is", m.get("march_native") or "?")]), False, False, 0)
+        box.pack_start(_heading("Parallel builds"), False, False, 0)
+        jobs, suggested, why = jobs_advice(value("MAKEOPTS"), m)
+        box.pack_start(_facts([("MAKEOPTS", value("MAKEOPTS")),
+                               ("Suggested", "-j%d (%s)" % (suggested, why))]),
+                       False, False, 0)
+
+
+def _heading(text):
+    label = Gtk.Label(xalign=0, margin_top=6)
+    label.set_markup("<b>%s</b>" % GLib.markup_escape_text(text))
+    return label
+
+
+def _small(text, **props):
+    label = Gtk.Label(xalign=0, wrap=True, max_width_chars=90, **props)
+    label.set_markup("<small>%s</small>" % GLib.markup_escape_text(text))
+    return label
+
+
+def _facts(rows):
+    grid = Gtk.Grid(column_spacing=12, row_spacing=4, margin_start=6)
+    for i, (name, value) in enumerate(rows):
+        grid.attach(Gtk.Label(label=name, xalign=0), 0, i, 1, 1)
+        label = Gtk.Label(label=value, xalign=0, selectable=True, wrap=True)
+        grid.attach(label, 1, i, 1, 1)
+    return grid
+
+
+def _flags(flags, described, known):
+    """Flags as small labels that wrap, '-' ones dimmed, unknown ones
+    struck through; hover for the description"""
+    flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=30,
+                       column_spacing=6, row_spacing=2, margin_start=6, homogeneous=False)
+    for flag in flags:
+        name = flag.lstrip("-+")
+        off = flag.startswith("-")
+        text = GLib.markup_escape_text(flag)
+        if known is not None and name not in known:
+            text = "<s>%s</s>" % text
+        elif off:
+            text = "<span alpha='60%%'>%s</span>" % text
+        label = Gtk.Label(xalign=0)
+        label.set_markup("<small>%s</small>" % text)
+        tip = described.get(name)
+        if known is not None and name not in known:
+            tip = "No package has this flag: setting it changes nothing."
+        label.set_tooltip_text(("Off: " if off else "") + (tip or "No description"))
+        flow.add(label)
+    return flow
