@@ -372,22 +372,9 @@ class AdvancedEmergeDialog:
         self.version_changed(button_widget)
 
     def on_make_conf_commit(self, button_widget):
-        debug.dprint("ADVEMERGE: on_make_conf_commit()")
-        use_flags = self.get_use_flags()
-        if not use_flags: return
-        addlist = use_flags.split()
-        removelist = []
-        for item in addlist: # get opposite of flags
-            if item.startswith('-'):
-                removelist.append(item[1:])
-            else:
-                removelist.append('-' + item)
-        # set_user_config must be performed after set_make_conf has finished or we get problems.
-        # we need to set package.use in case the flag was set there originally!
-        package_use_callback = Dispatcher( db.userconfigs.set_user_config,\
-                'USE', self.package.full_name, '', '', removelist, self.reload )
-        backends.portage_lib.set_make_conf('USE', add=addlist, remove=removelist, callback=package_use_callback )
-        self.version_changed(button_widget)
+        """The old "Update make.conf" button (hidden): Porthole doesn't
+        change make.conf; global USE is set in Settings > System"""
+        debug.dprint("ADVEMERGE: on_make_conf_commit(): not supported")
 
     def on_package_keywords_commit(self, button_widget):
         debug.dprint("ADVEMERGE: on_package_keywords_commit()")

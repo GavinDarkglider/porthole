@@ -512,6 +512,46 @@ class MakeConf:
         self.data += ('\n' +_property + '=' + str(value) +'\n')
 
 
+# the config files Porthole edits for the user, under a system's etc/portage
+EDITABLE = ("package.use", "package.accept_keywords", "package.keywords", "package.mask",
+            "package.unmask", "package.license")
+_ITEM = re.compile(r"^[A-Za-z0-9_+.@~*=<>:/-]+$")
+
+
+def checked_target(filename):
+    """The real path of a file to edit, if it is one of the package.* files
+    (or inside one of those directories) of a system Porthole manages"""
+    try:
+        from porthole.updater import targets
+        bases = [t.portage_dir for t in targets.load().values()]
+    except Exception:
+        bases = ["/etc/portage"]
+    real = os.path.realpath(filename or "")
+    for base in bases:
+        base = os.path.realpath(base)
+        for name in EDITABLE:
+            top = os.path.join(base, name)
+            if real == top or real.startswith(top + os.sep):
+                return real
+    raise ValueError("Not a file Porthole edits: %s" % filename)
+
+
+def checked_atom(atom):
+    from portage.dep import Atom
+    try:
+        Atom(atom)
+    except Exception:
+        raise ValueError("Not a package atom: %s" % atom)
+    return atom
+
+
+def checked_item(item):
+    """A flag, keyword or atom for a config line: one word, no tricks"""
+    if not _ITEM.match(item or ""):
+        raise ValueError("Not a flag, keyword or atom: %r" % item)
+    return item
+
+
 if __name__ == "__main__":
 
     DATA_PATH = "/usr/share/porthole/"
@@ -526,6 +566,7 @@ if __name__ == "__main__":
         exit(1)
 
     _file = ""
+    filename = ""
     name = ""
     ebuild = ""
     add = []
@@ -575,9 +616,22 @@ if __name__ == "__main__":
             username = arg
             dprint("username = %s" % str(username))
 
-    if 'make.conf' in filename:
-        set_make_conf(_property, add, remove, replace)
-    elif 'package.mask' in filename:
+    # Run as root (by Porthole, through sudo, pkexec or an unlocked
+    # session): only Porthole's kind of edit, checked here, not trusted from
+    # the caller. make.conf is never changed (Settings > System uses
+    # package.use/00-porthole-global instead).
+    try:
+        filename = checked_target(filename)
+        name = checked_atom(name) if name else ""
+        ebuild = checked_atom(ebuild) if ebuild else ""
+        add = [checked_item(item) for item in add]
+        remove = [checked_item(item) for item in remove]
+        if "\n" in comment or "\n" in username or not re.match(r"^[A-Za-z0-9_.-]*$", username):
+            raise ValueError("Bad comment or user name")
+    except ValueError as e:
+        print("set_config: refused: %s" % e, file=stderr)
+        exit(2)
+    if 'package.mask' in filename:
         set_package_mask(filename, name, ebuild, comment, username, add, remove)
     else:
         set_user_config(filename, name, ebuild, comment, username, add, remove)

@@ -22,6 +22,8 @@
 '''
 
 import gi; gi.require_version("Gtk", "3.0") # make sure we have the right version
+from gettext import gettext as _
+
 from gi.repository import Gtk
 from gi.repository import Gdk
 

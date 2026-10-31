@@ -173,17 +173,10 @@ def set_make_conf(property, add="", remove="", replace="", callback=None):
     if isinstance(replace, list):
         replace = " ".join(replace)
     if not os.access(os.path.join(portage.root, portage_const.MAKE_CONF_FILE), os.W_OK):
-        # as root, the way the update assistant asks (sudo, else polkit)
-        args = ["-f", _file, "-p", property]
-        for item in add.split():
-            args += ["-a", item]
-        for item in remove.split():
-            args += ["-r", item]
-        if replace != "":
-            args += ["-R", replace]
-        debug.dprint(" * PORTAGELIB: set_make_conf(); set_config %s" % args)
-        from porthole.updater.elevate import run_set_config
-        run_set_config(args, callback or reload_portage)
+        # Porthole doesn't change make.conf as root: global USE changes go in
+        # package.use/00-porthole-global (Settings > System)
+        debug.dprint(" * PORTAGELIB: set_make_conf(); refused (make.conf is the user's)")
+        return False
     else:
         add = add.split()
         remove = remove.split()
