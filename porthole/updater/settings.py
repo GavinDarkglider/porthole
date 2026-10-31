@@ -706,6 +706,14 @@ class SystemSettingsPage(Gtk.Notebook):
                 self.on_applied()
         run_as_root(service(*args), done)
 
+    def _profile_changed(self):
+        """Read everything again (the profile changes the defaults), and
+        work out the rebuild in Updates"""
+        import threading
+        threading.Thread(target=self._read, daemon=True).start()
+        if self.on_applied:
+            self.on_applied()
+
     def _refresh(self):
         """Redraw the tabs that show changes"""
         for name in ("use", "hardware"):
@@ -726,6 +734,10 @@ class SystemSettingsPage(Gtk.Notebook):
                  ("CPU", "%s (%d threads)" % (m["cpu"] or "?", m["threads"])),
                  ("Memory", "%s GB" % (m["memory_gb"] or "?"))]
         box.pack_start(_facts(facts), False, False, 0)
+        change = Gtk.Button(label="Change profile...", halign=Gtk.Align.START, margin_start=6)
+        change.connect("clicked", lambda b: ProfileDialog(self.get_toplevel(), info["profile"],
+                                                          self._profile_changed))
+        box.pack_start(change, False, False, 0)
         box.pack_start(_heading("Worth a look"), False, False, 0)
         if not info["findings"]:
             box.pack_start(_small("Nothing stands out."), False, False, 0)
@@ -927,3 +939,137 @@ def _flags(flags, described, known, on_click=None, state=None, changed=(), pendi
             label.set_tooltip_text(tip)
             flow.add(label)
     return flow
+
+
+class ProfileDialog(Gtk.Dialog):
+    """Choose another profile: preview what it rebuilds, then switch
+    (as root; Updates then works out the rebuild for review)"""
+
+    def __init__(self, parent, current, on_switched):
+        super().__init__(title="Porthole: change profile", transient_for=parent, modal=True)
+        from porthole.updater import system
+        self.current, self.on_switched = current, on_switched
+        self.set_default_size(640, 520)
+        area = self.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+        area.pack_start(_small(
+            "The profile sets this computer's defaults: USE flags, which packages make "
+            "up the system, and the init system. Switching usually rebuilds a lot. "
+            "Now: %s" % current), False, False, 0)
+        self.store = Gtk.ListStore(str, str)
+        self.all = system.profiles()
+        self.view = Gtk.TreeView(model=self.store, headers_visible=True)
+        for i, title in enumerate(("Profile", "Status")):
+            self.view.append_column(Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i))
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.add(self.view)
+        area.pack_start(scroller, True, True, 0)
+        self.show_all_check = Gtk.CheckButton(label="Also show dev and exp profiles "
+                                              "(not for everyday use)")
+        self.show_all_check.connect("toggled", lambda b: self.fill())
+        area.pack_start(self.show_all_check, False, False, 0)
+        self.note = Gtk.Label(xalign=0, wrap=True, max_width_chars=80)
+        area.pack_start(self.note, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.preview_button = self.add_button("Preview rebuild", 2)
+        self.switch_button = self.add_button("Switch", Gtk.ResponseType.OK)
+        self.view.get_selection().connect("changed", self.selected)
+        self.connect("response", self.on_response)
+        self.fill()
+        self.show_all()
+
+    def fill(self):
+        self.store.clear()
+        everything = self.show_all_check.get_active()
+        for name, status, _dir in self.all:
+            if everything or status == "stable" or name == self.current:
+                row = self.store.append([name, status + (" (now)" if name == self.current
+                                                         else "")])
+                if name == self.current:
+                    self.view.get_selection().select_iter(row)
+
+    def chosen(self):
+        model, row = self.view.get_selection().get_selected()
+        return model[row][0] if row else None
+
+    def selected(self, *args):
+        from porthole.updater.system import init_system
+        name = self.chosen()
+        other = bool(name) and name != self.current
+        self.preview_button.set_sensitive(other)
+        self.switch_button.set_sensitive(other)
+        notes = []
+        if other and init_system(name) != init_system(self.current):
+            notes.append("<b>This changes the init system (%s to %s).</b> That is more than "
+                         "a rebuild: services, logging and boot change, and there are "
+                         "manual steps (see the Gentoo handbook) before rebooting."
+                         % (init_system(self.current), init_system(name)))
+        parts = lambda n: (n or "").split("/")
+        if other and "no-multilib" in parts(name) and "no-multilib" not in parts(self.current):
+            notes.append("<b>Gentoo doesn't support switching to no-multilib in place:</b> "
+                         "32-bit libraries the system has can't be removed this way. It "
+                         "needs a reinstall from a no-multilib stage.")
+        if other and ("hardened" in parts(name)) != ("hardened" in parts(self.current)):
+            notes.append("This changes the compiler's default hardening: rebuild the "
+                         "toolchain first, then everything (emerge -e @world), not just "
+                         "what the update rebuilds.")
+        status = next((s for n, s, _d in self.all if n == name), "")
+        if other and status != "stable":
+            notes.append("This is a %s profile: not tested for everyday use." % status)
+        self.note.set_markup("<small>%s</small>" % "\n".join(notes))
+
+    def on_response(self, dialog, response):
+        if response == 2:
+            self.preview()
+        elif response == Gtk.ResponseType.OK:
+            self.switch()
+        else:
+            self.destroy()
+
+    def preview(self):
+        import threading
+        from porthole.updater import system
+        name = self.chosen()
+        self.set_sensitive(False)
+        self.note.set_markup("<small>Working out what %s would rebuild, on a copy of the "
+                             "configuration (a few minutes)...</small>"
+                             % GLib.markup_escape_text(name))
+
+        def work():
+            try:
+                plan = system.preview_profile(name)
+                builds = [m["cpv"] for m in plan.get("merge_list") or []]
+                if plan.get("status") in ("ready", "needs-approval", "up-to-date"):
+                    text = ("Nothing needs rebuilding." if not builds else
+                            "Would build %d package%s: %s" % (
+                                len(builds), "" if len(builds) == 1 else "s",
+                                ", ".join(builds[:40]) + (" ..." if len(builds) > 40 else "")))
+                else:
+                    from porthole.updater.analyze import summarize
+                    title, body = summarize(plan)
+                    text = "Portage couldn't work it out as it stands: %s %s" % (title, body)
+            except Exception as e:
+                text = "Couldn't preview it: %s" % e
+            GLib.idle_add(done, text)
+
+        def done(text):
+            self.set_sensitive(True)
+            self.selected()
+            self.note.set_markup(self.note.get_label() + "\n<small>%s</small>"
+                                 % GLib.markup_escape_text(text))
+            return False
+        threading.Thread(target=work, daemon=True).start()
+
+    def switch(self):
+        name = self.chosen()
+        self.set_sensitive(False)
+
+        def done(ok, output):
+            self.set_sensitive(True)
+            if not ok:
+                _error(self, "The profile wasn't changed", output or "Cancelled.")
+                return
+            self.destroy()
+            self.on_switched()
+        run_as_root(service("profile", name), done)

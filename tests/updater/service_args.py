@@ -43,6 +43,8 @@ CASES = [
     (["cancel"], {"job": None, "drop": False}),
     (["keep-building"], {"job": None}),
     (["licences", "redistributable"], {"policy": "redistributable", "target": None}),
+    (["profile", "default/linux/amd64/23.0/desktop"], {"name": "default/linux/amd64/23.0/desktop",
+                                                       "target": None}),
     (["global-use", '{"use": {"opus": false}}'], {"changes": '{"use": {"opus": false}}',
                                                   "target": None}),
     (["licences", "system", "--target", "arm-board"], {"policy": "system", "target": "arm-board"}),

@@ -386,3 +386,58 @@ def preview_global_use(model, log=lambda m: None):
             with open(path, "w") as f:
                 f.write(text)
         return Analyzer(config_root=scratch.root, log=log).analyze()
+
+
+# -- switching profiles --------------------------------------------------------------
+
+def profiles(arch=None):
+    """[(name, status, profiles dir)] for this arch from every repository's
+    profiles.desc, stable first"""
+    try:
+        import portage
+        arch = arch or portage.settings["ARCH"]
+        repos = list(portage.settings.repositories)
+    except Exception:
+        return []
+    found = []
+    for repo in repos:
+        directory = os.path.join(repo.location, "profiles")
+        for line in _lines(os.path.join(directory, "profiles.desc")):
+            words = line.split()
+            if len(words) >= 3 and words[0] == arch:
+                found.append((words[1], words[2], directory))
+    order = {"stable": 0, "dev": 1, "exp": 2}
+    return sorted(found, key=lambda p: (order.get(p[1], 3), p[0]))
+
+
+def init_system(name):
+    return "systemd" if "systemd" in (name or "").split("/") else "openrc"
+
+
+def link_profile(portage_dir, profiles_dir, name):
+    """Point make.profile at a profile, relative like eselect does"""
+    link = os.path.join(portage_dir, "make.profile")
+    target = os.path.join(profiles_dir, name)
+    if not os.path.isdir(target):
+        raise ValueError("No such profile directory: %s" % target)
+    relative = os.path.relpath(target, os.path.realpath(portage_dir))
+    tmp = link + ".porthole"
+    if os.path.lexists(tmp):
+        os.unlink(tmp)
+    os.symlink(relative, tmp)
+    os.replace(tmp, link)
+
+
+def preview_profile(name, log=lambda m: None):
+    """What switching to profile name would rebuild, worked out on a
+    scratch copy of the config: the plan"""
+    from porthole.updater.analyze import Analyzer, ScratchConfig
+    match = [p for p in profiles() if p[0] == name]
+    if not match:
+        raise ValueError("Not a profile for this computer: %s" % name)
+    with ScratchConfig("/") as scratch:
+        link = os.path.join(scratch.portage_dir, "make.profile")
+        if os.path.lexists(link):
+            os.unlink(link)
+        os.symlink(os.path.join(match[0][2], name), link)
+        return Analyzer(config_root=scratch.root, log=log).analyze()

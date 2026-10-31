@@ -1055,6 +1055,23 @@ def set_global_use(text, target_name=None):
     return "written"
 
 
+def set_profile(name, target_name=None):
+    """Switch a target's profile (only to one its repositories list)"""
+    from porthole.updater import system
+    try:
+        target = targets.get(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    match = [p for p in system.profiles() if p[0] == name]
+    if not match:
+        raise JobError("Not a profile for this computer: %s" % name)
+    try:
+        system.link_profile(target.portage_dir, match[0][2], name)
+    except (ValueError, OSError) as e:
+        raise JobError(str(e))
+    return name
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
