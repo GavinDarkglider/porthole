@@ -108,11 +108,11 @@ def _sentences(lines):
     return text + "." if text and text[-1] not in ".!?" else text
 
 
-def _file_for(kind):
-    return "/etc/portage/%s/%s" % (CONFIG_DIRS.get(kind, "package." + kind), OWNED_NAME)
+def _file_for(kind, portage_dir="/etc/portage"):
+    return "%s/%s/%s" % (portage_dir, CONFIG_DIRS.get(kind, "package." + kind), OWNED_NAME)
 
 
-def _refused_text(item):
+def _refused_text(item, portage_dir="/etc/portage"):
     """(what was done, why, how to change it) for a refusal"""
     if item["type"] == "stage":
         key = item.get("key", "")
@@ -136,7 +136,7 @@ def _refused_text(item):
     why = _sentences(item.get("explanation"))
     if item.get("unlocks"):
         return ("Did not add '%s' to %s, so %s stays held back."
-                % (item["line"], _file_for(item["kind"]), item["unlocks"]),
+                % (item["line"], _file_for(item["kind"], portage_dir), item["unlocks"]),
                 why + " It would mean using a testing version, which is your call.",
                 "Open Updates and click Check now: it is offered there for held-back "
                 "updates, for you to tick.")
@@ -149,7 +149,7 @@ def _refused_text(item):
                   "Porthole never unmasks one by itself.",
     }.get(item["kind"], "Porthole doesn't make this kind of change by itself.")
     return ("Did not add '%s' to %s; what needed it is held back."
-            % (item["line"], _file_for(item["kind"])),
+            % (item["line"], _file_for(item["kind"], portage_dir)),
             (why + " " if why else "") + reason,
             "Open Updates and click Check now: the change is offered there for you "
             "to approve.")
@@ -158,6 +158,8 @@ def _refused_text(item):
 def news_text(plan, refused, window_text, job_id=None):
     """(title, body) of the news item for an update the autopilot queued
     (or couldn't)"""
+    from porthole.updater.targets import of_plan
+    portage_dir = of_plan(plan).portage_dir
     merges = plan.get("merge_list") or []
     rebuilds = (plan.get("preserved") or {}).get("merge_list") or []
     lives = (plan.get("live") or {}).get("changed") or []
@@ -210,7 +212,8 @@ def news_text(plan, refused, window_text, job_id=None):
                 "-----------------------------------------"]
         for fix in accepted:
             out.append("")
-            out.append(_para("Added '%s' to %s." % (fix["line"], _file_for(fix["kind"])),
+            out.append(_para("Added '%s' to %s." % (fix["line"],
+                                                    _file_for(fix["kind"], portage_dir)),
                              "* "))
             why = _sentences(fix.get("explanation"))
             if why:
@@ -235,7 +238,7 @@ def news_text(plan, refused, window_text, job_id=None):
     if refused:
         out += ["", "What it left for you", "--------------------"]
         for value in sorted(refused):
-            did, why, change = _refused_text(refused[value])
+            did, why, change = _refused_text(refused[value], portage_dir)
             out.append("")
             out.append(_para(did, "* "))
             if why:

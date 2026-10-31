@@ -33,6 +33,7 @@ import signal
 import subprocess
 import time
 
+from porthole.updater import targets
 from porthole.updater.analyze import CONFIG_DIRS, OWNED_NAME, TEMP_NAME
 from porthole.updater.commands import script_command
 from porthole.updater.service import (
@@ -85,17 +86,18 @@ def newest_config_change(top=PORTAGE_DIR):
 def stale_reason(plan):
     """Why the plan may no longer match the system, or None"""
     checked = plan_time(plan)
+    portage_dir = targets.of_plan(plan).portage_dir
     if (last_repo_sync() or 0) > checked + GRACE:
         return "The repositories were synced after this check."
-    if newest_config_change() > checked + GRACE:
-        return "/etc/portage was changed after this check."
+    if newest_config_change(portage_dir) > checked + GRACE:
+        return "%s was changed after this check." % portage_dir
     return None
 
 
-def write_fixes(fixes):
-    """Append approved lines to /etc/portage/package.*/zz-porthole"""
+def write_fixes(fixes, portage_dir=PORTAGE_DIR):
+    """Append approved lines to <portage_dir>/package.*/zz-porthole"""
     for fix in fixes:
-        path = os.path.join(PORTAGE_DIR, CONFIG_DIRS[fix["kind"]])
+        path = os.path.join(portage_dir, CONFIG_DIRS[fix["kind"]])
         if os.path.isfile(path):
             raise JobError(
                 "%s is a single file. Porthole keeps its changes in its own file, "
@@ -104,7 +106,7 @@ def write_fixes(fixes):
     stamp = time.strftime("%Y-%m-%d")
     written = []
     for fix in fixes:
-        directory = os.path.join(PORTAGE_DIR, CONFIG_DIRS[fix["kind"]])
+        directory = os.path.join(portage_dir, CONFIG_DIRS[fix["kind"]])
         os.makedirs(directory, exist_ok=True)
         path = os.path.join(directory, OWNED_NAME)
         try:
@@ -124,9 +126,9 @@ def write_fixes(fixes):
     return written
 
 
-def stage_shell(stage):
+def stage_shell(stage, portage_dir=PORTAGE_DIR):
     """One shell command line for a stage; stops at the first failure"""
-    temp = os.path.join(PORTAGE_DIR, CONFIG_DIRS["use"], TEMP_NAME)
+    temp = os.path.join(portage_dir, CONFIG_DIRS["use"], TEMP_NAME)
     steps = []
     if stage.get("remove_config"):
         steps.append("rm -f " + shlex.quote(temp))
@@ -280,13 +282,14 @@ def submit_update(generated, later=False, auto=None):
 def plan_steps(plan):
     """Job steps carrying out a verified plan"""
     steps = []
+    target = targets.of_plan(plan)
     if plan.get("fixes"):
         steps.append({"kind": "apply-config",
-                      "title": "Add the approved changes to /etc/portage",
-                      "fixes": plan["fixes"]})
+                      "title": "Add the approved changes to " + target.portage_dir,
+                      "fixes": plan["fixes"], "target": target.name})
     for stage in plan.get("stages") or []:
         steps.append({"kind": "shell", "title": stage["title"],
-                      "shell": stage_shell(stage)})
+                      "shell": stage_shell(stage, target.portage_dir)})
     return steps
 
 
@@ -735,7 +738,8 @@ class Runner:
 
     def step_apply_config(self, job_id, step, log):
         try:
-            written = write_fixes(step["fixes"])
+            # only a target root knows of (targets.conf), never a path from the job
+            written = write_fixes(step["fixes"], targets.get(step.get("target")).portage_dir)
         except JobError as e:
             log("!! " + str(e))
             return False

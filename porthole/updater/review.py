@@ -26,7 +26,8 @@ from porthole.updater.analyze import (
     CONFIG_DIRS, KIND_NAMES, OWNED_NAME, format_report, normalize_choices, summarize)
 from porthole.updater.commands import icon_path
 from porthole.updater.elevate import run_as_root, service
-from porthole.updater.runner import ACTIVE, PORTAGE_DIR, stale_reason
+from porthole.updater import targets
+from porthole.updater.runner import ACTIVE, stale_reason
 from porthole.updater.service import (
     PLAN_FILE, STATE_DIR, USER_PLAN_FILE, latest_plan, load_config, read_json, world_request)
 from porthole.updater.viewer import read_jobs
@@ -266,8 +267,9 @@ class UpdateAssistant(Gtk.Window):
             kind_fixes = [f for f in fixes if f["kind"] == kind]
             if not kind_fixes:
                 continue
-            inner.pack_start(_label("Add to %s/%s/%s:" % (PORTAGE_DIR, CONFIG_DIRS[kind],
-                                                         OWNED_NAME)), False, False, 0)
+            inner.pack_start(_label("Add to %s/%s/%s:" % (
+                targets.of_plan(plan).portage_dir, CONFIG_DIRS[kind], OWNED_NAME)),
+                False, False, 0)
             for fix in kind_fixes:
                 item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=12)
                 item.pack_start(self._choice(

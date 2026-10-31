@@ -505,6 +505,7 @@ class Service:
             else:
                 plan = analyze(standing)
             plan["sync"] = sync_info
+            plan["target"] = "local"  # the scheduled check is for this computer
             write_json(PLAN_FILE, plan)
             self.log("Plan written: %s, %d updates, %d old-library rebuilds, "
                      "%d live rebuilds"
