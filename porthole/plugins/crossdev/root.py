@@ -27,11 +27,15 @@
                                                JSON: the text as a string)
         plugin crossdev profile NAME REPO:PROFILE
                                                point it at another profile
+        plugin crossdev firstboot NAME FILE    its first-boot setup (FILE: JSON
+                                               the front end wrote, mode 0600,
+                                               password hashes, never passwords)
 
     Job steps (kind "plugin", plugin "crossdev"):
 
         remove-root   {"name": NAME}
         toolchain     {"name": NAME}
+        firstboot     {"name": NAME}   write its first-boot setup into it
 
     Copyright (C) 2026 Porthole developers
 
@@ -340,7 +344,49 @@ def profile(args):
     return 0
 
 
+def firstboot(args):
+    """plugin crossdev firstboot NAME FILE"""
+    from porthole.plugins.crossdev import firstboot as fb
+    if len(args) != 2:
+        print("usage: plugin crossdev firstboot NAME FILE", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    try:
+        if os.path.getsize(args[1]) > 64 * 1024:
+            raise ValueError("That file is too big")
+        with open(args[1]) as f:
+            config = json.load(f)
+        fb.save(target.name, config)
+    except (OSError, ValueError, fb.FirstBootError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print("Saved %s's first-boot setup" % target.title)
+    return 0
+
+
+def step_firstboot(runner, job_id, step, log):
+    """Write the first-boot setup into the system (the end of its build)"""
+    from porthole.plugins.crossdev import firstboot as fb, roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    config = fb.read(target.name)
+    if not config:
+        log("No first-boot setup for %s" % target.title)
+        return True
+    try:
+        return fb.apply(target, config, log)
+    except OSError as e:
+        log("!! %s" % e)
+        return False
+
+
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs,
-            "settings": settings, "write-file": write_file, "profile": profile}
-STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain}
+            "settings": settings, "write-file": write_file, "profile": profile,
+            "firstboot": firstboot}
+STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain,
+         "firstboot": step_firstboot}

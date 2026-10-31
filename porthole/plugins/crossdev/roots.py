@@ -344,6 +344,8 @@ def remove(name, roots_dir=None, targets_file=None,
         raise RootError("Something was mounted in %s; not deleting it" % target.root)
     shutil.rmtree(target.root)
     log("Deleted %s" % target.root)
+    from porthole.plugins.crossdev import firstboot
+    firstboot.remove(name)
     packages = os.path.join(binpkgs_dir, name)
     if os.path.isdir(packages):
         shutil.rmtree(packages)

@@ -25,7 +25,39 @@ from porthole.plugins.crossdev import conf
 from porthole.updater.settings import _facts, _flags, _heading, _small
 
 TABS = (("overview", "Overview"), ("compiler", "Compiler"), ("use", "USE flags"),
-        ("hardware", "Hardware"), ("build", "Build options"), ("files", "Files"))
+        ("hardware", "Hardware"), ("build", "Build options"), ("firstboot", "First boot"),
+        ("files", "Files"))
+
+
+TITLES_SSHD = "Let me log in over the network (sshd), to finish setting it up from here"
+
+
+def _host_defaults():
+    """This computer's time zone, language, keyboard and user, as a start"""
+    import os
+    import pwd
+    found = {}
+    try:
+        link = os.path.realpath("/etc/localtime")
+        if "/zoneinfo/" in link:
+            found["timezone"] = link.split("/zoneinfo/", 1)[1]
+    except OSError:
+        pass
+    lang = os.environ.get("LANG", "")
+    if lang and lang not in ("C", "POSIX"):
+        found["locale"] = lang.replace(".utf8", ".UTF-8")
+    try:
+        with open("/etc/conf.d/keymaps") as f:
+            for line in f:
+                if line.strip().startswith("keymap="):
+                    found["keymap"] = line.split("=", 1)[1].strip().strip('"')
+    except OSError:
+        pass
+    try:
+        found["user"] = pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        pass
+    return found
 
 
 def _cpu_flags_var(arch):
@@ -111,6 +143,12 @@ class SystemSettingsWindow(Gtk.Window):
                 except toolchain.ToolchainError as e:
                     info["toolchain"] = str(e)
             info["files"] = conf.files(target)
+            from porthole.plugins.crossdev import firstboot
+            info["firstboot"] = firstboot.read_public(target.name)
+            info["firstboot_status"] = firstboot.status(target, info["firstboot"])
+            info["zones"] = firstboot.zones()
+            info["locales"] = firstboot.locales()
+            info["init"] = firstboot.init_system(target)
             info["repos"] = roots.used_repos(target)
             import os
             link = os.path.realpath(os.path.join(target.portage_dir, "make.profile"))
@@ -138,6 +176,7 @@ class SystemSettingsWindow(Gtk.Window):
         self._use()
         self._hardware()
         self._build()
+        self._firstboot()
         self._files()
         for key in self.tabs:
             self.tabs[key].show_all()
@@ -648,6 +687,162 @@ class SystemSettingsWindow(Gtk.Window):
             words.append("~" + self.info["arch"])
         self.set("ACCEPT_KEYWORDS", " ".join(words))
         self._redraw("overview")
+
+    # -- First boot --
+
+    def _firstboot(self):
+        from porthole.plugins.crossdev import firstboot as fb
+        box, info = self.tabs["firstboot"], self.info
+        saved = info["firstboot"]
+        box.pack_start(_small(
+            "Just enough that the system starts, lets you log in and gets online; Porthole on "
+            "the system takes over from there. Written into the system at the end of its "
+            "build, after its packages. Empty: left to the system's packages (a board's "
+            "repository may bring its own)."), False, False, 0)
+        if not saved:
+            box.pack_start(_small("Nothing saved yet: filled in from this computer as a start."),
+                           False, False, 0)
+        host = _host_defaults()
+        grid = Gtk.Grid(column_spacing=8, row_spacing=6, margin_start=6)
+        self.fb = {}
+
+        def combo(values, current):
+            widget = Gtk.ComboBoxText.new_with_entry()
+            completion = Gtk.EntryCompletion(model=Gtk.ListStore(str), text_column=0)
+            for value in values:
+                widget.append_text(value)
+                completion.get_model().append([value])
+            completion.set_match_func(lambda c, key, it: key.lower() in
+                                      (c.get_model()[it][0] or "").lower())
+            widget.get_child().set_completion(completion)
+            widget.get_child().set_text(current or "")
+            return widget
+
+        rows = [("hostname", "Computer name", Gtk.Entry(text=saved.get(
+                    "hostname", self.info["target"].name))),
+                ("timezone", "Time zone", combo(info["zones"], saved.get(
+                    "timezone", host.get("timezone")))),
+                ("locale", "Language", combo(info["locales"], saved.get(
+                    "locale", host.get("locale")))),
+                ("keymap", "Keyboard (text console)", combo(fb.KEYMAPS, saved.get(
+                    "keymap", host.get("keymap"))))]
+        for i, (key, title, widget) in enumerate(rows):
+            grid.attach(Gtk.Label(label=title, xalign=0), 0, i, 1, 1)
+            widget.set_hexpand(True)
+            grid.attach(widget, 1, i, 2, 1)
+            self.fb[key] = widget
+        row = len(rows)
+
+        def password_pair(row, title, is_set):
+            grid.attach(Gtk.Label(label=title, xalign=0), 0, row, 1, 1)
+            first = Gtk.Entry(visibility=False, hexpand=True,
+                              placeholder_text="set already: leave empty to keep it"
+                              if is_set else "password")
+            second = Gtk.Entry(visibility=False, hexpand=True, placeholder_text="again")
+            grid.attach(first, 1, row, 1, 1)
+            grid.attach(second, 2, row, 1, 1)
+            return first, second
+        self.fb["root"] = password_pair(row, "root password", saved.get("root_set"))
+        row += 1
+        user = saved.get("user") or {}
+        grid.attach(Gtk.Label(label="Your account", xalign=0), 0, row, 1, 1)
+        self.fb["user"] = Gtk.Entry(text=user.get("name", host.get("user", "")),
+                                    placeholder_text="user name (empty: none)")
+        grid.attach(self.fb["user"], 1, row, 1, 1)
+        self.fb["admin"] = Gtk.CheckButton(label="may run things as root (sudo)")
+        self.fb["admin"].set_active(user.get("admin", True))
+        grid.attach(self.fb["admin"], 2, row, 1, 1)
+        row += 1
+        self.fb["user_password"] = password_pair(row, "Its password",
+                                                 user.get("password_set"))
+        box.pack_start(grid, False, False, 0)
+
+        box.pack_start(_heading("Network at boot"), False, False, 0)
+        first = None
+        self.fb["network"] = {}
+        for key, (_pkg, _service, title) in fb.NETWORK.items():
+            button = (Gtk.RadioButton.new_with_label(None, title) if first is None else
+                      Gtk.RadioButton.new_with_label_from_widget(first, title))
+            first = first or button
+            button.set_margin_start(6)
+            button.set_active(saved.get("network", "networkmanager") == key)
+            self.fb["network"][key] = button
+            box.pack_start(button, False, False, 0)
+        self.fb["sshd"] = Gtk.CheckButton(label=TITLES_SSHD, margin_start=6)
+        self.fb["sshd"].set_active(saved.get("sshd", False))
+        box.pack_start(self.fb["sshd"], False, False, 0)
+        box.pack_start(_small(
+            "Their packages (and sudo for an account that may run things as root) are added "
+            "to what the system installs."), False, False, 0)
+
+        save = Gtk.Button(label="Save the first-boot setup", halign=Gtk.Align.START)
+        save.connect("clicked", lambda b: self.save_firstboot())
+        box.pack_start(save, False, False, 0)
+        self.fb_message = Gtk.Label(xalign=0, wrap=True, max_width_chars=90)
+        box.pack_start(self.fb_message, False, False, 0)
+
+        box.pack_start(_heading("Where each comes from (%s)" % info["init"]), False, False, 0)
+        box.pack_start(_facts([(title, source) for _item, title, source
+                               in info["firstboot_status"]]), False, False, 0)
+
+    def _fb_text(self, key):
+        widget = self.fb[key]
+        if isinstance(widget, Gtk.ComboBoxText):
+            widget = widget.get_child()
+        return widget.get_text().strip()
+
+    def save_firstboot(self):
+        import os
+        import tempfile
+        from porthole.plugins.crossdev import firstboot as fb
+        from porthole.updater.elevate import run_as_root, service
+
+        def problem(text):
+            self.fb_message.set_markup("<small>\u26a0 %s</small>" % GLib.markup_escape_text(text))
+        config = {key: self._fb_text(key) for key in ("hostname", "timezone", "locale",
+                                                      "keymap")}
+        config = {k: v for k, v in config.items() if v}
+        if config.get("timezone") and config["timezone"] not in self.info["zones"]:
+            return problem("Not a time zone: %s" % config["timezone"])
+        if config.get("locale") and config["locale"] not in self.info["locales"]:
+            return problem("Not a language this computer knows: %s" % config["locale"])
+        try:
+            for key, target in (("root", "root_hash"), ("user_password", "user_hash")):
+                first, second = (e.get_text() for e in self.fb[key])
+                if first != second:
+                    return problem("The two %s entries differ" % (
+                        "root password" if key == "root" else "account password"))
+                if first:
+                    config[target] = fb.hash_password(first)
+            name = self._fb_text("user")
+            if name:
+                config["user"] = {"name": name, "hash": config.pop("user_hash", ""),
+                                  "admin": self.fb["admin"].get_active()}
+            else:
+                config.pop("user_hash", None)
+            config["network"] = next(k for k, b in self.fb["network"].items()
+                                     if b.get_active())
+            config["sshd"] = self.fb["sshd"].get_active()
+            fb.check(config)
+        except fb.FirstBootError as e:
+            return problem(str(e))
+        cache = os.path.join(os.environ.get("XDG_CACHE_HOME") or
+                             os.path.expanduser("~/.cache"), "porthole")
+        os.makedirs(cache, mode=0o700, exist_ok=True)
+        fd, path = tempfile.mkstemp(prefix="firstboot-", suffix=".json", dir=cache)
+        with os.fdopen(fd, "w") as f:  # mkstemp: mode 0600
+            json.dump(config, f)
+
+        def done(ok, output):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+            if not ok:
+                self.error("The first-boot setup wasn't saved", output)
+                return
+            self.changed()
+        run_as_root(service("plugin", "crossdev", "firstboot", self.name, path), done)
 
     # -- Files --
 
