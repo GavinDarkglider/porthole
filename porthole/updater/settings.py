@@ -809,7 +809,9 @@ class SystemSettingsPage(Gtk.Notebook):
             self.use_view = "categories" if by_category.get_active() else "make.conf"
             self.show_profile = include.get_active()
             self._refresh()
-        by_category.connect("toggled", lambda b: b.get_active() and switch_view())
+        # each radio button says when it becomes the chosen one
+        for button in (by_category, as_written):
+            button.connect("toggled", lambda b: b.get_active() and switch_view())
         include.connect("toggled", switch_view)
         box.pack_start(choices, False, False, 0)
 
