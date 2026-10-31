@@ -480,19 +480,20 @@ def step_build_stage(runner, job_id, step, log):
         return False
     try:
         env = _build_env(target, log)
-        argv = bd.command(target, step.get("stage", ""))
+        argvs = bd.commands(target, step.get("stage", ""))
     except (bd.BuildError, OSError) as e:
         log("!! %s" % e)
         return False
-    if argv is None:
+    if not argvs:
         log("Nothing to do here.")
         return True
-    log("$ " + " ".join(argv))
-    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
-        log("!! Some packages didn't build (above). Starting the build again picks up "
-            "where it stopped; packages that won't cross-compile will be built in the "
-            "emulator in a later version of Porthole.")
-        return False
+    for argv in argvs:
+        log("$ " + " ".join(argv))
+        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+            log("!! Some packages didn't build (above). Starting the build again picks up "
+                "where it stopped; packages that won't cross-compile will be built in the "
+                "emulator in a later version of Porthole.")
+            return False
     return True
 
 

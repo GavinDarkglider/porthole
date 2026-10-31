@@ -110,18 +110,23 @@ STAGES = (("base", "The kernel headers and C library"),
           ("world", "The system's own packages (@world)"))
 
 
-def command(target, stage):
-    """emerge's arguments for one stage of the build, or None (nothing to do)"""
+def commands(target, stage):
+    """[emerge arguments] for one stage of the build ([]: nothing to do)"""
     common = ["emerge", "--verbose", "--color=y"]
     if stage == "base":
-        return common + ["--oneshot", "--update"] + list(BASE)
+        # one at a time, without their dependencies: in portage's order some
+        # (timezone-data, libidn2) come before glibc, and they can't be
+        # compiled until glibc's headers and libraries are in the root.
+        # glibc itself needs only the kernel headers and the cross compiler.
+        # --noreplace: a build started again doesn't redo them
+        return [common + ["--oneshot", "--nodeps", "--noreplace", atom] for atom in BASE]
     if stage == "system":
-        return common + ["--update", "--deep", "--newuse", "--keep-going", "@system"]
+        return [common + ["--update", "--deep", "--newuse", "--keep-going", "@system"]]
     if stage == "extra":
         extra = world_extra(target)
-        return common + ["--noreplace", "--keep-going"] + extra if extra else None
+        return [common + ["--noreplace", "--keep-going"] + extra] if extra else []
     if stage == "world":
-        return common + ["--update", "--deep", "--newuse", "--keep-going", "@world"]
+        return [common + ["--update", "--deep", "--newuse", "--keep-going", "@world"]]
     raise BuildError("No such stage: %s" % stage)
 
 
