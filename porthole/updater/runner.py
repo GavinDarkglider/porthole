@@ -1072,6 +1072,105 @@ def set_profile(name, target_name=None):
     return name
 
 
+# -- repositories ---------------------------------------------------------------
+
+REPOS_DIR = "/var/db/repos"
+
+
+def submit_repo_sync(name):
+    """Queue a sync of one repository (re-checks the plan afterwards)"""
+    from porthole.updater import system
+    if not system._REPO_NAME.match(name or ""):
+        raise JobError("Not a repository name: %s" % name)
+    job = new_job("sync", "Sync %s" % name,
+                  [{"kind": "argv", "title": "Sync %s" % name,
+                    "argv": ["emaint", "sync", "--repo", name]}], recheck=True)
+    with jobs_state() as state:
+        state["jobs"].append(job)
+        prune(state)
+    return job
+
+
+def add_repo(name, sync_type, uri, priority=None, auto_sync=True, target_name=None):
+    """Define a repository in repos.conf/<name>.conf (one file each, the
+    way most people write them) and queue its first sync"""
+    from porthole.updater import system
+    if not system._REPO_NAME.match(name or ""):
+        raise JobError("Not a repository name: %s" % name)
+    if sync_type not in system.SYNC_TYPES:
+        raise JobError("Not a sync type portage knows: %s" % sync_type)
+    try:
+        system.check_repo_uri(uri)
+    except ValueError as e:
+        raise JobError(str(e))
+    try:
+        target = targets.get(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    if name in system.repos_conf_sections(target.portage_dir) or name == "gentoo":
+        raise JobError("There already is a repository called %s" % name)
+    directory = os.path.join(target.portage_dir, "repos.conf")
+    if os.path.isfile(directory):
+        raise JobError("%s is a single file. Porthole adds each repository in a file of "
+                       "its own: move it into a new directory of that name first."
+                       % directory)
+    lines = ["[%s]" % name, "location = %s" % os.path.join(REPOS_DIR, name),
+             "sync-type = %s" % sync_type, "sync-uri = %s" % uri,
+             "auto-sync = %s" % ("yes" if auto_sync else "no")]
+    if priority is not None:
+        lines.append("priority = %d" % int(priority))
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, name + ".conf")
+    with open(path + ".new", "w") as f:
+        f.write("# Added in Porthole (Settings, Repositories)\n" + "\n".join(lines) + "\n")
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return submit_repo_sync(name)
+
+
+def deletable(location):
+    """A repository checkout Porthole may delete: directly in /var/db/repos,
+    and not Gentoo's own"""
+    real = os.path.realpath(location or "/")
+    return (os.path.dirname(real) == REPOS_DIR
+            and real != os.path.join(REPOS_DIR, "gentoo"))
+
+
+def remove_repo(name, delete_files=False, target_name=None):
+    """Remove a repository's definition: only a repos.conf file of its own
+    (one defining others too is left for the user to edit). delete_files:
+    its checkout too, only if that is directly in /var/db/repos."""
+    from porthole.updater import system
+    if not system._REPO_NAME.match(name or ""):
+        raise JobError("Not a repository name: %s" % name)
+    try:
+        target = targets.get(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    sections = system.repos_conf_sections(target.portage_dir)
+    if name == "gentoo" or name not in sections:
+        raise JobError("%s can't be removed here" % name if name == "gentoo"
+                       else "%s isn't defined in repos.conf" % name)
+    path = sections[name]
+    others = [s for s, f in sections.items() if f == path and s != name]
+    if others:
+        raise JobError("%s also defines %s; remove [%s] from it by hand."
+                       % (path, ", ".join(others), name))
+    import configparser
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(path)
+    location = parser.get(name, "location", fallback="")
+    os.unlink(path)
+    removed = [path]
+    if delete_files and location:
+        real = os.path.realpath(location)
+        if (deletable(real) and os.path.isdir(real)):
+            import shutil
+            shutil.rmtree(real)
+            removed.append(real)
+    return removed
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")

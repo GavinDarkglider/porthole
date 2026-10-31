@@ -119,7 +119,8 @@ class MainBase(object):
 
     def configure_porthole(self, menuitem_widget=None, page=None):
         """Shows the settings window"""
-        return ConfigDialog(page, on_system_changed=self.system_settings_changed)
+        return ConfigDialog(page, on_system_changed=self.system_settings_changed,
+                            on_portage_changed=self.re_init_portage)
 
     def system_settings_changed(self):
         """USE changes were saved in Settings > System: work out what they

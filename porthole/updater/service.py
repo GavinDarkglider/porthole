@@ -26,6 +26,9 @@
         global-use JSON [--target T]   Porthole's USE changes for every
                                     package (package.use/00-porthole-global)
         profile NAME [--target T]   switch the profile (one profiles.desc lists)
+        repo add NAME --sync-type T --uri U [--priority N] [--no-auto-sync]
+        repo remove NAME [--delete-files]
+        repo sync NAME              add, remove or sync a repository
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -571,6 +574,16 @@ def main(argv=None):
     prof = sub.add_parser("profile", help="switch a system's profile")
     prof.add_argument("name", help="e.g. default/linux/amd64/23.0/desktop")
     prof.add_argument("--target", default=None, help="the system (default: this computer)")
+    repo = sub.add_parser("repo", help="add, remove or sync a repository")
+    repo.add_argument("action", choices=("add", "remove", "sync"))
+    repo.add_argument("name")
+    repo.add_argument("--sync-type", default="git")
+    repo.add_argument("--uri")
+    repo.add_argument("--priority", type=int)
+    repo.add_argument("--no-auto-sync", action="store_true")
+    repo.add_argument("--delete-files", action="store_true",
+                      help="remove: also delete its checkout (/var/db/repos/NAME only)")
+    repo.add_argument("--target", default=None, help="the system (default: this computer)")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -681,6 +694,20 @@ def job_command(args, parser):
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
+        elif args.command == "repo":
+            if args.action == "add":
+                if not args.uri:
+                    parser.error("repo add needs --uri")
+                job = runner.add_repo(args.name, args.sync_type, args.uri, args.priority,
+                                      not args.no_auto_sync, args.target)
+                runner.start_runner()
+                print(job["id"])
+            elif args.action == "remove":
+                print("\n".join(runner.remove_repo(args.name, args.delete_files, args.target)))
+            else:
+                job = runner.submit_repo_sync(args.name)
+                runner.start_runner()
+                print(job["id"])
         elif args.command == "profile":
             print(runner.set_profile(args.name, args.target))
         elif args.command == "global-use":

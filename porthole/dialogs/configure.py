@@ -43,7 +43,7 @@ class ConfigDialog:
     RESPONSE_CANCEL = -6 # Gtk.ResponseType.CANCEL still -6, ok for now
     RESPONSE_OK = -5     # Gtk.ResponseType.OK     still -5
 
-    def __init__(self, page=None, on_system_changed=None):
+    def __init__(self, page=None, on_system_changed=None, on_portage_changed=None):
         """ Initialize Config GUI; page names a tab to open at ("updates") """
 
         # Parse glade file
@@ -88,6 +88,10 @@ class ConfigDialog:
         indexes = {}
         # System has tabs of its own, each scrolling
         indexes["system"] = notebook.append_page(self.system_page, Gtk.Label(label=_("System")))
+        from porthole.updater.repospage import RepositoriesPage
+        self.repos_page = RepositoriesPage(on_changed=on_portage_changed)
+        indexes["repositories"] = notebook.append_page(self.repos_page,
+                                                       Gtk.Label(label=_("Repositories")))
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.add(self.updates_page)
         indexes["updates"] = notebook.append_page(scroller, Gtk.Label(label=_("Updates")))

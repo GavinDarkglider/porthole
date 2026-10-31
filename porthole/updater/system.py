@@ -533,3 +533,113 @@ def categorise(flag, descriptions, local):
 
 def category_order():
     return [title for title, _flags in CATEGORIES] + [SPECIFIC, OTHER]
+
+
+# -- repositories ------------------------------------------------------------------
+
+REPO_LIST_URL = "https://api.gentoo.org/overlays/repositories.xml"
+_REPO_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+SYNC_TYPES = ("git", "rsync", "webrsync", "mercurial", "svn", "laymansync", "zipfile")
+
+
+def repos_conf_sections(portage_dir="/etc/portage"):
+    """{repo name: file it is defined in} from repos.conf (file or directory)"""
+    import configparser
+    path = os.path.join(portage_dir, "repos.conf")
+    files = ([os.path.join(path, f) for f in sorted(os.listdir(path))
+              if f.endswith(".conf") or "." not in f] if os.path.isdir(path)
+             else [path] if os.path.exists(path) else [])
+    found = {}
+    for name in files:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(name)
+        except configparser.Error:
+            continue
+        for section in parser.sections():
+            if section != "DEFAULT":
+                found[section] = name
+    return found
+
+
+def installed_from(repo, root="/"):
+    """Installed packages (cpv) that came from a repository"""
+    import glob
+    found = []
+    for path in glob.glob(os.path.join(root, "var", "db", "pkg", "*", "*", "repository")):
+        try:
+            with open(path) as f:
+                if f.read().strip() == repo:
+                    cat, pf = path.split(os.sep)[-3:-1]
+                    found.append("%s/%s" % (cat, pf))
+        except OSError:
+            continue
+    return sorted(found)
+
+
+def repositories():
+    """The repositories portage uses now: [{name, location, sync_type,
+    sync_uri, priority, auto_sync, file, main, installed}]"""
+    try:
+        import portage
+        settings = portage.settings
+        repos = list(settings.repositories)
+        main = settings.repositories.mainRepo()
+        main_name = main.name if main else "gentoo"
+    except Exception:
+        return []
+    files = repos_conf_sections()
+    counts = {}
+    import glob
+    for path in glob.glob("/var/db/pkg/*/*/repository"):
+        try:
+            with open(path) as f:
+                name = f.read().strip()
+        except OSError:
+            continue
+        counts[name] = counts.get(name, 0) + 1
+    return [{"name": r.name, "location": r.location, "sync_type": r.sync_type or "",
+             "sync_uri": r.sync_uri or "", "priority": r.priority,
+             "auto_sync": str(getattr(r, "auto_sync", "") or ""),
+             "file": files.get(r.name), "main": r.name == main_name,
+             "installed": counts.get(r.name, 0)}
+            for r in sorted(repos, key=lambda r: (r.name != main_name, r.name))]
+
+
+def official_repos(cache_dir=None, max_age=24 * 3600, fetch=True):
+    """Gentoo's list of repositories (what eselect repository offers):
+    [{name, description, homepage, status, quality, sources: [(type, url)]}].
+    Fetched as the user, kept a day."""
+    import time
+    import urllib.request
+    import xml.etree.ElementTree as ET
+    cache_dir = cache_dir or os.path.join(
+        os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache"), "porthole")
+    os.makedirs(cache_dir, exist_ok=True)
+    path = os.path.join(cache_dir, "repositories.xml")
+    fresh = os.path.exists(path) and time.time() - os.path.getmtime(path) < max_age
+    if fetch and not fresh:
+        with urllib.request.urlopen(REPO_LIST_URL, timeout=60) as response:
+            data = response.read()
+        with open(path + ".new", "wb") as f:
+            f.write(data)
+        os.replace(path + ".new", path)
+    repos = []
+    for repo in ET.parse(path).getroot().findall("repo"):
+        sources = [(s.get("type"), (s.text or "").strip()) for s in repo.findall("source")]
+        repos.append({"name": (repo.findtext("name") or "").strip(),
+                      "description": " ".join((repo.findtext("description") or "").split()),
+                      "homepage": (repo.findtext("homepage") or "").strip(),
+                      "status": repo.get("status", ""), "quality": repo.get("quality", ""),
+                      "sources": sources})
+    return repos
+
+
+def check_repo_uri(uri):
+    """An address a repository may sync from: one word, a known scheme"""
+    if not uri or any(c.isspace() for c in uri) or len(uri) > 400:
+        raise ValueError("Not a repository address: %r" % uri)
+    if not re.match(r"^(https?|git|rsync|ssh|svn|svn\+ssh)://", uri) and \
+            not re.match(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/~-]+$", uri):
+        raise ValueError("Not an address Porthole knows how to sync from: %s" % uri)
+    return uri
