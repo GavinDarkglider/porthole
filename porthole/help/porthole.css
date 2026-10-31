@@ -1,37 +1,265 @@
-/* Porthole help: plain and readable, light or dark as the browser prefers */
-html { margin: 0; }
-body {
-  margin: 0; padding: 1.2em 1.6em 3em;
-  max-width: 52em;
-  font: 11pt/1.55 sans-serif;
-  color: #1d1d1f; background: #fbfbf8;
-}
-@media (prefers-color-scheme: dark) {
-  body { color: #e6e6e3; background: #1f2023; }
-  a:link, a:visited { color: #8ab4f8; }
-  pre, code, kbd { background: #2c2d31; }
-  div.note { background: #2a2e36; border-color: #4a6fa5; }
-  div.warn { background: #3a3220; border-color: #b8902c; }
-  table th { background: #2c2d31; }
-  table td, table th { border-color: #44464b; }
-}
-h1 { font-size: 1.7em; margin: 0.2em 0 0.6em; }
-h2 { font-size: 1.25em; margin: 1.6em 0 0.4em; }
-h3 { font-size: 1.05em; margin: 1.2em 0 0.3em; }
-p, li { margin: 0.4em 0; }
-a:link, a:visited { color: #1a5fb4; }
-pre, code, kbd { font-family: monospace; background: #efefea; border-radius: 3px; }
-code, kbd { padding: 0 0.25em; }
-pre { padding: 0.6em 0.8em; overflow-x: auto; }
-div.note, div.warn { margin: 0.8em 0; padding: 0.5em 0.9em; border-left: 4px solid; border-radius: 3px; }
-div.note { background: #eef3fb; border-color: #1a5fb4; }
-div.warn { background: #fbf4e4; border-color: #c88800; }
-figure { margin: 1em 0; }
-figure img { max-width: 100%; border: 1px solid #8888; border-radius: 4px; }
-figcaption { font-size: 0.9em; opacity: 0.8; }
-table { border-collapse: collapse; margin: 0.6em 0; }
-table td, table th { border: 1px solid #ccc; padding: 0.3em 0.6em; text-align: left; vertical-align: top; }
-table th { background: #efefea; }
-nav.pages { font-size: 0.9em; margin-bottom: 1.2em; }
-nav.pages a { margin-right: 0.8em; }
-p.next { margin-top: 2em; font-size: 0.95em; }
+html
+  {margin: 0;
+  }
+body
+  {padding: .3cm;
+   margin: 0;
+   background-color: oldlace;
+   color: black;
+   font-size: 10pt;
+  }
+a:active, a:visited, a:link
+  {color: black; 
+  }
+a:hover
+  {background-color: yellow;
+   color: blue; 
+  }
+p
+  {text-indent:1.5em;
+  }
+pre
+  {margin-left:2em;
+   margin-right:2em;
+   padding:.1cm;
+   background-color:navajowhite;
+  }
+span.note
+  {font-style: italic;
+  }
+span.note:before {content: "["}
+span.note:after {content: "]"}
+span.command
+  {background-color: #000080;
+   color:white;
+   font-weight:bold;
+  }
+span.emerge
+  {background-color: #90ee90;
+   font-weight: bold;
+  }
+span.warning
+  {background-color:yellow;
+  }
+span.info
+  {background-color: #b0ffff;
+  }
+span.error
+  {color: #faf0e6;
+   background-color: #ff0000;
+   font-weight: bold;
+  }
+span.appnote
+  {color: #8b008b;
+  }
+div.toc 
+  {float: right;
+   margin: 2pt 2pt 2pt 2pt;
+  }
+div.figright
+  {float: right;
+   font-size: 10pt;
+   text-align: center;
+   margin-left: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color: blue;
+  }
+div.figright img
+  {border: medium solid black
+  }
+div.figleft
+  {float: left;
+   font-size: 10pt;
+   text-align: center;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color:blue;
+  }
+div.figleft img
+  {border: medium solid black
+  }
+div.figinline
+  {font-size: 10pt;
+   text-align: center;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color:blue;
+  }
+div.figinline img
+  {border: medium solid black
+  }
+
+div.warnright
+  {float: right;
+   font-size: 10pt;
+   padding: 0.1cm;
+   margin-left: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color: #a00033;
+   background-color: yellow;
+   width: 15em;
+   border: thin solid red;
+  }
+div.warnleft
+  {float: left;
+   font-size: 10pt;
+   padding: 0.1cm;
+   color: #a00033;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   background-color: yellow;
+   width: 15em;
+   border: thin solid red;
+   margin: 0.2cm;
+  }
+div.noteright
+  {float: right;
+   font-size: 10pt;
+   padding: 0.1cm;
+   margin-left: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color: black;
+   background-color: #ffffdd;
+   width: 15em;
+   border: thin solid black;
+  }
+div.noteleft
+  {float: left;
+   font-size: 10pt;
+   padding: 0.1cm;
+   color:black;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   background-color:  #ffffdd;
+   width:15em;
+   border: thin solid black;
+   margin: 0.2cm;
+  }
+div.tipright
+  {float: right;
+   font-size: 10pt;
+   margin-left: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   padding: 0.1cm;
+   color:navy;
+   background-color: #66ffcc;
+   width:15em;
+   border: thin solid green;
+  }
+div.tipleft
+  {float: left;
+   font-size: 10pt;
+   padding: 0.1cm;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+   color:navy;
+   background-color: #66ffcc;
+   width:15em;
+   border: thin solid green;
+  }
+img.left
+  {float:left;
+   margin-right: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+  }
+img.right
+  {float:right;
+   margin-left: 0.3cm;
+   margin-bottom: 0.3cm;
+   margin-top: 0.3cm;
+  }
+iframe
+  {margin-bottom: 1em;
+   margin-left: 1em;
+   float:left;
+   border-top: thick solid brown;
+   border-bottom: thick solid brown;
+  }
+h1
+  {text-indent:3em;
+   color:blue;
+   font-variant:small-caps;
+   font-size:18pt;
+  }
+h2
+  {font-size:14pt;
+  }
+h3
+  {font-size:12pt;
+  }
+dl
+  {
+  }
+dt
+  {font-weight: bold;
+  }
+
+/* The pages rewritten in 2026 use these, in the original colours above */
+code, kbd
+  {background-color: navajowhite;
+   padding: 0 0.2em;
+  }
+div.note
+  {font-size: 10pt;
+   padding: 0.1cm 0.2cm;
+   margin: 0.3cm 0;
+   color: black;
+   background-color: #ffffdd;
+   border: thin solid black;
+  }
+div.warn
+  {font-size: 10pt;
+   padding: 0.1cm 0.2cm;
+   margin: 0.3cm 0;
+   color: #a00033;
+   background-color: yellow;
+   border: thin solid red;
+  }
+figure
+  {font-size: 10pt;
+   text-align: center;
+   margin: 0.3cm 0;
+   color: blue;
+  }
+figure img
+  {max-width: 100%;
+   border: medium solid black;
+  }
+table
+  {border-collapse: collapse;
+   margin: 0.3cm 0;
+  }
+table td, table th
+  {border: thin solid black;
+   padding: 0.1cm 0.2cm;
+   text-align: left;
+   vertical-align: top;
+  }
+table th
+  {background-color: navajowhite;
+  }
+dd
+  {margin-bottom: 0.2cm;
+  }
+nav.pages
+  {font-size: 9pt;
+   margin-bottom: 0.3cm;
+  }
+nav.pages a
+  {margin-right: 1em;
+  }
+p.next
+  {text-indent: 0;
+   margin-top: 1cm;
+   font-weight: bold;
+  }
