@@ -43,6 +43,7 @@ class SystemSettingsWindow(Gtk.Window):
         self.set_default_size(820, 640)
         self.info = None
         self.pending = {}  # VAR: value, or None (Porthole doesn't set it)
+        self.machine_pending = None  # the computer it is for, changed
         self.search = ""
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, border_width=8)
         self.bar = Gtk.InfoBar(message_type=Gtk.MessageType.QUESTION, no_show_all=True)
@@ -81,6 +82,7 @@ class SystemSettingsWindow(Gtk.Window):
 
     def reload(self):
         self.pending = {}
+        self.machine_pending = None
         self.update_bar()
         threading.Thread(target=self._read, daemon=True).start()
 
@@ -164,7 +166,15 @@ class SystemSettingsWindow(Gtk.Window):
         return values
 
     def get(self, name):
+        if name == "MAKEOPTS" and self.machine():
+            return conf.makeopts(self.machine()["threads"], self.machine()["memory_gb"])
         return conf.effective(self.info, name, self.values())
+
+    def machine(self):
+        return self.machine_pending or self.info["machine"]
+
+    def dirty(self):
+        return bool(self.pending) or self.machine_pending is not None
 
     def set(self, name, value):
         """Set Porthole's value of a variable (None: leave it to the profile)"""
@@ -180,10 +190,14 @@ class SystemSettingsWindow(Gtk.Window):
         self.update_bar()
 
     def update_bar(self):
-        if not self.pending:
+        if not self.dirty():
             self.bar.hide()
             return
         parts = []
+        if self.machine_pending:
+            parts.append("the computer it is for: %d threads, %d GB (MAKEOPTS %s)" % (
+                self.machine_pending["threads"], self.machine_pending["memory_gb"],
+                self.get("MAKEOPTS")))
         for name, value in sorted(self.pending.items()):
             parts.append("%s back to the profile's" % name if value is None
                          else '%s="%s"' % (name, value))
@@ -197,6 +211,7 @@ class SystemSettingsWindow(Gtk.Window):
     def on_bar(self, bar, response):
         if response == 1:
             self.pending = {}
+            self.machine_pending = None
             self.update_bar()
             self._show(self.info)
         elif response == 2:
@@ -221,7 +236,8 @@ class SystemSettingsWindow(Gtk.Window):
             self.changed()
             if then:
                 then()
-        run_as_root(service("plugin", "crossdev", "settings", self.name, json.dumps(values)),
+        request = {"values": values, "machine": self.machine()}
+        run_as_root(service("plugin", "crossdev", "settings", self.name, json.dumps(request)),
                     done)
 
     def changed(self):
@@ -230,7 +246,7 @@ class SystemSettingsWindow(Gtk.Window):
             self.on_changed()
 
     def on_delete(self, *args):
-        if not self.pending:
+        if not self.dirty():
             return False
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
@@ -290,7 +306,8 @@ class SystemSettingsWindow(Gtk.Window):
             "The profile's values are only where the settings start: look through each "
             "tab and set what this system should be."), False, False, 0)
         grid = Gtk.Grid(column_spacing=10, row_spacing=4, margin_start=6)
-        for i, (tab, done, text) in enumerate(conf.checklist(info, self.values())):
+        for i, (tab, done, text) in enumerate(conf.checklist(info, self.values(),
+                                                             self.machine())):
             mark = Gtk.Label(label="✓" if done else "✗", xalign=0)
             grid.attach(mark, 0, i, 1, 1)
             grid.attach(Gtk.Label(label=text, xalign=0, wrap=True, max_width_chars=80),
@@ -311,7 +328,7 @@ class SystemSettingsWindow(Gtk.Window):
                     return
                 self.changed()
             run_as_root(service("plugin", "crossdev", "profile", self.name, choice), done)
-        if self.pending:
+        if self.dirty():
             self.error("Save or discard the changes first",
                        "A new profile changes where the settings start.")
             return
@@ -351,6 +368,8 @@ class SystemSettingsWindow(Gtk.Window):
         grid = Gtk.Grid(column_spacing=8, row_spacing=2, margin_start=6, margin_top=6)
         row = 0
         for name in conf.COMPILER:
+            if name == "MAKEOPTS":
+                continue
             label = Gtk.Label(label=name, xalign=0)
             label.set_tooltip_text(conf.NOTES.get(name, ""))
             grid.attach(label, 0, row, 1, 1)
@@ -370,8 +389,34 @@ class SystemSettingsWindow(Gtk.Window):
             row += 2
         box.pack_start(grid, False, False, 0)
         box.pack_start(_small(
-            "${CFLAGS} in CXXFLAGS and the others means the same as CFLAGS. MAKEOPTS is how "
-            "many files build at once (-jN), wherever the system is built."), False, False, 0)
+            "${CFLAGS} in CXXFLAGS and the others means the same as CFLAGS."), False, False, 0)
+        box.pack_start(_heading("Parallel builds (MAKEOPTS)"), False, False, 0)
+        self.makeopts_label = _small("")
+        box.pack_start(self.makeopts_label, False, False, 0)
+        self._makeopts_note()
+
+    def _makeopts_note(self):
+        machine = self.machine()
+        if machine:
+            text = ("%s when emerge is run by hand on it: worked out from the computer it is "
+                    "for (Hardware: %d CPU threads, %d GB). Porthole's own builds work it out "
+                    "again for each build, from the machines that help compile."
+                    % (self.get("MAKEOPTS"), machine["threads"], machine["memory_gb"]))
+        else:
+            text = ("Set by Porthole once it knows the computer it is for: its CPU threads "
+                    "and memory (Hardware tab).")
+            if self.get("MAKEOPTS"):
+                text += " Now: " + self.get("MAKEOPTS")
+        self.makeopts_label.set_markup("<small>%s</small>" % GLib.markup_escape_text(text))
+
+    def _machine_changed(self, threads, memory):
+        machine = {"threads": int(threads.get_value()), "memory_gb": int(memory.get_value())}
+        self.machine_pending = None if machine == self.info["machine"] else machine
+        self.makeopts.set_markup("<small>MAKEOPTS: %s</small>" % GLib.markup_escape_text(
+            conf.makeopts(machine["threads"], machine["memory_gb"])))
+        self.update_bar()
+        self._makeopts_note()
+        self._redraw("overview")
 
     def _set_cpu(self, cpu):
         cpu = cpu.strip()
@@ -503,6 +548,32 @@ class SystemSettingsWindow(Gtk.Window):
 
     def _hardware(self):
         box, info = self.tabs["hardware"], self.info
+        box.pack_start(_heading("The computer it is for"), False, False, 0)
+        machine = self.machine() or {}
+        row = Gtk.Box(spacing=6, margin_start=6)
+        threads = Gtk.SpinButton.new_with_range(1, 1024, 1)
+        threads.set_value(machine.get("threads", 4))
+        memory = Gtk.SpinButton.new_with_range(1, 65536, 1)
+        memory.set_value(machine.get("memory_gb", 4))
+        row.pack_start(threads, False, False, 0)
+        row.pack_start(Gtk.Label(label="CPU threads"), False, False, 0)
+        row.pack_start(memory, False, False, 0)
+        row.pack_start(Gtk.Label(label="GB of memory"), False, False, 0)
+        self.makeopts = Gtk.Label(xalign=0, margin_start=12)
+        row.pack_start(self.makeopts, False, False, 0)
+        box.pack_start(row, False, False, 0)
+        if machine:
+            self.makeopts.set_markup("<small>MAKEOPTS: %s</small>" % GLib.markup_escape_text(
+                self.get("MAKEOPTS")))
+        else:
+            self.makeopts.set_markup("<small>Not set yet: set them, Porthole works out "
+                                     "MAKEOPTS (one job per 2 GB, at most one per thread)"
+                                     "</small>")
+            confirm = Gtk.Button(label="These are right")
+            confirm.connect("clicked", lambda b: self._machine_changed(threads, memory))
+            row.pack_start(confirm, False, False, 0)
+        for spin in (threads, memory):
+            spin.connect("value-changed", lambda s: self._machine_changed(threads, memory))
         box.pack_start(_small(
             "What the computer this system is for has: packages build support for exactly "
             "these. Nothing is found out here (this isn't that computer): choose them. "
@@ -620,7 +691,7 @@ class SystemSettingsWindow(Gtk.Window):
 
     def save_file(self):
         from porthole.updater.elevate import run_as_root, service
-        if self.pending:
+        if self.dirty():
             self.error("Save or discard the changes above first",
                        "They are written to make.conf too.")
             return

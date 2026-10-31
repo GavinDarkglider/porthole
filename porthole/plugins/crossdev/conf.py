@@ -13,6 +13,11 @@
     above "# Your own settings below.": lines the user adds there come
     later, so they win, and Porthole leaves them alone.
 
+    MAKEOPTS is Porthole's: worked out from the computer the system is
+    for (its CPU threads and memory, written in the block as a comment),
+    a safe value for emerge run by hand on it. Porthole's own builds set
+    it again for each job from the machines that answer (job_makeopts).
+
     Variables portage adds up (USE, VIDEO_CARDS, FEATURES, ...) are
     written as changes to the profile's ("wayland -gtk"); the others
     (CFLAGS, CHOST, MAKEOPTS, ...) as the whole value. The profile's own
@@ -37,6 +42,10 @@ OWN = "# Your own settings below."
 # the whole value is written
 COMPILER = ("CHOST", "CFLAGS", "CXXFLAGS", "FCFLAGS", "FFLAGS", "LDFLAGS", "RUSTFLAGS",
             "MAKEOPTS")
+# the computer the system is for, in Porthole's block
+_MACHINE = re.compile(r"^# the computer it is for: (\d+) CPU threads, (\d+) GB of memory$", re.M)
+# memory one compile job may need (the handbook's 2 GB per job)
+GB_PER_JOB = 2
 # changes to the profile's (portage adds these up)
 INCREMENTAL = ("USE", "FEATURES", "ACCEPT_KEYWORDS", "ACCEPT_LICENSE")
 HARDWARE = ("VIDEO_CARDS", "INPUT_DEVICES", "CPU_FLAGS_ARM", "CPU_FLAGS_X86", "CPU_FLAGS_PPC",
@@ -56,6 +65,38 @@ GENERIC = re.compile(r"^(x86-64(-v[1-4])?|i[3-6]86|armv[0-9.]+-?[a-z]?|armv[0-9.
 
 class ConfError(Exception):
     pass
+
+
+def safe_jobs(threads, memory_gb):
+    """Compile jobs a computer can run at once without running out of
+    memory"""
+    return max(1, min(int(threads), int(memory_gb) // GB_PER_JOB))
+
+
+def makeopts(threads, memory_gb):
+    """MAKEOPTS for emerge run by hand: safe jobs, and no new ones while
+    the load is above the thread count"""
+    return "-j%d -l%d" % (safe_jobs(threads, memory_gb), int(threads))
+
+
+def job_makeopts(local_threads, local_memory_gb, helper_slots=0):
+    """MAKEOPTS for one of Porthole's builds: what this computer can run
+    plus the slots of the machines compiling for it (distcc), while the
+    load here stays under this computer's threads"""
+    return "-j%d -l%d" % (safe_jobs(local_threads, local_memory_gb) + int(helper_slots),
+                          int(local_threads))
+
+
+def check_machine(machine):
+    if machine is None:
+        return None
+    try:
+        threads, memory = int(machine["threads"]), int(machine["memory_gb"])
+    except (KeyError, TypeError, ValueError):
+        raise ConfError("The computer it is for needs CPU threads and memory (GB)")
+    if not (1 <= threads <= 1024 and 1 <= memory <= 65536):
+        raise ConfError("CPU threads 1-1024, memory 1-65536 GB")
+    return {"threads": threads, "memory_gb": memory}
 
 
 def incremental(name):
@@ -150,7 +191,10 @@ def read(target):
     before, block, after = split_text(text)
     porthole = {name: " ".join(words) for name, words in _assignments(block).items()}
     own = _assignments(before + after)
-    return {"profile": profile, "porthole": porthole,
+    found = _MACHINE.search(block)
+    machine = ({"threads": int(found.group(1)), "memory_gb": int(found.group(2))}
+               if found else None)
+    return {"profile": profile, "porthole": porthole, "machine": machine,
             "own": {name: " ".join(words) for name, words in own.items()},
             "arch": settings.get("ARCH", ""), "expand": expand, "hidden": sorted(hidden),
             "locations": locations, "has_block": bool(block or BEGIN in text)}
@@ -176,8 +220,13 @@ def effective(info, name, porthole=None):
 
 # -- writing ----------------------------------------------------------------------
 
-def render_block(values):
+def render_block(values, machine=None):
     lines = [BEGIN]
+    machine = check_machine(machine)
+    if machine:
+        lines.append("# the computer it is for: %d CPU threads, %d GB of memory"
+                     % (machine["threads"], machine["memory_gb"]))
+        values = dict(values, MAKEOPTS=makeopts(machine["threads"], machine["memory_gb"]))
     names = [n for n in ORDER if n in values] + sorted(n for n in values if n not in ORDER)
     for name in names:
         value = values[name]
@@ -185,16 +234,20 @@ def render_block(values):
             continue
         check_value(name, value)
         note = NOTES.get(name)
-        if note:
+        if name == "MAKEOPTS" and machine:
+            lines.append("# parallel builds when emerge is run by hand (set by Porthole "
+                         "from the above;")
+            lines.append("# Porthole's own builds work it out for each build)")
+        elif note:
             lines.append("# " + note)
         lines.append('%s="%s"' % (name, " ".join(value.split())))
     lines.append(END)
     return "\n".join(lines)
 
 
-def set_text(text, values):
+def set_text(text, values, machine=None):
     """make.conf text with Porthole's block holding exactly values"""
-    block = render_block(values)
+    block = render_block(values, machine)
     before, old, after = split_text(text)
     if BEGIN in text:
         return before + block + after
@@ -204,15 +257,15 @@ def set_text(text, values):
     return text.rstrip("\n") + "\n\n" + block + "\n"
 
 
-def write(target, values):
+def write(target, values, machine=None):
     """Porthole's block in the system's make.conf: {VAR: value or None}
-    (None: not set by Porthole)"""
+    (None: not set by Porthole), and the computer it is for"""
     values = {k: v for k, v in values.items() if v is not None}
     for name, value in values.items():
         check_value(name, value)
     path = os.path.join(target.portage_dir, "make.conf")
     text = read_text(target)
-    _write_file(path, set_text(text, values))
+    _write_file(path, set_text(text, values, machine))
 
 
 def _write_file(path, text):
@@ -281,7 +334,7 @@ def tuning(flags):
                   "CPU of its kind" % ("only " + march if march else "no -mcpu or -march"))
 
 
-def checklist(info, values=None):
+def checklist(info, values=None, machine=None):
     """[(tab, done, text)] of what to look at before building"""
     def get(name):
         return effective(info, name, values)
@@ -295,9 +348,13 @@ def checklist(info, values=None):
         items.append(("compiler", tuning(cxx)[1] is None,
                       "C++ flags differ from the C flags; check they name the CPU too"))
     items.append(("compiler", bool(get("CHOST")), "CHOST: %s" % (get("CHOST") or "not set")))
-    items.append(("compiler", bool(get("MAKEOPTS")),
-                  "Parallel builds (MAKEOPTS): %s" % (get("MAKEOPTS") or
-                                                      "not set, builds one file at a time")))
+    machine = machine or info.get("machine")
+    items.append(("hardware", machine is not None,
+                  "The computer it is for: %d CPU threads, %d GB (MAKEOPTS %s)" % (
+                      machine["threads"], machine["memory_gb"],
+                      makeopts(machine["threads"], machine["memory_gb"])) if machine else
+                  "The computer it is for: how many CPU threads and how much memory? "
+                  "(Porthole sets MAKEOPTS from it)"))
     for name, what in (("VIDEO_CARDS", "graphics drivers"), ("INPUT_DEVICES", "input drivers")):
         value = get(name)
         items.append(("hardware", bool(value), "%s (%s): %s" % (

@@ -56,6 +56,20 @@ def _is_distccd(pid):
         return False
 
 
+def safe_jobs(threads=None, memory_gb=None):
+    """Compile jobs this computer can run at once: one per thread, but no
+    more than one per 2 GB of memory"""
+    threads = threads or os.cpu_count() or 1
+    if memory_gb is None:
+        try:
+            with open("/proc/meminfo") as f:
+                kb = next(int(l.split()[1]) for l in f if l.startswith("MemTotal:"))
+            memory_gb = kb // (1024 * 1024)
+        except (OSError, StopIteration, ValueError):
+            memory_gb = 2 * threads
+    return max(1, min(threads, memory_gb // 2))
+
+
 class LocalDistcc:
     """A distccd for one job, on 127.0.0.1"""
 
@@ -66,7 +80,7 @@ class LocalDistcc:
         run_dir, log_dir = run_dir or RUN_DIR, log_dir or LOG_DIR
         self.pid_file = os.path.join(run_dir, "distccd-%s.pid" % job_id)
         self.log_file = os.path.join(log_dir, "distccd-%s.log" % job_id)
-        self.jobs = jobs or os.cpu_count() or 1
+        self.jobs = jobs or safe_jobs()
         self.port = None
 
     def start(self, log):
@@ -107,7 +121,10 @@ class LocalDistcc:
             raise HelperError("distccd started but doesn't answer on port %d" % self.port)
         log("== distcc: compiling on 127.0.0.1:%d for this job (%d at a time)"
             % (self.port, self.jobs))
-        return {"DISTCC_HOSTS": "127.0.0.1:%d/%d" % (self.port, self.jobs)}
+        # the build hands its compiling to this distccd: as many jobs as it
+        # runs, and none started while this computer's load is above its threads
+        return {"DISTCC_HOSTS": "127.0.0.1:%d/%d" % (self.port, self.jobs),
+                "MAKEOPTS": "-j%d -l%d" % (self.jobs, os.cpu_count() or 1)}
 
     def pid(self):
         try:

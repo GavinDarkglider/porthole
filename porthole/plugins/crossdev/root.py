@@ -18,7 +18,9 @@
         plugin crossdev toolchain NAME         queue a job building the cross
                                                toolchain its profile allows
         plugin crossdev settings NAME JSON     Porthole's settings block in its
-                                               make.conf ({VAR: value}, conf.py)
+                                               make.conf ({"values": {VAR: value},
+                                               "machine": {"threads", "memory_gb"}},
+                                               conf.py)
         plugin crossdev write-file NAME FILE JSON
                                                save one of its Portage files
                                                (make.conf, package.*, env/*;
@@ -289,12 +291,13 @@ def settings(args):
     if target is None:
         return 1
     try:
-        values = json.loads(args[1])
+        request = json.loads(args[1])
+        values = request.get("values") if isinstance(request, dict) else None
         if not isinstance(values, dict) or not all(
                 isinstance(k, str) and (v is None or isinstance(v, str))
                 for k, v in values.items()):
-            raise ValueError("expected {VAR: value}")
-        conf.write(target, values)
+            raise ValueError('expected {"values": {VAR: value}, "machine": {...}}')
+        conf.write(target, values, request.get("machine"))
     except (ValueError, conf.ConfError, OSError) as e:
         print(e, file=sys.stderr)
         return 1

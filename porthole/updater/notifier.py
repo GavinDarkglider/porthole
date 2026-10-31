@@ -245,6 +245,12 @@ class Notifier(Gtk.Application):
             menu.append(item)
             self.items[label] = item
         self.check_item = self.items["Check now"]
+        # porthole-update-notifier --check-now, from another process
+        action = Gio.SimpleAction.new("check-now", None)
+        action.connect("activate", lambda a, p: self.check_now())
+        self.add_action(action)
+        if getattr(self, "check_on_start", False):
+            GLib.idle_add(lambda: self.check_now() and False)
         menu.append(Gtk.SeparatorMenuItem())
         quit_item = Gtk.MenuItem(label="Quit")
         quit_item.connect("activate", lambda w: self.quit())
@@ -517,7 +523,21 @@ class Notifier(Gtk.Application):
 
 
 def main(argv=None):
-    return Notifier().run(argv if argv is not None else sys.argv[:1])
+    """porthole-update-notifier [--check-now]: --check-now asks the running
+    notifier to check for updates now, as the user (or starts it and
+    checks): anything that wants an update noticed (a new commit of a live
+    package, like Porthole's own) goes through the updater, not a
+    terminal."""
+    argv = list(argv if argv is not None else sys.argv)
+    app = Notifier()
+    if "--check-now" in argv[1:]:
+        app.register(None)
+        if app.get_is_remote():
+            app.activate_action("check-now", None)
+            app.get_dbus_connection().flush_sync(None)
+            return 0
+        app.check_on_start = True
+    return app.run(argv[:1])
 
 
 if __name__ == "__main__":
