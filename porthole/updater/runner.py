@@ -207,6 +207,12 @@ def new_job(kind, title, steps, recheck, **extra):
         "recheck": recheck,
         "progress": None,
     }
+    if "helpers" in extra:
+        from porthole.updater.ondemand import check_helpers
+        try:
+            extra["helpers"] = check_helpers(extra["helpers"])
+        except ValueError as e:
+            raise JobError(str(e))
     job.update(extra)
     return job
 
@@ -636,6 +642,54 @@ class Runner:
         log = JobLog(job["log"])
         log("== %s (requested by %s)" % (job["title"], job["by"]))
         status = "done"
+        # services the job needs only while it runs (ondemand.py): stopped
+        # after its last step whatever happens
+        from porthole.updater.ondemand import Helpers
+        helpers = Helpers(job_id, [])
+        self.job_env = {}
+        try:
+            helpers = Helpers(job_id, job.get("helpers") or [])
+            self.job_env = helpers.start(log)
+        except Exception as e:
+            log("!! %s" % e)
+            status = "failed"
+        try:
+            status = self.run_steps(job_id, log, status)
+        finally:
+            helpers.stop(log)
+            self.job_env = {}
+        log("\n== %s" % {"done": "Finished", "failed": "Failed",
+                         "cancelled": "Cancelled"}[status])
+        # the job is over now: the job window stops following it here, and
+        # the re-check below shows in the tray as a check. One that stopped
+        # part way may leave programs using old libraries: only root can
+        # tell, so it is noted for the job window to offer a rebuild
+        extra = {}
+        if status != "done":
+            extra["preserved_rebuild"] = preserved_rebuild_packages(log)
+        self.update(job_id, status=status, finished=time.time(), **extra)
+        with jobs_state(write=False) as state:
+            news_item = find_job(state, job_id).get("news")  # added after queuing
+        if news_item:
+            # the automatic update's news item gets its outcome
+            try:
+                from porthole.updater import autopilot, news
+                news.append_porthole_item(news_item, autopilot.result_text(
+                    dict(job, status=status)))
+            except Exception as e:
+                log("!! couldn't add the result to the news item: %s" % e)
+        if job.get("recheck"):
+            log("\n== Checking what is left to update")
+            try:
+                with check_lock():
+                    Service(load_config(), Log(echo=False)).run(
+                        force=True, sync=False, from_runner=True)
+            except Exception as e:
+                log("!! re-check failed: %s: %s" % (type(e).__name__, e))
+
+    def run_steps(self, job_id, log, status):
+        """Run a job's steps in turn; once one fails (or status isn't
+        "done" to begin with) the rest are not run. Returns the status."""
         index = -1
         while True:
             # steps can add steps (plan-install), so read them each time
@@ -668,34 +722,7 @@ class Runner:
                 status = "cancelled"
             elif not ok:
                 status = "failed"
-        log("\n== %s" % {"done": "Finished", "failed": "Failed",
-                         "cancelled": "Cancelled"}[status])
-        # the job is over now: the job window stops following it here, and
-        # the re-check below shows in the tray as a check. One that stopped
-        # part way may leave programs using old libraries: only root can
-        # tell, so it is noted for the job window to offer a rebuild
-        extra = {}
-        if status != "done":
-            extra["preserved_rebuild"] = preserved_rebuild_packages(log)
-        self.update(job_id, status=status, finished=time.time(), **extra)
-        with jobs_state(write=False) as state:
-            news_item = find_job(state, job_id).get("news")  # added after queuing
-        if news_item:
-            # the automatic update's news item gets its outcome
-            try:
-                from porthole.updater import autopilot, news
-                news.append_porthole_item(news_item, autopilot.result_text(
-                    dict(job, status=status)))
-            except Exception as e:
-                log("!! couldn't add the result to the news item: %s" % e)
-        if job.get("recheck"):
-            log("\n== Checking what is left to update")
-            try:
-                with check_lock():
-                    Service(load_config(), Log(echo=False)).run(
-                        force=True, sync=False, from_runner=True)
-            except Exception as e:
-                log("!! re-check failed: %s: %s" % (type(e).__name__, e))
+        return status
 
     # -- steps: each returns True on success --
 
@@ -790,7 +817,8 @@ class Runner:
         import select
         from porthole.updater.window import ACTIVE, idle_for, low_priority_env
         config = load_config()
-        env = dict(os.environ, TERM="xterm", **(extra_env or {}))
+        env = dict(os.environ, TERM="xterm", **getattr(self, "job_env", {}))
+        env.update(extra_env or {})
         if config["low_priority"] or self.window_job:
             env.update(low_priority_env())
         env.pop("NOCOLOR", None)

@@ -53,7 +53,8 @@ def _disable():
 
 def _readiness():
     from porthole.plugins.crossdev.window import ReadinessWindow
-    ReadinessWindow()
+    manager = _state["manager"]
+    ReadinessWindow(getattr(manager, "porthole_instance", None))
 
 
 event_table = {"load": _load, "enable": _enable, "disable": _disable, "unload": _disable}

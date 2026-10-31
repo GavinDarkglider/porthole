@@ -6,7 +6,15 @@
     for the target, qemu's user-mode emulator and binfmt (for what won't
     cross-compile), and distcc (so the emulated builds compile with the
     native cross compiler). Each check says what it found and, if
-    something is missing, what to do about it.
+    something is missing, what to do about it; where Porthole can do it,
+    the check's action says how:
+
+      {"queue": {"name", "targets", "requested"}}   an install, planned
+                                                    and reviewed like any
+      {"root": [command words]}                     plugin crossdev ...
+
+    qemu's binfmt registration and distcc's daemon aren't left running:
+    the runner starts them for the jobs that need them (updater/ondemand.py).
 
     Copyright (C) 2026 Porthole developers
 
@@ -24,6 +32,8 @@ import shutil
 import subprocess
 
 ROOTS_DIR = "/var/lib/porthole/roots"
+REPO_NAME = "crossdev"
+REPO_DIR = "/var/db/repos/crossdev"
 # portage arch -> qemu's user-mode target name
 QEMU_TARGETS = {"arm64": "aarch64", "arm": "arm", "riscv": "riscv64", "ppc64": "ppc64",
                 "ppc": "ppc", "x86": "i386", "amd64": "x86_64", "loong": "loongarch64",
@@ -35,8 +45,9 @@ class Check:
     """One thing checked: ok (True/False/None for unknown), what was found,
     and what to do if it isn't ok"""
 
-    def __init__(self, key, title, ok, found, fix=None):
+    def __init__(self, key, title, ok, found, fix=None, action=None):
         self.key, self.title, self.ok, self.found, self.fix = key, title, ok, found, fix
+        self.action = action if ok is False else None
 
     def __repr__(self):
         return "Check(%s, %s)" % (self.key, self.ok)
@@ -70,13 +81,26 @@ def kernel_option(name):
     return None
 
 
-def repos():
-    """{name: location} of the repositories portage uses"""
-    try:
-        import portage
-        return {r.name: r.location for r in portage.settings.repositories}
-    except Exception:
-        return {}
+def repos(portage_dir="/etc/portage"):
+    """{name: location} of the repositories in repos.conf, read afresh
+    (portage's own settings are read once per process, and the window
+    checks again after adding one)"""
+    import configparser
+    from porthole.updater import system
+    found = {}
+    for name, path in system.repos_conf_sections(portage_dir).items():
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(path)
+            found[name] = parser.get(name, "location", fallback="").strip()
+        except configparser.Error:
+            continue
+    return found
+
+
+def queue_install(name, targets, requested=()):
+    return {"queue": {"name": name, "targets": list(targets),
+                      "requested": [{"kind": k, "line": l} for k, l in requested]}}
 
 
 def check_all(arch=None, tuple_=None):
@@ -89,17 +113,19 @@ def check_all(arch=None, tuple_=None):
     checks.append(Check(
         "crossdev", "crossdev", bool(have),
         "installed (%s)" % have[0][0] if have else "not installed",
-        None if have else "Install sys-devel/crossdev."))
+        None if have else "Install sys-devel/crossdev.",
+        queue_install("crossdev", ["sys-devel/crossdev"])))
     found = repos()
     cross_repo = next((n for n, loc in found.items()
-                       if n == "crossdev" or loc.rstrip("/").endswith("/crossdev")), None)
+                       if n == REPO_NAME or loc.rstrip("/").endswith("/" + REPO_NAME)), None)
     checks.append(Check(
         "crossdev-repo", "A repository for crossdev's toolchain packages",
         cross_repo is not None,
         "%s (%s)" % (cross_repo, found[cross_repo]) if cross_repo else "none",
         None if cross_repo else
         "crossdev puts the toolchain ebuilds it makes in a repository of their own; "
-        "Porthole can create one in /var/db/repos/crossdev."))
+        "Porthole can create one in %s (local only, never synced)." % REPO_DIR,
+        {"root": ["make-repo"]}))
 
     # the cross toolchain for the target
     if tuple_:
@@ -116,6 +142,11 @@ def check_all(arch=None, tuple_=None):
     use = qemu[0][1] if qemu else set()
     static = "static-user" in use
     has_target = (not target) or ("qemu_user_targets_%s" % target) in use
+    flags = ["static-user"] + (["qemu_user_targets_%s" % target] if target else [])
+    if not qemu:
+        # only user mode is needed: not the default full-system emulator,
+        # with its firmware (an installed qemu keeps what it has)
+        flags.append("-qemu_softmmu_targets_x86_64")
     checks.append(Check(
         "qemu", "qemu's user-mode emulator%s" % (" for %s" % target if target else ""),
         bool(qemu) and static and has_target,
@@ -124,7 +155,10 @@ def check_all(arch=None, tuple_=None):
         if qemu else "not installed",
         None if qemu and static and has_target else
         "Needed only for packages that won't cross-compile: app-emulation/qemu with "
-        "USE=static-user and QEMU_USER_TARGETS=\"%s\"." % (target or "...")))
+        "USE=static-user and QEMU_USER_TARGETS=\"%s\"%s." % (
+            target or "...", "" if qemu else ", user mode only"),
+        queue_install("qemu (%s)" % (target or "user mode"), ["app-emulation/qemu"],
+                      [("use", "app-emulation/qemu " + " ".join(flags))])))
 
     # binfmt: the kernel runs the target's programs through qemu
     option = kernel_option("CONFIG_BINFMT_MISC")
@@ -134,39 +168,34 @@ def check_all(arch=None, tuple_=None):
         "CONFIG_BINFMT_MISC=%s" % option if option else "unknown (no kernel config readable)",
         None if option in ("y", "m") else "Set CONFIG_BINFMT_MISC in the kernel."))
     if target:
+        from porthole.updater.ondemand import Binfmt
+        how = Binfmt.available()
         entry = "/proc/sys/fs/binfmt_misc/qemu-%s" % target
         registered = os.path.exists(entry)
-        enabled = False
-        if registered:
-            try:
-                with open(entry) as f:
-                    enabled = f.readline().strip() == "enabled"
-            except OSError:
-                pass
         checks.append(Check(
-            "binfmt-qemu", "qemu registered to run %s programs" % target,
-            registered and enabled,
-            "registered" if registered and enabled else
-            "registered but disabled" if registered else "not registered",
-            None if registered and enabled else
-            "Start the qemu-binfmt service (rc-update add qemu-binfmt default)."))
+            "binfmt-qemu", "qemu can be registered to run %s programs" % target,
+            bool(how) or registered,
+            ("registered now" if registered else
+             "Porthole starts qemu-binfmt for the builds that need it, and stops it "
+             "after" if how == "openrc" else
+             "systemd-binfmt registers qemu at boot" if how == "systemd" else
+             "qemu's binfmt service isn't installed"),
+            None if how or registered else "It comes with qemu (above)."))
 
-    # distcc: emulated builds hand their compiling to the native cross compiler
+    # distcc: emulated builds hand their compiling to the native cross
+    # compiler, through a distccd the runner starts for the job on 127.0.0.1
     distcc = _installed("sys-devel/distcc")
     running = subprocess.run(["pgrep", "-x", "distccd"], capture_output=True).returncode == 0
     allows = _distccd_allows()
-    local = any(a.startswith(("127.", "localhost")) for a in allows)
     checks.append(Check(
-        "distcc", "distcc for builds in the emulator",
-        bool(distcc) and running and local,
-        "%s; %s; allows %s" % ("installed" if distcc else "not installed",
-                                "running" if running else "not running",
-                                " ".join(allows) or "nobody"),
-        None if distcc and running and local else " ".join(
-            (["Install sys-devel/distcc."] if not distcc else [])
-            + (["Allow this computer in /etc/conf.d/distccd (--allow 127.0.0.1); "
-                "Porthole adds nothing else unless you ask."] if not local else [])
-            + (["Start distccd (rc-service distccd start)."] if not running else []))))
+        "distcc", "distcc for builds in the emulator", bool(distcc),
+        ("installed. Porthole starts a distccd of its own for each build in the "
+         "emulator (on 127.0.0.1 only) and stops it after. Your distccd service "
+         "(%s, allows %s) is left as it is." % ("running" if running else "not running",
+                                               " ".join(allows) or "nobody"))
+        if distcc else "not installed",
+        None if distcc else "Install sys-devel/distcc.",
+        queue_install("distcc", ["sys-devel/distcc"])))
 
     # room for the systems built
     base = ROOTS_DIR if os.path.isdir(ROOTS_DIR) else os.path.dirname(ROOTS_DIR)
