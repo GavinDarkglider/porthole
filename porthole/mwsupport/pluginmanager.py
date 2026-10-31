@@ -41,17 +41,11 @@ class PluginManager:
         plugin_dir = config.Prefs.PLUGIN_DIR
         self.porthole_instance = porthole_instance
         self.plugins = []
-        plugin_list = []
-        list = os.listdir(plugin_dir)
-        for entry in list:
-            debug.dprint("PLUGIN: PluginManager.init();"
-                " possible plugin found: %s" % entry)
-            if os.path.isdir(os.path.join(plugin_dir, entry)):
-                if os.access(os.path.join(plugin_dir, entry, '__init__.py'),
-                        os.R_OK):
-                    plugin_list.append(entry)
-                    debug.dprint("PLUGIN: PluginManager.init();"
-                        " valid plugin found: %s" % entry)
+        # only plugins switched on for this computer (Settings, Plugins):
+        # an installed but disabled plugin isn't even imported
+        from porthole import plugins
+        plugin_list = plugins.enabled()
+        debug.dprint("PLUGIN: PluginManager.init(); enabled plugins: %s" % plugin_list)
         os.chdir(plugin_dir)
         for entry in plugin_list:
             new_plugin = Plugin(entry, plugin_dir, self)
@@ -61,10 +55,9 @@ class PluginManager:
     def event_all(self, event, *args):
         for i in self.plugins:
             i.event(event, *args)
-            #We should really check our prefs here to see if they should
-            # automatically be enabled.
-            i.enabled = i.name in config.Prefs.plugins.active_list
-            if i.enabled:
+            # loaded at all means switched on for this computer
+            if event == "load" and getattr(i, "valid", False):
+                i.enabled = True
                 i.event("enable")
 
     def plugin_list(self):

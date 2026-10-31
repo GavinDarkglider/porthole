@@ -51,6 +51,8 @@ CASES = [
      {"action": "add", "name": "desktop", "no_verify": True}),
     (["binhost", "remove", "desktop"], {"action": "remove", "name": "desktop"}),
     (["binpkgs", "upload"], {"action": "upload"}),
+    (["plugin", "crossdev", "check", "arm64"], {"name": "crossdev", "args": ["check", "arm64"]}),
+    (["plugin", "crossdev", "--", "check"], {"name": "crossdev", "args": ["check"]}),
     (["profile", "default/linux/amd64/23.0/desktop"], {"name": "default/linux/amd64/23.0/desktop",
                                                        "target": None}),
     (["global-use", '{"use": {"opus": false}}'], {"changes": '{"use": {"opus": false}}',

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import os
 from glob import glob
 
 from setuptools import setup
@@ -21,7 +22,10 @@ setup( \
                         'porthole.db', 'porthole.dialogs', 'porthole.loaders', 'porthole.mwsupport',
                         'porthole.plugins', 'porthole.readers', 'porthole.terminal',
                         'porthole.updater', 'porthole.utils', 'porthole.views', 'porthole._xml',
-                        'porthole.views.packagebook'],
+                        'porthole.views.packagebook']
+               # every plugin (the ebuild drops the ones not wanted, by USE flag)
+               + ['porthole.plugins.' + d for d in sorted(os.listdir('porthole/plugins'))
+                  if os.path.isfile(os.path.join('porthole/plugins', d, '__init__.py'))],
     package_dir = {'porthole':'porthole'},
     scripts = ["scripts/porthole", "scripts/porthole-update-check",
                "scripts/porthole-update-service", "scripts/porthole-update-notifier",

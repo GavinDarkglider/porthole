@@ -96,6 +96,9 @@ class ConfigDialog:
         self.binpkg_page = BinaryPackagesPage()
         indexes["binary"] = notebook.append_page(self.binpkg_page,
                                                  Gtk.Label(label=_("Binary packages")))
+        from porthole.updater.pluginspage import PluginsPage
+        self.plugins_page = PluginsPage()
+        indexes["plugins"] = notebook.append_page(self.plugins_page, Gtk.Label(label=_("Plugins")))
         scroller = Gtk.ScrolledWindow(hscrollbar_policy=Gtk.PolicyType.NEVER)
         scroller.add(self.updates_page)
         indexes["updates"] = notebook.append_page(scroller, Gtk.Label(label=_("Updates")))
@@ -339,6 +342,16 @@ class ConfigDialog:
                 dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
                                            buttons=Gtk.ButtonsType.CLOSE,
                                            text=_("The binary package settings weren't saved"))
+                dialog.format_secondary_text(message or _("Cancelled."))
+                dialog.run()
+                dialog.destroy()
+            self.plugins_page.save(plugins_saved)
+
+        def plugins_saved(ok, message):
+            if not ok:
+                dialog = Gtk.MessageDialog(modal=True, message_type=Gtk.MessageType.ERROR,
+                                           buttons=Gtk.ButtonsType.CLOSE,
+                                           text=_("The plugin settings weren't saved"))
                 dialog.format_secondary_text(message or _("Cancelled."))
                 dialog.run()
                 dialog.destroy()

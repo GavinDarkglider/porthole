@@ -1,0 +1,194 @@
+"""
+    Porthole crossdev plugin: is this computer ready to build for another one?
+
+    Read-only checks (no root needed) of what building a system for another
+    architecture takes here: crossdev and its repository, a cross toolchain
+    for the target, qemu's user-mode emulator and binfmt (for what won't
+    cross-compile), and distcc (so the emulated builds compile with the
+    native cross compiler). Each check says what it found and, if
+    something is missing, what to do about it.
+
+    Copyright (C) 2026 Porthole developers
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+"""
+
+import glob
+import gzip
+import os
+import re
+import shutil
+import subprocess
+
+ROOTS_DIR = "/var/lib/porthole/roots"
+# portage arch -> qemu's user-mode target name
+QEMU_TARGETS = {"arm64": "aarch64", "arm": "arm", "riscv": "riscv64", "ppc64": "ppc64",
+                "ppc": "ppc", "x86": "i386", "amd64": "x86_64", "loong": "loongarch64",
+                "mips": "mips", "s390": "s390x", "sparc": "sparc64", "alpha": "alpha",
+                "hppa": "hppa", "m68k": "m68k"}
+
+
+class Check:
+    """One thing checked: ok (True/False/None for unknown), what was found,
+    and what to do if it isn't ok"""
+
+    def __init__(self, key, title, ok, found, fix=None):
+        self.key, self.title, self.ok, self.found, self.fix = key, title, ok, found, fix
+
+    def __repr__(self):
+        return "Check(%s, %s)" % (self.key, self.ok)
+
+
+def _installed(cp):
+    """Installed versions of cat/pkg: [(pf, USE set)]"""
+    found = []
+    for path in glob.glob("/var/db/pkg/%s-[0-9]*" % cp):
+        try:
+            with open(os.path.join(path, "USE")) as f:
+                use = set(f.read().split())
+        except OSError:
+            use = set()
+        found.append((os.path.basename(path), use))
+    return found
+
+
+def kernel_option(name):
+    """y, m, n (unset), or None if the running kernel's config can't be read"""
+    for path in ("/proc/config.gz", "/boot/config-%s" % os.uname().release):
+        try:
+            opener = gzip.open if path.endswith(".gz") else open
+            with opener(path, "rt") as f:
+                for line in f:
+                    if line.startswith(name + "="):
+                        return line.split("=", 1)[1].strip()
+            return "n"
+        except OSError:
+            continue
+    return None
+
+
+def repos():
+    """{name: location} of the repositories portage uses"""
+    try:
+        import portage
+        return {r.name: r.location for r in portage.settings.repositories}
+    except Exception:
+        return {}
+
+
+def check_all(arch=None, tuple_=None):
+    """Checks for building for arch (portage's name, e.g. arm64), with the
+    toolchain tuple_ (e.g. aarch64-unknown-linux-gnu) if known"""
+    checks = []
+
+    # crossdev itself, and the repository it puts its toolchain ebuilds in
+    have = _installed("sys-devel/crossdev")
+    checks.append(Check(
+        "crossdev", "crossdev", bool(have),
+        "installed (%s)" % have[0][0] if have else "not installed",
+        None if have else "Install sys-devel/crossdev."))
+    found = repos()
+    cross_repo = next((n for n, loc in found.items()
+                       if n == "crossdev" or loc.rstrip("/").endswith("/crossdev")), None)
+    checks.append(Check(
+        "crossdev-repo", "A repository for crossdev's toolchain packages",
+        cross_repo is not None,
+        "%s (%s)" % (cross_repo, found[cross_repo]) if cross_repo else "none",
+        None if cross_repo else
+        "crossdev puts the toolchain ebuilds it makes in a repository of their own; "
+        "Porthole can create one in /var/db/repos/crossdev."))
+
+    # the cross toolchain for the target
+    if tuple_:
+        gcc = shutil.which(tuple_ + "-gcc")
+        checks.append(Check(
+            "toolchain", "Cross toolchain for %s" % tuple_, bool(gcc),
+            gcc or "not built",
+            None if gcc else "Build it with crossdev, with the versions the target's "
+            "profile allows (Porthole works them out)."))
+
+    # qemu user mode, for what won't cross-compile
+    target = QEMU_TARGETS.get(arch or "")
+    qemu = _installed("app-emulation/qemu")
+    use = qemu[0][1] if qemu else set()
+    static = "static-user" in use
+    has_target = (not target) or ("qemu_user_targets_%s" % target) in use
+    checks.append(Check(
+        "qemu", "qemu's user-mode emulator%s" % (" for %s" % target if target else ""),
+        bool(qemu) and static and has_target,
+        ("installed, USE " + " ".join(sorted(
+            f for f in use if f == "static-user" or f.startswith("qemu_user_targets_"))))
+        if qemu else "not installed",
+        None if qemu and static and has_target else
+        "Needed only for packages that won't cross-compile: app-emulation/qemu with "
+        "USE=static-user and QEMU_USER_TARGETS=\"%s\"." % (target or "...")))
+
+    # binfmt: the kernel runs the target's programs through qemu
+    option = kernel_option("CONFIG_BINFMT_MISC")
+    checks.append(Check(
+        "binfmt-kernel", "Kernel support for running other architectures' programs",
+        option in ("y", "m") if option is not None else None,
+        "CONFIG_BINFMT_MISC=%s" % option if option else "unknown (no kernel config readable)",
+        None if option in ("y", "m") else "Set CONFIG_BINFMT_MISC in the kernel."))
+    if target:
+        entry = "/proc/sys/fs/binfmt_misc/qemu-%s" % target
+        registered = os.path.exists(entry)
+        enabled = False
+        if registered:
+            try:
+                with open(entry) as f:
+                    enabled = f.readline().strip() == "enabled"
+            except OSError:
+                pass
+        checks.append(Check(
+            "binfmt-qemu", "qemu registered to run %s programs" % target,
+            registered and enabled,
+            "registered" if registered and enabled else
+            "registered but disabled" if registered else "not registered",
+            None if registered and enabled else
+            "Start the qemu-binfmt service (rc-update add qemu-binfmt default)."))
+
+    # distcc: emulated builds hand their compiling to the native cross compiler
+    distcc = _installed("sys-devel/distcc")
+    running = subprocess.run(["pgrep", "-x", "distccd"], capture_output=True).returncode == 0
+    allows = _distccd_allows()
+    local = any(a.startswith(("127.", "localhost")) for a in allows)
+    checks.append(Check(
+        "distcc", "distcc for builds in the emulator",
+        bool(distcc) and running and local,
+        "%s; %s; allows %s" % ("installed" if distcc else "not installed",
+                                "running" if running else "not running",
+                                " ".join(allows) or "nobody"),
+        None if distcc and running and local else " ".join(
+            (["Install sys-devel/distcc."] if not distcc else [])
+            + (["Allow this computer in /etc/conf.d/distccd (--allow 127.0.0.1); "
+                "Porthole adds nothing else unless you ask."] if not local else [])
+            + (["Start distccd (rc-service distccd start)."] if not running else []))))
+
+    # room for the systems built
+    base = ROOTS_DIR if os.path.isdir(ROOTS_DIR) else os.path.dirname(ROOTS_DIR)
+    while not os.path.isdir(base):
+        base = os.path.dirname(base)
+    usage = shutil.disk_usage(base)
+    free_gb = usage.free / 1024 ** 3
+    checks.append(Check(
+        "space", "Room for systems in %s" % ROOTS_DIR, free_gb >= 20,
+        "%.0f GB free" % free_gb,
+        None if free_gb >= 20 else
+        "A desktop system takes 15-30 GB to build; free some space first."))
+    return checks
+
+
+def _distccd_allows():
+    """Addresses /etc/conf.d/distccd lets in (--allow)"""
+    try:
+        with open("/etc/conf.d/distccd") as f:
+            text = f.read()
+    except OSError:
+        return []
+    opts = " ".join(re.findall(r'^\s*DISTCCD_OPTS="([^"]*)"', text, re.M))
+    opts = opts.replace("${DISTCCD_OPTS}", "")
+    return re.findall(r"--allow[= ]\s*(\S+)", opts)

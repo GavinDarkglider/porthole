@@ -32,6 +32,7 @@
         binhost add NAME --uri U [--priority N] [--no-verify]
         binhost remove NAME         a binhost in binrepos.conf
         binpkgs clean|index|upload  look after the package directory (jobs)
+        plugin NAME ARGS...         a command of an enabled plugin (its root.py)
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -82,6 +83,9 @@
         build_binpkgs = no
         # where "Upload" copies PKGDIR (rsync destination), empty: none
         binpkg_upload =
+        # plugins switched on for this computer (space separated); only
+        # these may run anything as root
+        plugins =
 
     Copyright (C) 2026 Porthole developers
 
@@ -171,6 +175,7 @@ DEFAULTS = {
     "idle_minutes": "15",
     "pause_when_active": "yes",
     "low_priority": "yes",
+    "plugins": "",
 }
 
 
@@ -197,6 +202,7 @@ def load_config(path=CONFIG_FILE):
         "use_binpkgs": section.getboolean("use_binpkgs", False),
         "build_binpkgs": section.getboolean("build_binpkgs", False),
         "binpkg_upload": section.get("binpkg_upload", "").strip(),
+        "plugins": section.get("plugins", "").split(),
         "build_window": _window(section.get("build_window", "")),
         "window_needs_ac": section.getboolean("window_needs_ac", True),
         "idle_minutes": _minutes(section.get("idle_minutes")),
@@ -610,6 +616,9 @@ def main(argv=None):
     binhost.add_argument("--target", default=None)
     binpkgs = sub.add_parser("binpkgs", help="clean, index or upload the package directory")
     binpkgs.add_argument("action", choices=("clean", "index", "upload"))
+    plug = sub.add_parser("plugin", help="a command of an enabled plugin")
+    plug.add_argument("name")
+    plug.add_argument("args", nargs=argparse.REMAINDER, help="the plugin's own arguments")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -720,6 +729,20 @@ def job_command(args, parser):
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
+        elif args.command == "plugin":
+            from porthole import plugins
+            try:
+                module = plugins.root_module(args.name)
+            except plugins.PluginError as e:
+                print(e, file=sys.stderr)
+                return 3
+            words = args.args[1:] if args.args[:1] == ["--"] else args.args
+            if not words or words[0] not in getattr(module, "COMMANDS", {}):
+                print("%s has no command %s (it has: %s)" % (
+                    args.name, words[:1], ", ".join(sorted(getattr(module, "COMMANDS", {})))),
+                    file=sys.stderr)
+                return 2
+            return module.COMMANDS[words[0]](words[1:]) or 0
         elif args.command == "binhost":
             if args.action == "add":
                 if not args.uri:

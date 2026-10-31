@@ -757,6 +757,21 @@ class Runner:
         # a check that was skipped (emerge running) leaves the old plan
         return code == 0 and (read_json(PLAN_FILE) or {}).get("generated") != plan_before
 
+    def step_plugin(self, job_id, step, log):
+        """A step a plugin provides (its root.py STEPS), if the plugin is
+        still switched on"""
+        from porthole import plugins
+        try:
+            module = plugins.root_module(step.get("plugin"))
+        except plugins.PluginError as e:
+            log("!! %s" % e)
+            return False
+        action = (getattr(module, "STEPS", {}) or {}).get(step.get("action"))
+        if action is None:
+            log("!! The %s plugin has no step %s" % (step.get("plugin"), step.get("action")))
+            return False
+        return bool(action(self, job_id, step, log))
+
     def step_shell(self, job_id, step, log):
         log("$ " + step["shell"])
         return self.run_logged(job_id, step, log, ["/bin/bash", "-c", step["shell"]])
@@ -1323,6 +1338,13 @@ def set_config(changes, path=CONFIG_FILE):
             except ValueError as e:
                 raise JobError(str(e))
             clean[key] = format_window(window) if window else ""
+        elif key == "plugins":
+            from porthole import plugins
+            names = value.split()
+            unknown = [n for n in names if n not in plugins.installed()]
+            if unknown:
+                raise JobError("No such plugin installed: %s" % " ".join(unknown))
+            clean[key] = " ".join(sorted(set(names)))
         elif key == "binpkg_upload":
             from porthole.updater.system import check_upload_destination
             try:

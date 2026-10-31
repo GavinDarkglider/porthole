@@ -116,8 +116,7 @@ class PluginGUI(Gtk.Window):
                 config.Prefs.plugins.active_list.append(changed_plugin.name)
         else:
             if changed_plugin.name in config.Prefs.plugins.active_list:
-                index = config.Prefs.plugins.active_list.index(changed_plugin.name)
-                config.Prefs.plugins.active_list = config.Prefs.plugins.active_list[:index-1] + config.Prefs.plugins.active_list[index+1:]
+                config.Prefs.plugins.active_list.remove(changed_plugin.name)
 
     def sel_changed(self, selection, *args):
         treemodel, row = selection.get_selected()
