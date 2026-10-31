@@ -222,6 +222,26 @@ def step_toolchain(runner, job_id, step, log):
         log("   %-15s %-22s from %s%s" % (title, version, repo,
                                           "  (built: %s)" % built if built else ""))
     argv = tc.command(resolved, output)
+    # crossdev's settings first, then Porthole's unmask for the pinned
+    # versions (crossdev's own "live" mask hides 9999.N ones), then a
+    # check that all of them can be emerged, before hours of building
+    log("$ " + " ".join(argv + ["--init-target"]))
+    if not runner.run_logged(job_id, step, log, argv + ["--init-target"]):
+        return False
+    try:
+        path = tc.write_unmask(resolved)
+    except (tc.ToolchainError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    log("Unmasked exactly these versions in %s:" % path)
+    for line in tc.unmask_lines(resolved):
+        log("   " + line)
+    check = tc.pretend_command(resolved)
+    log("$ " + " ".join(check))
+    if not runner.run_logged(job_id, step, log, check):
+        log("!! The toolchain packages can't be emerged as they are (above); nothing "
+            "was built.")
+        return False
     log("$ " + " ".join(argv))
     if not runner.run_logged(job_id, step, log, argv):
         return False

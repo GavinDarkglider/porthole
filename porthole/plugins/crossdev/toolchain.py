@@ -113,3 +113,44 @@ def compare(resolved, vdb="/var/db/pkg"):
     have = installed(resolved["tuple"], vdb)
     return [(TITLES[p["part"]], p["version"], p["repo"],
              have.get(p["cp"].split("/", 1)[1])) for p in resolved["parts"]]
+
+
+def unmask_lines(resolved):
+    """package.unmask lines for exactly the pinned versions: crossdev masks
+    >=9999 of each package as "live" unless the version is exactly 9999,
+    which also hides real versions numbered 9999.N (the Switch overlay's
+    patched kernel headers are 9999.512)"""
+    category = "cross-" + resolved["tuple"]
+    return ["=%s/%s-%s" % (category, p["cp"].split("/", 1)[1], p["version"])
+            for p in resolved["parts"]]
+
+
+def write_unmask(resolved, portage_dir="/etc/portage"):
+    """Porthole's own package.unmask file for this toolchain (replaced
+    each time); returns its path"""
+    directory = os.path.join(portage_dir, "package.unmask")
+    if os.path.isfile(directory):
+        raise ToolchainError("%s is a single file. Porthole keeps its changes in a file of "
+                             "its own: move it into a new directory of that name first."
+                             % directory)
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    path = os.path.join(directory, "porthole-cross-" + resolved["tuple"])
+    with open(path + ".new", "w") as f:
+        f.write("# Porthole: the exact cross toolchain versions %s's profile allows.\n"
+                "# crossdev masks >=9999 as live versions, which also hides real ones\n"
+                "# numbered 9999.N; only these exact versions are unmasked.\n"
+                % resolved["tuple"])
+        for line in unmask_lines(resolved):
+            f.write(line + "\n")
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return path
+
+
+def pretend_command(resolved):
+    """emerge --pretend for exactly the pinned cross packages, without their
+    dependencies: are they all visible (not masked, keyworded) here?"""
+    category = "cross-" + resolved["tuple"]
+    return ["emerge", "--pretend", "--oneshot", "--nodeps", "--quiet"] + [
+        "=%s/%s-%s" % (category, p["cp"].split("/", 1)[1], p["version"])
+        for p in resolved["parts"]]
