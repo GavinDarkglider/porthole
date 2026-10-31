@@ -1,0 +1,259 @@
+"""
+    Porthole crossdev plugin: building a system on this computer
+
+    Cross-compiled with the system's toolchain, the way crossdev's
+    cross-emerge does, except that the system's root is also its sysroot
+    (one tree: what is built for it is linked against what is in it):
+
+        ROOT=SYSROOT=PORTAGE_CONFIGROOT=<root>  CBUILD=<this computer>
+
+    The cross gcc always looks in /usr/<CHOST> (its built-in sysroot, not
+    $SYSROOT), so the build runs with small wrappers first in PATH that add
+    --sysroot=<root> (/var/lib/porthole/cross/<name>/bin). crossdev's
+    pkg-config wrapper already follows ESYSROOT.
+
+    In order: the kernel headers and C library first (everything else
+    links against them), then @system, then the system's own list
+    (@world) and what its First boot choices need, then the first-boot
+    setup. Packages that fail to cross-compile are listed at the end (the
+    emulator fallback builds them in a later version).
+
+    Tools a build runs on this computer (BDEPEND) are installed here, the
+    way any cross build does; when they need a change on this computer
+    (typically one more Python target, when the system's Python is
+    another version), it is shown before building and only made when
+    the user agrees, in Porthole's own file
+    /etc/portage/package.use/porthole-cross-<name>.
+
+    Copyright (C) 2026 Porthole developers
+
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation; either version 2 of the License, or
+    (at your option) any later version.
+"""
+
+import os
+import re
+import subprocess
+
+WRAPPERS_DIR = "/var/lib/porthole/cross"
+TOOLS = ("gcc", "g++", "cc", "c++", "cpp", "gfortran", "ld", "ld.bfd")
+BASE = ("sys-kernel/linux-headers", "sys-libs/glibc")
+HOST_FILE = "porthole-cross-%s"
+ROOT_FILE = "00-porthole-build"
+_LINE = re.compile(r"^(>=|<=|=|~|<|>)?[A-Za-z0-9+_][A-Za-z0-9+_.-]*/[A-Za-z0-9+_][A-Za-z0-9+_.:-]*"
+                   r"( +-?[A-Za-z0-9][A-Za-z0-9+_@.:-]*)+$")
+_KEYWORD_LINE = re.compile(r"^(>=|<=|=|~|<|>)?[A-Za-z0-9+_][A-Za-z0-9+_.-]*/"
+                           r"[A-Za-z0-9+_][A-Za-z0-9+_.:-]*( +~?\*?[a-z0-9-]*\*?)?$")
+
+
+class BuildError(Exception):
+    pass
+
+
+def host_chost():
+    from porthole.plugins.crossdev import toolchain
+    return toolchain.host_chost()
+
+
+def chost_of(target):
+    from porthole.plugins.crossdev import conf
+    return conf.effective(conf.read(target), "CHOST")
+
+
+def wrappers_dir(target, base=None):
+    return os.path.join(base or WRAPPERS_DIR, target.name, "bin")
+
+
+def write_wrappers(target, chost, base=None, search="/usr/bin"):
+    """The compiler wrappers adding --sysroot=<root>; returns their folder"""
+    directory = wrappers_dir(target, base)
+    os.makedirs(directory, mode=0o755, exist_ok=True)
+    root = os.path.realpath(target.root)
+    for tool in TOOLS:
+        real = os.path.join(search, "%s-%s" % (chost, tool))
+        path = os.path.join(directory, "%s-%s" % (chost, tool))
+        if not os.path.exists(real):
+            if os.path.exists(path):
+                os.unlink(path)
+            continue
+        with open(path + ".new", "w") as f:
+            f.write("#!/bin/sh\n# Porthole: %s for the system in %s (its root is its sysroot)\n"
+                    'exec %s --sysroot=%s "$@"\n' % (tool, root, real, root))
+        os.chmod(path + ".new", 0o755)
+        os.replace(path + ".new", path)
+    return directory
+
+
+def environment(target, chost, base=None):
+    """What emerge needs to build into the system"""
+    root = os.path.realpath(target.root)
+    return {"ROOT": root, "SYSROOT": root, "PORTAGE_CONFIGROOT": os.path.realpath(
+                target.config_root), "CBUILD": host_chost() or "", "CHOST": chost,
+            "PATH": wrappers_dir(target, base) + ":" + os.environ.get("PATH", "/usr/bin:/bin")}
+
+
+def world_extra(target):
+    """Packages the First boot choices need that the list doesn't have"""
+    from porthole.plugins.crossdev import firstboot, packages
+    saved = firstboot.read_public(target.name)
+    if not saved:
+        return []
+    have = set(packages.read_world(target))
+    return [a for a in firstboot.packages(saved) if a not in have]
+
+
+STAGES = (("base", "The kernel headers and C library"),
+          ("system", "The base system (@system)"),
+          ("extra", "What First boot needs, added to the list"),
+          ("world", "The system's own packages (@world)"))
+
+
+def command(target, stage):
+    """emerge's arguments for one stage of the build, or None (nothing to do)"""
+    common = ["emerge", "--verbose", "--color=y"]
+    if stage == "base":
+        return common + ["--oneshot", "--update"] + list(BASE)
+    if stage == "system":
+        return common + ["--update", "--deep", "--newuse", "--keep-going", "@system"]
+    if stage == "extra":
+        extra = world_extra(target)
+        return common + ["--noreplace", "--keep-going"] + extra if extra else None
+    if stage == "world":
+        return common + ["--update", "--deep", "--newuse", "--keep-going", "@world"]
+    raise BuildError("No such stage: %s" % stage)
+
+
+def check_argv(target):
+    """emerge --pretend as root before building: everything agreed to is
+    written, so it must work out now without further changes"""
+    return ["emerge", "--pretend", "--quiet", "--color=y", "--update", "--deep", "--newuse",
+            "@system", "@world"] + list(BASE) + world_extra(target)
+
+
+def pretend_argv(target):
+    """One emerge --pretend over everything the build installs"""
+    return ["emerge", "--pretend", "--verbose", "--color=n", "--update", "--deep", "--newuse",
+            "--autounmask=y", "--autounmask-backtrack=y", "--autounmask-write=n",
+            "@system", "@world"] + list(BASE) + world_extra(target)
+
+
+def parse_pretend(text, root):
+    """{"root": [cpv], "host": [cpv], "root_use", "host_use", "root_keywords",
+    "host_keywords": [line], "other": [text], "ok": bool} from emerge
+    --pretend's output (its changes come under "For <config dir>:")"""
+    root = os.path.realpath(root).rstrip("/")
+    out = {"root": [], "host": [], "root_use": [], "host_use": [], "root_keywords": [],
+           "host_keywords": [], "other": [], "ok": True}
+    side, section = "root", None
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        match = re.match(r"^\[(ebuild|binary)[^\]]*\]\s+(\S+)", line)
+        if match:
+            cpv = re.sub(r"::.*$", "", match.group(2))
+            (out["root"] if " to %s/" % root in line else out["host"]).append(cpv)
+            continue
+        match = re.match(r"^For (/\S*):$", line)
+        if match:
+            side = "root" if os.path.realpath(match.group(1)).startswith(root + "/") else "host"
+            continue
+        if "USE changes are necessary" in line:
+            section = "use"
+            continue
+        if "keyword changes are necessary" in line:
+            section = "keywords"
+            continue
+        if re.search(r"(mask|license) changes are necessary", line):
+            section = None
+            out["ok"] = False
+            out["other"].append(line.strip())
+            continue
+        if section and (not line or line.startswith(("#", " "))):
+            continue
+        if section == "use" and _LINE.match(line.strip()):
+            out[side + "_use"].append(line.strip())
+            continue
+        if section == "keywords" and _KEYWORD_LINE.match(line.strip()):
+            out[side + "_keywords"].append(line.strip())
+            continue
+        section = None
+        if line.startswith(("!!!", "emerge: there are no")):
+            out["ok"] = False
+            out["other"].append(line.strip())
+    if out["host_keywords"]:
+        out["ok"] = False
+        out["other"].append("Packages built on this computer would need testing versions: "
+                            + ", ".join(out["host_keywords"]))
+    return out
+
+
+def plan(target):
+    """Work out the build as the user (no root needed): parse_pretend's
+    result, with "output" (its end) and "chost" """
+    chost = chost_of(target)
+    env = dict(os.environ, **environment(target, chost))
+    env["PATH"] = os.environ.get("PATH", "/usr/bin:/bin")
+    result = subprocess.run(pretend_argv(target), env=env, capture_output=True, text=True,
+                            timeout=1800)
+    text = result.stdout + "\n" + result.stderr
+    parsed = parse_pretend(text, target.root)
+    if result.returncode != 0 and not (parsed["root_use"] or parsed["host_use"]
+                                       or parsed["root_keywords"]):
+        parsed["ok"] = False
+    parsed["output"] = text[-6000:]
+    parsed["chost"] = chost
+    return parsed
+
+
+def check_lines(lines, pattern):
+    lines = [l.strip() for l in lines or [] if l.strip()]
+    for line in lines:
+        if not pattern.match(line):
+            raise BuildError("Not a package setting: %r" % line)
+    return lines
+
+
+def write_changes(target, host_use, root_use, root_keywords, portage_dir="/etc/portage"):
+    """The changes the user agreed to: this computer's in Porthole's own
+    file for this system (removed with it), the system's in its own"""
+    host_use = check_lines(host_use, _LINE)
+    root_use = check_lines(root_use, _LINE)
+    root_keywords = check_lines(root_keywords, _KEYWORD_LINE)
+    written = []
+    for path, lines, what in (
+            (os.path.join(portage_dir, "package.use", HOST_FILE % target.name), host_use,
+             "this computer: tools that build %s" % target.title),
+            (os.path.join(target.portage_dir, "package.use", ROOT_FILE), root_use,
+             "%s's packages" % target.title),
+            (os.path.join(target.portage_dir, "package.accept_keywords", ROOT_FILE),
+             root_keywords, "%s's packages" % target.title)):
+        if not lines:
+            continue
+        directory = os.path.dirname(path)
+        if os.path.isfile(directory):
+            raise BuildError("%s is a single file; Porthole keeps its changes in a file of "
+                             "its own: move it into a new directory of that name first"
+                             % directory)
+        os.makedirs(directory, mode=0o755, exist_ok=True)
+        old = []
+        if os.path.exists(path):
+            with open(path) as f:
+                old = [l.strip() for l in f if l.strip() and not l.startswith("#")]
+        merged = list(dict.fromkeys(old + lines))
+        with open(path + ".new", "w") as f:
+            f.write("# Porthole: changes building %s needs (%s),\n"
+                    "# agreed to before the build. Removed with the system.\n"
+                    % (target.title, what) + "".join(l + "\n" for l in merged))
+        os.chmod(path + ".new", 0o644)
+        os.replace(path + ".new", path)
+        written.append(path)
+    return written
+
+
+def remove_host_changes(target, portage_dir="/etc/portage"):
+    path = os.path.join(portage_dir, "package.use", HOST_FILE % target.name)
+    if os.path.exists(path):
+        os.unlink(path)
+        return path
+    return None

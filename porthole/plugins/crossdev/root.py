@@ -30,6 +30,9 @@
         plugin crossdev packages NAME JSON     what it installs: its world file and
                                                USE for single packages
                                                ({"world": [...], "use": {...}})
+        plugin crossdev build NAME JSON        queue building it, with the changes
+                                               the user agreed to ({"host_use",
+                                               "root_use", "root_keywords"}: lines)
         plugin crossdev firstboot NAME FILE    its first-boot setup (FILE: JSON
                                                the front end wrote, mode 0600,
                                                password hashes, never passwords)
@@ -38,6 +41,8 @@
 
         remove-root   {"name": NAME}
         toolchain     {"name": NAME}
+        build-check   {"name": NAME}   compiler wrappers; emerge --pretend
+        build-stage   {"name": NAME, "stage": base|system|extra|world}
         firstboot     {"name": NAME}   write its first-boot setup into it
 
     Copyright (C) 2026 Porthole developers
@@ -389,6 +394,108 @@ def packages(args):
     return 0
 
 
+def build(args):
+    """plugin crossdev build NAME JSON"""
+    from porthole.plugins.crossdev import build as bd
+    from porthole.updater import runner
+    if len(args) != 2:
+        print("usage: plugin crossdev build NAME JSON", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    try:
+        changes = json.loads(args[1])
+        if not isinstance(changes, dict):
+            raise ValueError("expected an object")
+        for path in bd.write_changes(target, changes.get("host_use"), changes.get("root_use"),
+                                     changes.get("root_keywords")):
+            print("Wrote %s" % path)
+    except (ValueError, bd.BuildError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    title = "Build %s" % target.title
+
+    def step(action, step_title, **more):
+        return dict({"kind": "plugin", "title": step_title, "plugin": "crossdev",
+                     "action": action, "name": target.name}, **more)
+    steps = [step("build-check", "Check the build can go ahead")]
+    steps += [step("build-stage", stage_title, stage=stage) for stage, stage_title in bd.STAGES]
+    steps.append(step("firstboot", "The first-boot setup"))
+    job = runner.new_job("plugin", title, steps, recheck=False)
+    with runner.jobs_state() as state:
+        state["jobs"].append(job)
+        runner.prune(state)
+    runner.start_runner()
+    print(job["id"])
+    return 0
+
+
+def _build_env(target, log):
+    from porthole.plugins.crossdev import build as bd
+    chost = bd.chost_of(target)
+    if not chost:
+        raise bd.BuildError("%s's settings give no CHOST" % target.title)
+    bd.write_wrappers(target, chost)
+    return bd.environment(target, chost)
+
+
+def step_build_check(runner, job_id, step, log):
+    import shutil
+    from porthole.plugins.crossdev import build as bd, toolchain as tc
+    from porthole.plugins.crossdev import roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    try:
+        env = _build_env(target, log)
+    except (bd.BuildError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    chost = env["CHOST"]
+    if env["CBUILD"] != chost:
+        if not shutil.which(chost + "-gcc"):
+            log("!! There is no cross compiler for %s yet: build its toolchain first "
+                "(Systems window)" % chost)
+            return False
+        built = tc.installed(chost)
+        log("Cross toolchain for %s: %s" % (chost, ", ".join(
+            "%s %s" % kv for kv in sorted(built.items())) or "?"))
+    log("Building into %s, as its own sysroot; compilers from %s"
+        % (env["ROOT"], bd.wrappers_dir(target)))
+    argv = bd.check_argv(target)
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+        log("!! Portage can't work the build out as it stands (above); nothing was built.")
+        return False
+    return True
+
+
+def step_build_stage(runner, job_id, step, log):
+    from porthole.plugins.crossdev import build as bd, roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    try:
+        env = _build_env(target, log)
+        argv = bd.command(target, step.get("stage", ""))
+    except (bd.BuildError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    if argv is None:
+        log("Nothing to do here.")
+        return True
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+        log("!! Some packages didn't build (above). Starting the build again picks up "
+            "where it stopped; packages that won't cross-compile will be built in the "
+            "emulator in a later version of Porthole.")
+        return False
+    return True
+
+
 def step_firstboot(runner, job_id, step, log):
     """Write the first-boot setup into the system (the end of its build)"""
     from porthole.plugins.crossdev import firstboot as fb, roots
@@ -410,6 +517,7 @@ def step_firstboot(runner, job_id, step, log):
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
-            "firstboot": firstboot, "packages": packages}
+            "firstboot": firstboot, "packages": packages, "build": build}
 STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain,
-         "firstboot": step_firstboot}
+         "firstboot": step_firstboot, "build-check": step_build_check,
+         "build-stage": step_build_stage}

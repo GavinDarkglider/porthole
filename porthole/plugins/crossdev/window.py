@@ -207,6 +207,13 @@ class SystemsWindow(Gtk.Window):
             "kernel headers its profile allows, built here with crossdev.")
         self.toolchain_button.connect("clicked", lambda b: self.build_toolchain())
         buttons.pack_start(self.toolchain_button, False, False, 0)
+        self.build_button = Gtk.Button(label="Build the system…")
+        self.build_button.set_tooltip_text(
+            "Cross-compile it here: kernel headers and C library, @system, its package list, "
+            "then its first-boot setup. Shows what it builds (and anything it needs changed "
+            "on this computer) first.")
+        self.build_button.connect("clicked", lambda b: self.build_system())
+        buttons.pack_start(self.build_button, False, False, 0)
         self.remove_button = Gtk.Button(label="Delete…")
         self.remove_button.connect("clicked", lambda b: self.remove_system())
         buttons.pack_start(self.remove_button, False, False, 0)
@@ -253,6 +260,7 @@ class SystemsWindow(Gtk.Window):
     def update_buttons(self):
         self.remove_button.set_sensitive(self.selected() is not None)
         self.settings_button.set_sensitive(self.selected() is not None)
+        self.build_button.set_sensitive(self.selected() is not None)
         self.toolchain_button.set_sensitive(self.selected() is not None)
 
     def error(self, text, detail):
@@ -355,6 +363,34 @@ class SystemsWindow(Gtk.Window):
             if not ok:
                 self.error("The toolchain build wasn't queued", output)
         run_as_root(service("plugin", "crossdev", "toolchain", target.name), done)
+        return False
+
+    def build_system(self):
+        """Work the build out as the user (a minute), then confirm"""
+        from porthole.plugins.crossdev import roots
+        target = roots.made_here().get(self.selected())
+        if target is None:
+            return
+        self.build_button.set_sensitive(False)
+        self.build_button.set_label("Working out the build…")
+
+        def work():
+            from porthole.plugins.crossdev import build
+            try:
+                plan = build.plan(target)
+                GLib.idle_add(self.confirm_build, target, plan, None)
+            except Exception as e:
+                GLib.idle_add(self.confirm_build, target, None, "%s: %s" % (
+                    type(e).__name__, e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def confirm_build(self, target, plan, problem):
+        self.build_button.set_label("Build the system…")
+        self.update_buttons()
+        if problem:
+            self.error("Porthole couldn't work out the build", problem)
+            return False
+        BuildDialog(self, target, plan)
         return False
 
     def remove_system(self):
@@ -605,3 +641,106 @@ class NewSystemDialog(Gtk.Dialog):
         if self.keep_binpkgs.get_active():
             args.append("--keep-binpkgs")
         return args
+
+
+class BuildDialog(Gtk.Dialog):
+    """What building a system installs, and the changes it needs (this
+    computer's only with the user's tick)"""
+
+    def __init__(self, parent, target, plan):
+        super().__init__(title="Porthole: build %s" % target.title, transient_for=parent,
+                         modal=True)
+        self.set_default_size(720, 560)
+        self.parent_window, self.target, self.plan = parent, target, plan
+        area = self.get_content_area()
+        area.set_border_width(12)
+        area.set_spacing(8)
+
+        def small(text):
+            label = Gtk.Label(xalign=0, wrap=True, max_width_chars=90)
+            label.set_markup("<small>%s</small>" % GLib.markup_escape_text(text))
+            return label
+
+        def heading(text):
+            label = Gtk.Label(xalign=0, margin_top=6)
+            label.set_markup("<b>%s</b>" % GLib.markup_escape_text(text))
+            return label
+
+        def listing(lines, height=90):
+            view = Gtk.TextView(editable=False, monospace=True, cursor_visible=False)
+            view.get_buffer().set_text("\n".join(lines))
+            scroller = Gtk.ScrolledWindow(min_content_height=height)
+            scroller.add(view)
+            return scroller
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        scroller = Gtk.ScrolledWindow(vexpand=True, hscrollbar_policy=Gtk.PolicyType.NEVER)
+        scroller.add(box)
+        area.pack_start(scroller, True, True, 0)
+        if not plan["ok"]:
+            box.pack_start(heading("Portage can't work this build out"), False, False, 0)
+            box.pack_start(small("\n".join(plan["other"]) or "See its output below."),
+                           False, False, 0)
+            box.pack_start(listing(plan["output"].splitlines()[-60:], 260), True, True, 0)
+            self.add_button("Close", Gtk.ResponseType.CANCEL)
+            self.show_all()
+            self.run()
+            self.destroy()
+            return
+        box.pack_start(heading("%d packages for %s (%s)" % (
+            len(plan["root"]), target.title, plan["chost"])), False, False, 0)
+        box.pack_start(small(
+            "Cross-compiled here, in order: kernel headers and C library, the base system, "
+            "the system's package list, then its first-boot setup. Hours, for a whole "
+            "system; it can be stopped and started again, and picks up where it stopped."),
+            False, False, 0)
+        box.pack_start(listing(plan["root"], 110), False, False, 0)
+        changes = plan["root_use"] + plan["root_keywords"]
+        if changes:
+            box.pack_start(heading("Changes to %s's settings" % target.title), False, False, 0)
+            box.pack_start(small("Its packages need these; they go in its own "
+                                 "package.use / package.accept_keywords (00-porthole-build)."),
+                           False, False, 0)
+            box.pack_start(listing(changes, 70), False, False, 0)
+        self.allow = None
+        if plan["host"]:
+            box.pack_start(heading("On this computer: %d build tools" % len(plan["host"])),
+                           False, False, 0)
+            box.pack_start(small(
+                "Some packages run tools while they build, and those run here, so they are "
+                "installed or rebuilt on this computer, as in any cross build:"),
+                False, False, 0)
+            box.pack_start(listing(plan["host"], 70), False, False, 0)
+        if plan["host_use"]:
+            box.pack_start(heading("Changes to this computer's settings"), False, False, 0)
+            box.pack_start(small(
+                "Those tools need these USE changes here (often one more Python version: "
+                "the system's Python is another than this computer's). Porthole keeps them "
+                "in a file of its own, /etc/portage/package.use/porthole-cross-%s, removed "
+                "with the system; nothing else on this computer changes." % target.name),
+                False, False, 0)
+            box.pack_start(listing(plan["host_use"], 90), False, False, 0)
+            self.allow = Gtk.CheckButton(label="Allow these changes on this computer")
+            self.allow.connect("toggled", lambda b: self.set_response_sensitive(
+                Gtk.ResponseType.OK, b.get_active()))
+            box.pack_start(self.allow, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.add_button("Build it", Gtk.ResponseType.OK)
+        if self.allow is not None:
+            self.set_response_sensitive(Gtk.ResponseType.OK, False)
+        self.show_all()
+        answer = self.run()
+        self.destroy()
+        if answer == Gtk.ResponseType.OK:
+            self.queue()
+
+    def queue(self):
+        import json
+        from porthole.updater.elevate import run_as_root, service
+        changes = {"host_use": self.plan["host_use"], "root_use": self.plan["root_use"],
+                   "root_keywords": self.plan["root_keywords"]}
+
+        def done(ok, output):
+            if not ok:
+                self.parent_window.error("The build wasn't queued", output)
+        run_as_root(service("plugin", "crossdev", "build", self.target.name,
+                            json.dumps(changes)), done)
