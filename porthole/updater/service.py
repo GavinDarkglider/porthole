@@ -29,6 +29,9 @@
         repo add NAME --sync-type T --uri U [--priority N] [--no-auto-sync]
         repo remove NAME [--delete-files]
         repo sync NAME              add, remove or sync a repository
+        binhost add NAME --uri U [--priority N] [--no-verify]
+        binhost remove NAME         a binhost in binrepos.conf
+        binpkgs clean|index|upload  look after the package directory (jobs)
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -72,6 +75,13 @@
         automation =
         # auto: may it accept testing (~arch) versions an update needs?
         auto_testing = no
+        # use binary packages from the binhosts in binrepos.conf when their
+        # USE matches (emerge --getbinpkg); make.conf is left alone
+        use_binpkgs = no
+        # keep binary packages of what is built here (emerge --buildpkg)
+        build_binpkgs = no
+        # where "Upload" copies PKGDIR (rsync destination), empty: none
+        binpkg_upload =
 
     Copyright (C) 2026 Porthole developers
 
@@ -153,6 +163,9 @@ DEFAULTS = {
     "offer_depclean": "yes",
     "automation": "",
     "auto_testing": "no",
+    "use_binpkgs": "no",
+    "build_binpkgs": "no",
+    "binpkg_upload": "",
     "build_window": "",
     "window_needs_ac": "yes",
     "idle_minutes": "15",
@@ -181,6 +194,9 @@ def load_config(path=CONFIG_FILE):
         "automation": (section.get("automation", "").strip()
                        if section.get("automation", "").strip() in AUTOMATION else None),
         "auto_testing": section.getboolean("auto_testing", False),
+        "use_binpkgs": section.getboolean("use_binpkgs", False),
+        "build_binpkgs": section.getboolean("build_binpkgs", False),
+        "binpkg_upload": section.get("binpkg_upload", "").strip(),
         "build_window": _window(section.get("build_window", "")),
         "window_needs_ac": section.getboolean("window_needs_ac", True),
         "idle_minutes": _minutes(section.get("idle_minutes")),
@@ -584,6 +600,16 @@ def main(argv=None):
     repo.add_argument("--delete-files", action="store_true",
                       help="remove: also delete its checkout (/var/db/repos/NAME only)")
     repo.add_argument("--target", default=None, help="the system (default: this computer)")
+    binhost = sub.add_parser("binhost", help="add or remove a binhost")
+    binhost.add_argument("action", choices=("add", "remove"))
+    binhost.add_argument("name")
+    binhost.add_argument("--uri")
+    binhost.add_argument("--priority", type=int)
+    binhost.add_argument("--no-verify", action="store_true",
+                         help="don't check package signatures (an unsigned binhost)")
+    binhost.add_argument("--target", default=None)
+    binpkgs = sub.add_parser("binpkgs", help="clean, index or upload the package directory")
+    binpkgs.add_argument("action", choices=("clean", "index", "upload"))
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -692,6 +718,18 @@ def job_command(args, parser):
                 if args.choices is not None:
                     runner.set_choices(args.choices)
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
+            runner.start_runner()
+            print(job["id"])
+        elif args.command == "binhost":
+            if args.action == "add":
+                if not args.uri:
+                    parser.error("binhost add needs --uri")
+                print(runner.add_binhost(args.name, args.uri, args.priority,
+                                         not args.no_verify, args.target))
+            else:
+                print(runner.remove_binhost(args.name, args.target))
+        elif args.command == "binpkgs":
+            job = runner.submit_binpkg_job(args.action)
             runner.start_runner()
             print(job["id"])
         elif args.command == "repo":

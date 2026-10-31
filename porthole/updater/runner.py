@@ -1171,6 +1171,91 @@ def remove_repo(name, delete_files=False, target_name=None):
     return removed
 
 
+# -- binary packages ---------------------------------------------------------------
+
+def add_binhost(name, uri, priority=None, verify=True, target_name=None):
+    """A binhost in binrepos.conf/<name>.conf (one file each)"""
+    from porthole.updater import system
+    if not system.BINHOST_NAME.match(name or ""):
+        raise JobError("Not a binhost name: %s" % name)
+    try:
+        system.check_binhost_uri(uri)
+        target = targets.get(target_name)
+    except ValueError as e:
+        raise JobError(str(e))
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    if name in {b["name"] for b in system.binrepos(target.portage_dir)}:
+        raise JobError("There already is a binhost called %s" % name)
+    directory = os.path.join(target.portage_dir, "binrepos.conf")
+    if os.path.isfile(directory):
+        raise JobError("%s is a single file. Porthole adds each binhost in a file of its "
+                       "own: move it into a new directory of that name first." % directory)
+    lines = ["[%s]" % name, "sync-uri = %s" % uri,
+             "location = /var/cache/binhost/%s" % name,
+             "verify-signature = %s" % ("true" if verify else "false")]
+    if priority is not None:
+        lines.append("priority = %d" % int(priority))
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, name + ".conf")
+    with open(path + ".new", "w") as f:
+        f.write("# Added in Porthole (Settings, Binary packages)\n" + "\n".join(lines) + "\n")
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return path
+
+
+def remove_binhost(name, target_name=None):
+    """Remove a binhost: only a binrepos.conf file of its own"""
+    from porthole.updater import system
+    try:
+        target = targets.get(target_name)
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    entries = system.binrepos(target.portage_dir)
+    mine = [b for b in entries if b["name"] == name]
+    if not mine:
+        raise JobError("%s isn't in binrepos.conf" % name)
+    path = mine[0]["file"]
+    others = [b["name"] for b in entries if b["file"] == path and b["name"] != name]
+    if others or os.path.basename(path) == "binrepos.conf":
+        raise JobError("%s also defines %s; remove [%s] from it by hand."
+                       % (path, ", ".join(others) or "other settings", name))
+    os.unlink(path)
+    return path
+
+
+def submit_binpkg_job(action):
+    """Look after the package directory: clean (eclean-pkg), index
+    (emaint binhost --fix) or upload (rsync to binpkg_upload)"""
+    import shutil
+    if action == "clean":
+        if not shutil.which("eclean-pkg"):
+            raise JobError("Cleaning needs eclean-pkg (app-portage/gentoolkit)")
+        argv, title = ["eclean-pkg", "--deep"], "Clean old binary packages"
+    elif action == "index":
+        argv, title = ["emaint", "binhost", "--fix"], "Rebuild the binary package index"
+    elif action == "upload":
+        from porthole.updater import system
+        destination = load_config().get("binpkg_upload")
+        if not destination:
+            raise JobError("No upload destination is set (Settings, Binary packages)")
+        system.check_upload_destination(destination)
+        if not shutil.which("rsync"):
+            raise JobError("Uploading needs rsync (net-misc/rsync)")
+        pkgdir = system.pkgdir_stats()[0]
+        argv = ["rsync", "-a", "--delete", pkgdir.rstrip("/") + "/", destination]
+        title = "Upload binary packages to %s" % destination
+    else:
+        raise JobError("Not a binary package job: %s" % action)
+    job = new_job("binpkg", title, [{"kind": "argv", "title": title, "argv": argv}],
+                  recheck=False)
+    with jobs_state() as state:
+        state["jobs"].append(job)
+        prune(state)
+    return job
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
@@ -1238,6 +1323,12 @@ def set_config(changes, path=CONFIG_FILE):
             except ValueError as e:
                 raise JobError(str(e))
             clean[key] = format_window(window) if window else ""
+        elif key == "binpkg_upload":
+            from porthole.updater.system import check_upload_destination
+            try:
+                clean[key] = check_upload_destination(value) if value else ""
+            except ValueError as e:
+                raise JobError(str(e))
         elif key == "automation":
             from porthole.updater.service import AUTOMATION
             if value not in AUTOMATION:

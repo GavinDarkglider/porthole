@@ -643,3 +643,127 @@ def check_repo_uri(uri):
             not re.match(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[A-Za-z0-9._/~-]+$", uri):
         raise ValueError("Not an address Porthole knows how to sync from: %s" % uri)
     return uri
+
+
+# -- binary packages ------------------------------------------------------------------
+
+BINHOST_NAME = _REPO_NAME
+
+
+def check_upload_destination(value):
+    """Where Upload copies the package directory: user@host:/path or a
+    local /path, one word"""
+    if not re.match(r"^(([A-Za-z0-9._-]+@)?[A-Za-z0-9.-]+:)?/[A-Za-z0-9._/~-]+$", value or ""):
+        raise ValueError("Not an upload destination (user@host:/path or /path): %s" % value)
+    return value
+
+
+def check_binhost_uri(uri):
+    if not uri or any(c.isspace() for c in uri) or not re.match(r"^(https?|ssh|rsync|file)://", uri):
+        raise ValueError("Not a binhost address (https://..., ssh://..., file://...): %s" % uri)
+    return uri
+
+
+def binrepos(portage_dir="/etc/portage"):
+    """The binhosts in binrepos.conf: [{name, uri, priority, verify, file}]"""
+    import configparser
+    path = os.path.join(portage_dir, "binrepos.conf")
+    files = ([os.path.join(path, f) for f in sorted(os.listdir(path))]
+             if os.path.isdir(path) else [path] if os.path.exists(path) else [])
+    found = []
+    for name in files:
+        parser = configparser.ConfigParser(interpolation=None)
+        try:
+            parser.read(name)
+        except configparser.Error:
+            continue
+        for section in parser.sections():
+            sec = parser[section]
+            found.append({"name": section, "uri": sec.get("sync-uri", ""),
+                          "priority": sec.get("priority", ""),
+                          "verify": sec.get("verify-signature", "true").lower() in
+                          ("true", "yes", "1"), "file": name})
+    return found
+
+
+def cpu_level():
+    """The highest x86-64 level this CPU runs (glibc's own answer), e.g.
+    2 for x86-64-v2; None if not x86-64 or unknown"""
+    for loader in ("/lib64/ld-linux-x86-64.so.2", "/lib/ld-linux-x86-64.so.2"):
+        try:
+            out = subprocess.run([loader, "--help"], capture_output=True, text=True,
+                                 timeout=10).stdout
+        except (OSError, subprocess.SubprocessError):
+            continue
+        levels = [int(m.group(1)) for m in
+                  re.finditer(r"x86-64-v(\d) \(supported", out)]
+        if levels:
+            return max(levels)
+        if "x86-64" in out:
+            return 1
+    return None
+
+
+def binhost_level(uri):
+    """The x86-64 level a binhost is built for, from its address
+    (Gentoo's: .../x86-64/ or .../x86-64-v3/), or None"""
+    match = re.search(r"x86-64(?:-v(\d))?(?:/|$)", uri or "")
+    if not match:
+        return None
+    return int(match.group(1) or 1)
+
+
+def pkgdir_stats(pkgdir=None):
+    """(path, package count, bytes) of the package directory"""
+    if pkgdir is None:
+        try:
+            import portage
+            pkgdir = portage.settings["PKGDIR"]
+        except Exception:
+            pkgdir = "/var/cache/binpkgs"
+    count = size = 0
+    for dirpath, _dirs, files in os.walk(pkgdir):
+        for f in files:
+            if f.endswith((".gpkg.tar", ".tbz2", ".xpak")):
+                count += 1
+                try:
+                    size += os.path.getsize(os.path.join(dirpath, f))
+                except OSError:
+                    pass
+    return pkgdir, count, size
+
+
+def binhost_match(uri, root="/"):
+    """How many installed packages a binhost has a build of with the same
+    USE (what portage needs to use it): (matching, not there, total).
+    Downloads the binhost's index (as the user)."""
+    import glob
+    import urllib.request
+    with urllib.request.urlopen(uri.rstrip("/") + "/Packages", timeout=120) as response:
+        text = response.read().decode(errors="replace")
+    builds = {}
+    for block in text.partition("\n\n")[2].split("\n\n"):
+        d = dict(l.split(": ", 1) for l in block.splitlines() if ": " in l)
+        if "CPV" in d:
+            builds.setdefault(d["CPV"], []).append(set(d.get("USE", "").split()))
+    matching = missing = total = 0
+    for vdb in glob.glob(os.path.join(root, "var", "db", "pkg", "*", "*")):
+        cat, pf = vdb.split(os.sep)[-2:]
+        if cat == "virtual" or cat.startswith("acct-"):
+            continue
+        try:
+            with open(os.path.join(vdb, "USE")) as f:
+                use = set(f.read().split())
+            with open(os.path.join(vdb, "IUSE")) as f:
+                flags = {w.lstrip("+-") for w in f.read().split()}
+        except OSError:
+            continue
+        total += 1
+        cpv = "%s/%s" % (cat, pf)
+        if cpv not in builds:
+            missing += 1
+            continue
+        mine = use & flags
+        if any((b & flags) == mine for b in builds[cpv]):
+            matching += 1
+    return matching, missing, total

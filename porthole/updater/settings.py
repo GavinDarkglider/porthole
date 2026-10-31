@@ -167,7 +167,8 @@ class UpdaterSettingsPage(Gtk.Grid):
             if callback:
                 callback(False, str(e))
             return
-        saved = dict(self.saved_config)
+        # only this page's settings: updater.conf has others (Binary packages)
+        saved = {key: self.saved_config.get(key) for key in values}
         if saved["automation"] is None and values["automation"] == "notify":
             # not chosen yet, and left as shown: still the first-start question's
             values["automation"] = None

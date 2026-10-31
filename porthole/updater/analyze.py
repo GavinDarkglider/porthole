@@ -362,6 +362,9 @@ class Analyzer:
         self.held = {cp: ("you chose not to update it", {"list": "exclude", "value": cp})
                      for cp in self.choices["exclude"]}
         self.base_targets = list(targets or WORLD_ARGS)
+        # binary packages, if updater.conf says so: in the resolution (a
+        # binary changes what is built) and in every emerge of the plan
+        self.base_targets += [o for o in self.binpkg_options() if o not in self.base_targets]
         self.targets = self.base_targets + self.exclude_args()
         self.config_root = config_root
         # installed packages the plan removes (from world, or entirely);
@@ -632,6 +635,17 @@ class Analyzer:
             return "Update"
         wanted = [t for t in self.base_targets if not t.startswith("-")]
         return "Install " + ", ".join(wanted) if wanted else "Update"
+
+    def binpkg_options(self):
+        """--getbinpkg / --buildpkg as updater.conf asks (make.conf is the
+        user's, so these come with each emerge Porthole runs)"""
+        try:
+            from porthole.updater.service import load_config
+            config = load_config()
+        except Exception:
+            return []
+        return ((["--getbinpkg"] if config.get("use_binpkgs") else [])
+                + (["--buildpkg"] if config.get("build_binpkgs") else []))
 
     def options(self):
         """emerge options from the targets, for follow-up commands"""
