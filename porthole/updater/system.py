@@ -298,3 +298,91 @@ def findings(conf, facts, iuse):
                     "-j%d, but %s suggests -j%d. Too many jobs can run out of memory "
                     "on big packages." % (jobs, why, suggested)))
     return out
+
+
+# -- Porthole's own global USE (package.use/00-porthole-global) -------------------
+#
+# Changes made in Settings > System never touch make.conf: they go in one
+# file of Porthole's own, "*/* flags" lines, read after make.conf (so they
+# win) and before the user's own package.use files (so per-package lines
+# still win over them). Deleting the file undoes them all.
+
+GLOBAL_USE_FILE = "00-porthole-global"
+_FLAG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_@.-]*$")
+_EXPAND_VALUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_.-]*$")
+
+
+def global_use_path(portage_dir="/etc/portage"):
+    return os.path.join(portage_dir, "package.use", GLOBAL_USE_FILE)
+
+
+def read_global_use(portage_dir="/etc/portage"):
+    """{"use": {flag: True|False}, "expand": {VAR: [values]}}"""
+    model = {"use": {}, "expand": {}}
+    for line in _lines(global_use_path(portage_dir)):
+        words = line.split()
+        if not words or words[0] != "*/*":
+            continue
+        words = words[1:]
+        if words and words[0].endswith(":") and words[0][:-1] in EXPAND:
+            model["expand"][words[0][:-1]] = words[1:]
+            continue
+        for word in words:
+            model["use"][word.lstrip("-")] = not word.startswith("-")
+    return model
+
+
+def check_global_use(model):
+    """The model, checked (ValueError if not something to write)"""
+    if not isinstance(model, dict):
+        raise ValueError("Not a set of USE changes")
+    use, expand = model.get("use") or {}, model.get("expand") or {}
+    if not isinstance(use, dict) or not isinstance(expand, dict):
+        raise ValueError("Not a set of USE changes")
+    for flag, on in use.items():
+        if not isinstance(flag, str) or not _FLAG.match(flag) or not isinstance(on, bool):
+            raise ValueError("Not a USE flag setting: %r" % (flag,))
+    for name, values in expand.items():
+        if name not in EXPAND or not isinstance(values, list) or not all(
+                isinstance(v, str) and _EXPAND_VALUE.match(v) for v in values):
+            raise ValueError("Not a setting Porthole can make: %r" % (name,))
+    return {"use": dict(use), "expand": {k: list(v) for k, v in expand.items()}}
+
+
+def render_global_use(model):
+    """The file's text for a model, or None if there is nothing to set"""
+    model = check_global_use(model)
+    lines = []
+    if model["use"]:
+        lines.append("*/* " + " ".join(
+            (f if on else "-" + f) for f, on in sorted(model["use"].items())))
+    for name, values in sorted(model["expand"].items()):
+        lines.append("*/* %s: %s" % (name, " ".join(values)))
+    if not lines:
+        return None
+    return ("# USE changes for every package, made in Porthole (Settings, System).\n"
+            "# Read after make.conf, so these win over it; your own package.use\n"
+            "# lines for single packages still win over these. Porthole replaces\n"
+            "# this file; delete it to undo all of them.\n" + "\n".join(lines) + "\n")
+
+
+def preview_global_use(model, log=lambda m: None):
+    """What changing Porthole's global USE to model would rebuild, worked
+    out on a scratch copy of the config (as the user; nothing real is
+    changed): the plan"""
+    from porthole.updater.analyze import Analyzer, ScratchConfig
+    text = render_global_use(model)
+    with ScratchConfig("/") as scratch:
+        path = global_use_path(scratch.portage_dir)
+        directory = os.path.dirname(path)
+        if os.path.isfile(directory):
+            raise ValueError("%s is a single file, not a directory"
+                             % "/etc/portage/package.use")
+        os.makedirs(directory, exist_ok=True)
+        if text is None:
+            if os.path.exists(path):
+                os.unlink(path)
+        else:
+            with open(path, "w") as f:
+                f.write(text)
+        return Analyzer(config_root=scratch.root, log=log).analyze()

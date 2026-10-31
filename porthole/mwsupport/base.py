@@ -119,7 +119,13 @@ class MainBase(object):
 
     def configure_porthole(self, menuitem_widget=None, page=None):
         """Shows the settings window"""
-        return ConfigDialog(page)
+        return ConfigDialog(page, on_system_changed=self.system_settings_changed)
+
+    def system_settings_changed(self):
+        """USE changes were saved in Settings > System: work out what they
+        rebuild in Updates, for the user to review and start"""
+        self.open_update_assistant()
+        self.update_assistant.on_recheck(None)
 
     def re_init_portage(self, *widget):
         """re-initializes the imported portage modules in order to

@@ -43,6 +43,8 @@ CASES = [
     (["cancel"], {"job": None, "drop": False}),
     (["keep-building"], {"job": None}),
     (["licences", "redistributable"], {"policy": "redistributable", "target": None}),
+    (["global-use", '{"use": {"opus": false}}'], {"changes": '{"use": {"opus": false}}',
+                                                  "target": None}),
     (["licences", "system", "--target", "arm-board"], {"policy": "system", "target": "arm-board"}),
     (["keep-building", "20261030-162651-install-f9d4"], {"job": "20261030-162651-install-f9d4"}),
     (["submit", "update", "--plan", "2026-10-29T16:17:22-0700", "--later"],

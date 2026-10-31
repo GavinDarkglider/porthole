@@ -74,4 +74,27 @@ check("CPU flags missing", "f16c" in found.get(
 check("too many jobs", "-j3" in found.get(
     "MAKEOPTS runs more jobs than this machine handles well", ""))
 check("jobs advice", system.jobs_advice("-j 2", facts)[:2] == (2, 3))
+
+# Porthole's global USE file: written, read back, refused, removed
+import json  # noqa: E402
+from porthole.updater import runner, targets  # noqa: E402
+root = os.path.join(work, "c")
+os.makedirs(os.path.join(root, "etc", "portage", "package.use"))
+target = targets.Target("c", "c", root, root)
+targets.get = lambda name=None: target
+model = {"use": {"opus": False, "foo": True}, "expand": {"CPU_FLAGS_X86": ["aes", "avx"]}}
+check("written", runner.set_global_use(json.dumps(model), "c") == "written")
+check("reads back", system.read_global_use(target.portage_dir) == model,
+      system.read_global_use(target.portage_dir))
+for bad in ({"use": {"two words": True}}, {"use": {"x": "yes"}},
+            {"expand": {"LD_PRELOAD": ["x"]}}, {"expand": {"VIDEO_CARDS": ["a;b"]}}, []):
+    try:
+        runner.set_global_use(json.dumps(bad), "c")
+        check("refused %s" % json.dumps(bad), False)
+    except runner.JobError:
+        check("refused %s" % json.dumps(bad), True)
+check("make.conf not touched", not os.path.exists(os.path.join(root, "etc", "portage", "make.conf")))
+check("nothing left: file removed",
+      runner.set_global_use(json.dumps({}), "c") == "removed"
+      and not os.path.exists(system.global_use_path(target.portage_dir)))
 sys.exit(1 if failed else 0)

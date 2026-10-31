@@ -1020,6 +1020,41 @@ def set_licence_policy(policy, target_name=None):
     return policy
 
 
+def set_global_use(text, target_name=None):
+    """Write Porthole's global USE file of a target from a JSON model
+    (system.check_global_use), or remove it when there's nothing to set"""
+    import json
+    from porthole.updater import system
+    try:
+        model = system.check_global_use(json.loads(text))
+        content = system.render_global_use(model)
+    except ValueError as e:
+        raise JobError(str(e))
+    try:
+        portage_dir = targets.get(target_name).portage_dir
+    except KeyError:
+        raise JobError("No such system: %s" % target_name)
+    path = system.global_use_path(portage_dir)
+    directory = os.path.dirname(path)
+    if os.path.isfile(directory):
+        raise JobError(
+            "%s is a single file. Porthole keeps its changes in its own file, so it "
+            "needs %s to be a directory. Move the file into a new directory of that "
+            "name and try again." % (directory, directory))
+    if content is None:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        return "removed"
+    os.makedirs(directory, exist_ok=True)
+    with open(path + ".new", "w") as f:
+        f.write(content)
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return "written"
+
+
 # -- choices -------------------------------------------------------------------
 
 _STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")

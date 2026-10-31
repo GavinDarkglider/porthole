@@ -17,7 +17,7 @@ import time
 
 import gi
 gi.require_version("Gtk", "3.0")
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from porthole.updater.elevate import run_as_root, service
 from porthole.updater.window import format_window, parse_window
@@ -488,12 +488,19 @@ def _effective_licences():
 
 class SystemSettingsPage(Gtk.Notebook):
     """System: the Portage settings of this computer, as written in its
-    make.conf and profile, with facts about the machine. Shown as they
-    are (make.conf is never rewritten); licences can be set."""
+    make.conf and profile, with facts about the machine. make.conf is
+    never written: USE changes go in Porthole's own global USE file
+    (package.use/00-porthole-global), previewed first; licences can be set.
+    on_applied() runs after USE changes were saved (to work out the
+    rebuild in Updates)."""
 
-    def __init__(self, target=None):
+    def __init__(self, target=None, on_applied=None):
         super().__init__(border_width=6)
         self.target = target
+        self.on_applied = on_applied
+        self.info = None
+        self.pending = {"use": {}, "expand": {}}  # value None: back to make.conf's
+        self.preview_labels = []
         self.licences = LicencesPage(target)
         self.tabs = {}
         for name, title in (("overview", "Overview"), ("use", "USE flags"),
@@ -529,6 +536,7 @@ class SystemSettingsPage(Gtk.Notebook):
             info["iuse"] = system.all_iuse()
             info["findings"] = system.findings(info["conf"], info["machine"], info["iuse"])
             info["expand"] = {name: system.expand_values(name) for name in system.EXPAND}
+            info["overrides"] = system.read_global_use()
         except Exception as e:
             info["error"] = "%s: %s" % (type(e).__name__, e)
         GLib.idle_add(self._show, info)
@@ -542,12 +550,172 @@ class SystemSettingsPage(Gtk.Notebook):
                 _small("Couldn't read the settings: " + info["error"]), False, False, 0)
             self.show_all()
             return False
+        self.info = info
         self._overview(info)
-        self._use(info)
-        self._hardware(info)
+        self._refresh()
         self._build(info)
         self.show_all()
         return False
+
+    # -- changes (Porthole's global USE file) --
+
+    def _effective(self):
+        """Porthole's global USE as it would be with the pending changes"""
+        model = {"use": dict(self.info["overrides"]["use"]),
+                 "expand": dict(self.info["overrides"]["expand"])}
+        for kind in ("use", "expand"):
+            for key, value in self.pending[kind].items():
+                if value is None:
+                    model[kind].pop(key, None)
+                else:
+                    model[kind][key] = value
+        return model
+
+    def _base_state(self, flag):
+        """Whether make.conf (or else the profile) turns a flag on"""
+        state = None
+        for group in self.info["conf"]["use_groups"]:
+            for word in group["flags"]:
+                if word.lstrip("-+") == flag:
+                    state = not word.startswith("-")
+        if state is None:
+            profile = self.info["profile_use"]
+            state = flag in profile and "-" + flag not in profile
+        return state
+
+    def _flag_state(self, flag):
+        """Whether a flag is on: Porthole's file (with the pending
+        changes) over make.conf over the profile"""
+        porthole = self._effective()["use"]
+        return porthole[flag] if flag in porthole else self._base_state(flag)
+
+    def _toggle(self, flag):
+        """Switch a flag for every package. Switching it back to what
+        make.conf says takes Porthole's change away instead."""
+        want = not self._flag_state(flag)
+        written = self.info["overrides"]["use"].get(flag)  # in the file now
+        if want == self._base_state(flag):
+            if written is None:
+                self.pending["use"].pop(flag, None)
+            else:
+                self.pending["use"][flag] = None
+        elif written == want:
+            self.pending["use"].pop(flag, None)
+        else:
+            self.pending["use"][flag] = want
+        self._refresh()
+
+    def _set_expand(self, name, values):
+        self.pending["expand"][name] = values
+        self._refresh()
+
+    def _changes_text(self):
+        parts = []
+        for flag, value in sorted(self.pending["use"].items()):
+            parts.append(("%s back to make.conf's" % flag) if value is None
+                         else ("+" if value else "-") + flag)
+        for name, values in sorted(self.pending["expand"].items()):
+            parts.append("%s back to make.conf's" % name if values is None
+                         else "%s: %s" % (name, " ".join(values)))
+        return ", ".join(parts)
+
+    def _changes_bar(self):
+        """Pending changes, with Preview / Apply / Discard"""
+        if not any(self.pending.values()):
+            return None
+        bar = Gtk.InfoBar(message_type=Gtk.MessageType.QUESTION)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        label = Gtk.Label(xalign=0, wrap=True, max_width_chars=80)
+        label.set_markup("<b>Not applied yet:</b> %s\n<small>These go in Porthole's own "
+                         "file, package.use/00-porthole-global, never in make.conf. Preview "
+                         "shows what they would rebuild.</small>"
+                         % GLib.markup_escape_text(self._changes_text()))
+        box.pack_start(label, False, False, 0)
+        preview = Gtk.Label(xalign=0, wrap=True, max_width_chars=80)
+        self.preview_labels.append(preview)
+        box.pack_start(preview, False, False, 0)
+        bar.get_content_area().add(box)
+        bar.add_button("Discard", 1)
+        bar.add_button("Preview rebuild", 2)
+        bar.add_button("Apply", 3)
+        bar.connect("response", self._on_changes)
+        self.changes_bar = bar
+        return bar
+
+    def _on_changes(self, bar, response):
+        if response == 1:
+            self.pending = {"use": {}, "expand": {}}
+            self._refresh()
+        elif response == 2:
+            self._preview(bar)
+        elif response == 3:
+            self._apply(bar)
+
+    def _preview(self, bar):
+        import threading
+        from porthole.updater import system
+        model = self._effective()
+        bar.set_sensitive(False)
+        for preview in self.preview_labels:
+            preview.set_markup("<small>Working out what this rebuilds, on a copy of the "
+                               "configuration (a minute or two)...</small>")
+
+        def work():
+            try:
+                plan = system.preview_global_use(model)
+                builds = [m["cpv"] for m in plan.get("merge_list") or []]
+                if plan.get("status") in ("ready", "needs-approval", "up-to-date"):
+                    text = ("Nothing needs rebuilding." if not builds else
+                            "Would rebuild %d package%s: %s" % (
+                                len(builds), "" if len(builds) == 1 else "s",
+                                ", ".join(builds)))
+                    if plan.get("status") == "needs-approval":
+                        text += " (Updates will also ask about some settings changes.)"
+                else:
+                    from porthole.updater.analyze import summarize
+                    title, body = summarize(plan)
+                    text = "Portage couldn't work it out as it stands: %s %s" % (title, body)
+            except Exception as e:
+                text = "Couldn't preview it: %s" % e
+            GLib.idle_add(done, text)
+
+        def done(text):
+            bar.set_sensitive(True)
+            for preview in self.preview_labels:
+                preview.set_markup("<small>%s</small>" % GLib.markup_escape_text(text))
+            return False
+        threading.Thread(target=work, daemon=True).start()
+
+    def _apply(self, bar):
+        import json
+        model = self._effective()
+        args = ["global-use", json.dumps(model)] + (
+            ["--target", self.target] if self.target else [])
+        bar.set_sensitive(False)
+
+        def done(ok, output):
+            bar.set_sensitive(True)
+            if not ok:
+                _error(self.get_toplevel(), "The USE changes weren't saved",
+                       output or "Cancelled.")
+                return
+            self.info["overrides"] = model
+            self.pending = {"use": {}, "expand": {}}
+            self._refresh()
+            if self.on_applied:
+                self.on_applied()
+        run_as_root(service(*args), done)
+
+    def _refresh(self):
+        """Redraw the tabs that show changes"""
+        for name in ("use", "hardware"):
+            for child in self.tabs[name].get_children():
+                child.destroy()
+        self.preview_labels = []
+        self._use(self.info)
+        self._hardware(self.info)
+        self.tabs["use"].show_all()
+        self.tabs["hardware"].show_all()
 
     # -- the tabs --
 
@@ -575,26 +743,63 @@ class SystemSettingsPage(Gtk.Notebook):
     def _use(self, info):
         box = self.tabs["use"]
         conf, described, iuse = info["conf"], info["descriptions"], info["iuse"]
+        bar = self._changes_bar()
+        if bar:
+            box.pack_start(bar, False, False, 0)
         box.pack_start(_small(
             "Your USE flags as make.conf groups them, each with its comment. Hover a "
-            "flag for what it does. Struck through: no package has the flag, so it "
-            "does nothing."), False, False, 0)
+            "flag for what it does; click one to switch it for every package (in "
+            "Porthole's own file, not make.conf). Struck through: no package has the "
+            "flag, so it does nothing."), False, False, 0)
+        porthole = self._effective()["use"]
+        changed = set(porthole) | set(self.pending["use"])
+        flag_view = lambda flags: _flags(flags, described, iuse, on_click=self._toggle,
+                                         state=self._flag_state, changed=changed,
+                                         pending=set(self.pending["use"]))
+        if porthole or self.pending["use"]:
+            box.pack_start(_heading("Porthole's changes (package.use/00-porthole-global)"),
+                           False, False, 0)
+            box.pack_start(flag_view(sorted(changed)), False, False, 0)
         mine = set()
         for group in conf["use_groups"]:
             box.pack_start(_heading(group["title"]), False, False, 0)
             for note in group["notes"]:
                 box.pack_start(_small(note), False, False, 0)
-            box.pack_start(_flags(group["flags"], described, iuse), False, False, 0)
+            box.pack_start(flag_view(group["flags"]), False, False, 0)
             mine.update(f.lstrip("-+") for f in group["flags"])
         inherited = sorted(f for f in info["profile_use"]
                            if f.lstrip("-") not in mine and "_" not in f.lstrip("-"))
         expander = Gtk.Expander(label="From the profile (%s): %d more"
                                 % (info["profile"] or "?", len(inherited)))
-        expander.add(_flags(inherited, described, iuse))
+        expander.add(flag_view(inherited))
         box.pack_start(expander, False, False, 0)
+        # a flag that isn't listed anywhere
+        add = Gtk.Box(spacing=6, margin_top=8)
+        add.pack_start(Gtk.Label(label="Another flag:"), False, False, 0)
+        entry = Gtk.Entry(placeholder_text="flag name", width_chars=20)
+        add.pack_start(entry, False, False, 0)
+        for label, on in (("Turn on", True), ("Turn off", False)):
+            button = Gtk.Button(label=label)
+            button.connect("clicked", lambda b, on=on: self._add_flag(entry, on))
+            add.pack_start(button, False, False, 0)
+        box.pack_start(add, False, False, 0)
+
+    def _add_flag(self, entry, on):
+        from porthole.updater.system import _FLAG
+        flag = entry.get_text().strip().lstrip("+")
+        if flag.startswith("-"):
+            flag, on = flag[1:], False
+        if not _FLAG.match(flag):
+            entry.grab_focus()
+            return
+        if self._flag_state(flag) != on:
+            self._toggle(flag)
 
     def _hardware(self, info):
         box, conf = self.tabs["hardware"], info["conf"]
+        bar = self._changes_bar()
+        if bar:
+            box.pack_start(bar, False, False, 0)
         box.pack_start(_small(
             "What make.conf says about the hardware. Packages build support for exactly "
             "these."), False, False, 0)
@@ -613,6 +818,22 @@ class SystemSettingsPage(Gtk.Notebook):
         cpu = info["machine"].get("cpu_flags")
         if cpu is not None:
             box.pack_start(_small("cpuid2cpuflags finds: " + " ".join(cpu)), False, False, 0)
+            current = self._effective()["expand"].get("CPU_FLAGS_X86")
+            written = (conf["vars"].get("CPU_FLAGS_X86") or {}).get("text", "").split()
+            if current is not None:
+                box.pack_start(_small("Porthole's file sets: " + " ".join(current)),
+                               False, False, 0)
+                button = Gtk.Button(label="Back to make.conf's CPU_FLAGS_X86",
+                                    halign=Gtk.Align.START)
+                button.connect("clicked", lambda b: self._set_expand("CPU_FLAGS_X86", None))
+                box.pack_start(button, False, False, 0)
+            elif sorted(cpu) != sorted(written):
+                button = Gtk.Button(label="Use what cpuid2cpuflags finds",
+                                    halign=Gtk.Align.START)
+                button.set_tooltip_text("Set CPU_FLAGS_X86 to exactly what this CPU has, in "
+                                        "Porthole's own file (make.conf stays as it is)")
+                button.connect("clicked", lambda b: self._set_expand("CPU_FLAGS_X86", cpu))
+                box.pack_start(button, False, False, 0)
 
     def _build(self, info):
         box, conf, m = self.tabs["build"], info["conf"], info["machine"]
@@ -654,24 +875,55 @@ def _facts(rows):
     return grid
 
 
-def _flags(flags, described, known):
-    """Flags as small labels that wrap, '-' ones dimmed, unknown ones
-    struck through; hover for the description"""
+def _text_colour():
+    from porthole.utils.themecolours import hex_of, palette
+    return hex_of(palette()["text"])
+
+
+def _flags(flags, described, known, on_click=None, state=None, changed=(), pending=()):
+    """Flags as small labels that wrap, off ones dimmed, unknown ones
+    struck through; hover for the description. With on_click, each is a
+    button (state(flag): whether it is on now; changed: flags Porthole's
+    file sets, marked; pending: not applied yet, in italics)"""
     flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.NONE, max_children_per_line=30,
-                       column_spacing=6, row_spacing=2, margin_start=6, homogeneous=False)
+                       column_spacing=4, row_spacing=0, margin_start=6, homogeneous=False)
     for flag in flags:
         name = flag.lstrip("-+")
-        off = flag.startswith("-")
-        text = GLib.markup_escape_text(flag)
+        written_off = flag.startswith("-")
+        off = (not state(name)) if state else written_off
+        shown = ("-" if off else "") + name
+        text = GLib.markup_escape_text(shown)
         if known is not None and name not in known:
             text = "<s>%s</s>" % text
-        elif off:
-            text = "<span alpha='60%%'>%s</span>" % text
-        label = Gtk.Label(xalign=0)
-        label.set_markup("<small>%s</small>" % text)
-        tip = described.get(name)
+        # one colour that means something: the theme's text, dimmed when off
+        text = "<span foreground='%s'%s>%s</span>" % (
+            _text_colour(), " alpha='55%'" if off else "", text)
+        if name in pending:
+            text = "<i>%s</i>" % text
+        if name in changed:
+            text += " \u2022"
+        tip = described.get(name) or "No description"
         if known is not None and name not in known:
             tip = "No package has this flag: setting it changes nothing."
-        label.set_tooltip_text(("Off: " if off else "") + (tip or "No description"))
-        flow.add(label)
+        tip = ("Off: " if off else "On: ") + tip
+        if name in changed:
+            tip += "\nSet by Porthole's global USE file%s." % (
+                " (not applied yet)" if name in pending else "")
+        label = Gtk.Label(xalign=0)
+        label.set_markup("<small>%s</small>" % text)
+        if on_click:
+            tip += "\nClick to turn it %s for every package." % ("on" if off else "off")
+            # a plain label that takes clicks: button styling would colour
+            # and space the flags like a toolbar
+            box = Gtk.EventBox()
+            box.add(label)
+            box.set_tooltip_text(tip)
+            box.connect("button-release-event",
+                        lambda w, e, n=name: (on_click(n), True)[1] if e.button == 1 else False)
+            box.connect("realize", lambda w: w.get_window().set_cursor(
+                Gdk.Cursor.new_from_name(w.get_display(), "pointer")))
+            flow.add(box)
+        else:
+            label.set_tooltip_text(tip)
+            flow.add(label)
     return flow

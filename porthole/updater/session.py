@@ -38,7 +38,7 @@ import time
 PROTOCOL = 1
 # what the helper runs: the service's own verbs (it checks their arguments)
 SERVICE_VERBS = {"submit", "cancel", "keep-building", "config", "news", "jobs", "plan",
-                 "sets", "licences"}
+                 "sets", "licences", "global-use"}
 # read-only: stopped at once on lock, where the rest are let finish
 READ_ONLY = {"jobs", "plan", "sets"}
 # the unlock times Settings offers, in minutes (0: until Porthole closes)

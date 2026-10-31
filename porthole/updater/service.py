@@ -23,6 +23,8 @@
         keep-building [JOB]         don't pause this build while someone works
         licences POLICY [--target T]   which licences are fine (free,
                                     redistributable, eula, all, system)
+        global-use JSON [--target T]   Porthole's USE changes for every
+                                    package (package.use/00-porthole-global)
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
         plan --request J            work out a plan as root, printed as JSON
@@ -561,6 +563,10 @@ def main(argv=None):
     lic = sub.add_parser("licences", help="set which licences are fine for a system")
     lic.add_argument("policy", choices=("free", "redistributable", "eula", "all", "system"))
     lic.add_argument("--target", default=None, help="the system (default: this computer)")
+    guse = sub.add_parser("global-use", help="set Porthole's USE changes for every package")
+    guse.add_argument("changes", help='JSON: {"use": {FLAG: true|false}, '
+                                      '"expand": {VAR: [VALUE...]}}')
+    guse.add_argument("--target", default=None, help="the system (default: this computer)")
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
@@ -671,6 +677,8 @@ def job_command(args, parser):
                 job = runner.submit_check(sync="now" if args.sync_now else not args.no_sync)
             runner.start_runner()
             print(job["id"])
+        elif args.command == "global-use":
+            print(runner.set_global_use(args.changes, args.target))
         elif args.command == "licences":
             print(runner.set_licence_policy(args.policy, args.target))
         elif args.command == "keep-building":
