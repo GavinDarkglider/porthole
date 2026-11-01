@@ -40,7 +40,9 @@ class EmulateError(Exception):
 
 def failed_packages(text, root):
     """[=cat/pkg-ver] emerge --keep-going listed as failed for root, from
-    its output (the last list in text)"""
+    its output (the last list in text): only those that really failed (a
+    build log follows them), not those dropped because a failed one is
+    their dependency; those cross-compile once it is in"""
     text = _ANSI.sub("", text)
     marks = [m.end() for m in re.finditer(r"The following \d* ?packages? ha(?:s|ve) failed to "
                                           r"build", text)]
@@ -48,8 +50,11 @@ def failed_packages(text, root):
         return []
     root = os.path.realpath(root).rstrip("/")
     found = []
-    for match in _FAILED.finditer(text[marks[-1]:]):
+    block = text[marks[-1]:]
+    for match in _FAILED.finditer(block):
         cpv, where = match.group(1), match.group(2)
+        if not block[match.end():match.end() + 12].lstrip(" ,").startswith("Log file"):
+            continue  # dropped: never built
         cpv = re.sub(r":.*$", "", cpv)
         if os.path.realpath(where).rstrip("/") == root and "=" + cpv not in found:
             found.append("=" + cpv)
