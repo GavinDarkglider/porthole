@@ -550,8 +550,15 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             log("== emulator: working out what building them in the system needs")
             result = subprocess.run(pretend, capture_output=True, text=True)
         wanted = {emulate.cp_of(a) for a in atoms}
-        tools = [a for a in emulate.merge_list(result.stdout)
-                 if emulate.cp_of(a) not in wanted]
+        # what they need to be built: what emerge merges before the first of
+        # them. What comes after needs them (shared-mime-info after glib): a
+        # cross build of it would pull them in again, so it is left for the
+        # system, after them
+        tools = []
+        for atom in emulate.merge_list(result.stdout):
+            if emulate.cp_of(atom) in wanted:
+                break
+            tools.append(atom)
         if tools:
             argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--keep-going",
                     "--buildpkg", "--usepkg", "--noreplace"] + tools
