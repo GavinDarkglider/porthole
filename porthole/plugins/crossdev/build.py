@@ -495,21 +495,35 @@ def allowed_changes(parsed, policy):
 def apply_allowed(target, argv, env, log, portage_dir="/etc/portage", run=None):
     """Before a cross build: emerge --pretend with autounmask over argv's
     packages, and write the changes the build may make by itself
-    (allowed_changes). Returns True when nothing it can't make is left."""
+    (allowed_changes), checking again after each round: a change still
+    asked for after it was written for the system is this computer's (a
+    package needed in both, emerge printed it without a "For <config>:"
+    heading). Returns True when nothing it can't make is left."""
     run = run or subprocess.run
     args = [a for a in argv[1:] if not a.startswith("--")]
     pretend = ["emerge", "--pretend", "--color=n", "--autounmask=y", "--autounmask-backtrack=y",
                "--autounmask-write=n"] + [a for a in argv[1:] if a in (
                    "--oneshot", "--update", "--deep", "--newuse", "--noreplace", "--usepkg",
                    "--nodeps")] + args
-    result = run(pretend, env=dict(os.environ, **env), capture_output=True, text=True)
-    parsed = parse_pretend(result.stdout + "\n" + result.stderr, target.root)
-    host_ok, root_ok, left = allowed_changes(parsed, read_policy(target))
-    if host_ok or root_ok:
+    policy = read_policy(target)
+    written_root = set()
+    left = []
+    for _round in range(3):
+        result = run(pretend, env=dict(os.environ, **env), capture_output=True, text=True)
+        parsed = parse_pretend(result.stdout + "\n" + result.stderr, target.root)
+        # written for the system already and still asked for: this computer's
+        again = [l for l in parsed["root_use"] if l in written_root]
+        parsed["root_use"] = [l for l in parsed["root_use"] if l not in written_root]
+        parsed["host_use"] = parsed["host_use"] + [l for l in again
+                                                   if l not in parsed["host_use"]]
+        host_ok, root_ok, left = allowed_changes(parsed, policy)
+        if not host_ok and not root_ok:
+            break
         for path in write_changes(target, host_ok, root_ok, [], portage_dir):
             log("Wrote the changes this build needs in %s:" % path)
         for line in host_ok + root_ok:
             log("   " + line)
+        written_root.update(root_ok)
     for line in left:
         log("!! Not changed by itself (needs you): " + line)
     return not left
