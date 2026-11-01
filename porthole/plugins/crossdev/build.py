@@ -89,6 +89,8 @@ def write_wrappers(target, chost, base=None, search="/usr/bin"):
 def qemu_name(chost):
     """qemu's user-mode emulator for a CHOST's CPU"""
     cpu = chost.split("-")[0]
+    if cpu.startswith("armeb"):
+        return "qemu-armeb"
     if cpu.startswith("arm"):
         return "qemu-arm"
     if re.match(r"i[3-6]86$", cpu):
@@ -97,8 +99,32 @@ def qemu_name(chost):
                       "powerpc": "ppc"}.get(cpu, cpu)
 
 
-def elf_machine(path):
-    """The e_machine number of an ELF file, or None"""
+# ELF e_machine and class (1 = 32-bit, 2 = 64-bit) -> qemu's user-mode emulator
+# (in big endian where the CPU has both, see qemu_for)
+QEMU_MACHINES = {(183, 2): "aarch64", (40, 1): "arm", (62, 2): "x86_64", (3, 1): "i386",
+                 (243, 2): "riscv64", (243, 1): "riscv32", (21, 2): "ppc64", (20, 1): "ppc",
+                 (258, 2): "loongarch64", (22, 2): "s390x", (8, 1): "mips", (8, 2): "mips64",
+                 (2, 1): "sparc", (43, 2): "sparc64", (15, 1): "hppa", (4, 1): "m68k",
+                 (36901, 2): "alpha"}
+
+
+# the same CPU number in little endian
+QEMU_LITTLE = {"ppc64": "ppc64le", "mips": "mipsel", "mips64": "mips64el"}
+# and in big endian
+QEMU_BIG = {"aarch64": "aarch64_be", "arm": "armeb"}
+
+
+def qemu_for(ident):
+    """qemu's user-mode emulator name for an elf_id(), or None"""
+    machine, klass, little = ident
+    name = QEMU_MACHINES.get((machine, klass))
+    if name is None:
+        return None
+    return QEMU_LITTLE.get(name, name) if little else QEMU_BIG.get(name, name)
+
+
+def elf_id(path):
+    """(e_machine, class, little endian) of an ELF file, or None"""
     import struct
     try:
         with open(path, "rb") as f:
@@ -107,43 +133,80 @@ def elf_machine(path):
         return None
     if len(head) < 20 or head[:4] != b"\x7fELF":
         return None
-    return struct.unpack("<H" if head[5] == 1 else ">H", head[18:20])[0]
+    little = head[5] == 1
+    return struct.unpack("<H" if little else ">H", head[18:20])[0], head[4], little
 
 
-def dynamic_linker(root):
-    """The system's dynamic linker (as installed by its C library), or None"""
+def elf_machine(path):
+    found = elf_id(path)
+    return found[0] if found else None
+
+
+def dynamic_linkers(root):
+    """{elf_id: linker path} of every dynamic linker in the system (a
+    multilib system has one per ABI)"""
     import glob
+    found = {}
     for path in sorted(glob.glob(os.path.join(root, "lib*", "ld-linux*.so*")) +
-                       glob.glob(os.path.join(root, "lib*", "ld-musl*.so*"))):
-        if os.path.exists(path):
-            return path
+                       glob.glob(os.path.join(root, "lib*", "ld-musl*.so*")) +
+                       glob.glob(os.path.join(root, "lib*", "ld.so.1"))):
+        real = os.path.realpath(path)
+        ident = elf_id(real)
+        if ident and ident not in found:
+            found[ident] = real
+    return found
+
+
+def dynamic_linker(root, chost=None):
+    """The system's main dynamic linker (its CHOST's ABI when known)"""
+    linkers = dynamic_linkers(root)
+    if chost:
+        wanted = qemu_name(chost)[len("qemu-"):]
+        for ident, path in linkers.items():
+            if qemu_for(ident) == wanted:
+                return path
+    # otherwise prefer 64-bit
+    for key in sorted(linkers, key=lambda k: -k[1]):
+        return linkers[key]
     return None
 
 
 def write_ldd(target, chost, base=None):
-    """An ldd first in PATH that also lists the system's programs (through
-    qemu and the system's own ld.so --list); others go to the real ldd.
+    """An ldd first in PATH that also lists the system's programs, each
+    through the qemu and dynamic linker (ld.so --list) of its own ABI
+    (a multilib system has several); others go to the real ldd.
     g-ir-scanner runs ldd on the program it builds."""
     root = os.path.realpath(target.root)
-    linker = dynamic_linker(root)
     path = os.path.join(wrappers_dir(target, base), "ldd")
-    machine = elf_machine(linker) if linker else None
-    if machine is None:
+    cases = []
+    for ident, linker in sorted(dynamic_linkers(root).items()):
+        qemu = qemu_for(ident)
+        if qemu:
+            cases.append('\t%d/%d/%d) exec qemu-%s -L %s %s --list "$last" ;;'
+                         % (ident[0], ident[1], 1 if ident[2] else 2, qemu, root, linker))
+    if not cases:
         if os.path.exists(path):
             os.unlink(path)
         return None
+    os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
     with open(path + ".new", "w") as f:
         f.write('#!/bin/sh\n'
                 '# Porthole: ldd that also lists programs built for %s (%s)\n'
                 'for last; do :; done\n'
-                'machine=$(od -An -tu2 -j18 -N2 "$last" 2>/dev/null | tr -d " ")\n'
-                'magic=$(od -An -c -j1 -N3 "$last" 2>/dev/null | tr -d " ")\n'
-                'if [ "$magic" = "ELF" ] && [ "$machine" = "%d" ]; then\n'
-                '\texec %s -L %s %s --list "$last"\n'
+                'if [ "$(od -An -c -j1 -N3 "$last" 2>/dev/null | tr -d " ")" = "ELF" ]; then\n'
+                '\tclass=$(od -An -tu1 -j4 -N1 "$last" | tr -d " ")\n'
+                '\tendian=$(od -An -tu1 -j5 -N1 "$last" | tr -d " ")\n'
+                '\tif [ "$endian" = 1 ]; then\n'
+                '\t\tmachine=$(od -An -tu1 -j18 -N2 "$last" | awk \'{print $1 + 256 * $2}\')\n'
+                '\telse\n'
+                '\t\tmachine=$(od -An -tu1 -j18 -N2 "$last" | awk \'{print 256 * $1 + $2}\')\n'
+                '\tfi\n'
+                '\tcase "$machine/$class/$endian" in\n'
+                '%s\n'
+                '\tesac\n'
                 'fi\n'
                 'exec /usr/bin/ldd "$@"\n'
-                % (target.name, chost, machine, qemu_name(chost), root,
-                   os.path.realpath(linker)))
+                % (target.name, chost, "\n".join(cases)))
     os.chmod(path + ".new", 0o755)
     os.replace(path + ".new", path)
     return path

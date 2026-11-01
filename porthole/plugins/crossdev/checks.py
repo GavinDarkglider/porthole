@@ -137,7 +137,13 @@ def check_all(arch=None, tuple_=None):
             "profile allows (Porthole works them out)."))
 
     # qemu user mode, for what won't cross-compile
-    target = QEMU_TARGETS.get(arch or "")
+    # from the toolchain tuple when known (it tells the byte order: ppc64le,
+    # mipsel, ...), the same name the build runs; else from portage's arch
+    if tuple_:
+        from porthole.plugins.crossdev.build import qemu_name
+        target = qemu_name(tuple_)[len("qemu-"):]
+    else:
+        target = QEMU_TARGETS.get(arch or "")
     qemu = _installed("app-emulation/qemu")
     use = qemu[0][1] if qemu else set()
     static = "static-user" in use
