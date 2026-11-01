@@ -166,8 +166,13 @@ class Chroot:
         return False
 
     def emerge_argv(self, args, env):
-        """argv running emerge inside the root, with a clean environment"""
-        return chroot_argv(self.root, ["emerge"] + list(args), env)
+        """argv running emerge inside the root, with a clean environment.
+        Never another Python: the system's Python is its profile's, and a
+        build tool's "any Python 3.x" would otherwise pull in a new slot
+        (seen: python 3.14 next to the profile's 3.13, compiled under qemu
+        for nothing)"""
+        return chroot_argv(self.root, ["emerge", "--exclude", "dev-lang/python"] + list(args),
+                           env)
 
 
 def chroot_argv(root, command, env=None):
