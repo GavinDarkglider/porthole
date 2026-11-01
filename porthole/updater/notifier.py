@@ -266,7 +266,7 @@ class Notifier(Gtk.Application):
         except GLib.Error:
             self.monitor = None
         # and poll now and then in case the directory didn't exist yet
-        GLib.timeout_add_seconds(600, self.reload)
+        GLib.timeout_add_seconds(600, self._poll)
         # how long this session has been idle, for builds in the build window
         # (the runner is root and can't ask X itself; see window.py)
         from porthole.updater.window import WRITE_EVERY, write_activity
@@ -287,7 +287,19 @@ class Notifier(Gtk.Application):
         if (file.get_basename() in ("plan.json", "state.json", "jobs.json")
                 and not self.reload_pending):
             self.reload_pending = True
-            GLib.timeout_add(500, self.reload)
+            GLib.timeout_add(500, self._reload_once)
+
+    def _poll(self):
+        """The 10-minute poll: keeps its timer"""
+        self.reload()
+        return True
+
+    def _reload_once(self):
+        """After a file change: runs once. (reload() used to return True
+        here too, so every change added a timer that never stopped: after a
+        long build, thousands of them re-read the queue twice a second.)"""
+        self.reload()
+        return False
 
     def reload(self):
         self.reload_pending = False
@@ -350,7 +362,7 @@ class Notifier(Gtk.Application):
             self.save_seen()
         if self.report and self.report.get_visible():
             self.report.show_plan(self.plan, self.state)
-        return True  # keep the poll timer going
+        return False  # a timer calling it directly runs once
 
     def announce_finished(self, jobs):
         """One notification per job that finished since we last looked"""
