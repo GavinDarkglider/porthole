@@ -462,6 +462,20 @@ def step_build_check(runner, job_id, step, log):
         built = tc.installed(chost)
         log("Cross toolchain for %s: %s" % (chost, ", ".join(
             "%s %s" % kv for kv in sorted(built.items())) or "?"))
+        # some builds run the programs they just made (meson's exe_wrapper,
+        # gobject-introspection): Gentoo's eclasses run them with qemu-<arch>
+        cpu = chost.split("-")[0]
+        qemu = "qemu-" + ("arm" if cpu.startswith("arm") else "i386" if re.match(
+            r"i[3-6]86$", cpu) else {"powerpc64": "ppc64", "powerpc64le": "ppc64le",
+                                     "powerpc": "ppc"}.get(cpu, cpu))
+        if not shutil.which(qemu):
+            log("!! Warning: %s isn't installed (app-emulation/qemu with qemu_user_targets "
+                "for it). Packages that run what they build while building (glib, "
+                "gobject-introspection and what uses it) will fail; \"Ready to build for "
+                "another computer?\" adds it to the install queue." % qemu)
+        else:
+            log("Programs built for %s run here with %s when a build needs it"
+                % (chost, qemu))
     log("Building into %s, as its own sysroot; compilers from %s"
         % (env["ROOT"], bd.wrappers_dir(target)))
     argv = bd.check_argv(target)
