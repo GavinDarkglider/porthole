@@ -556,11 +556,35 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             # (another Python target here): those the user allowed
             bd.apply_allowed(target, argv, env, log)
             log("== emulator: %d build tool%s needed in the system: cross-building them "
-                "here (binary packages kept); any that won't cross-compile are built in "
-                "the emulator with the rest" % (len(tools), "" if len(tools) == 1 else "s"))
-            log("$ " + " ".join(argv))
-            if not runner.run_logged(job_id, step, log, argv, extra_env=env):
-                log("== emulator: not all of them cross-compiled; the emulator builds the rest")
+                "here (binary packages kept)" % (len(tools), "" if len(tools) == 1 else "s"))
+            tried = set()
+            for _round in range(4):
+                offset = _log_size(job_id)
+                log("$ " + " ".join(argv))
+                if runner.run_logged(job_id, step, log, argv, extra_env=env):
+                    break
+                # the tools that really failed (perl XS modules, say) are
+                # built in the system; those dropped for them cross-compile
+                # once they are in
+                failed = [a for a in emulate.failed_packages(_log_since(job_id, offset), root)
+                          if a not in tried]
+                if not failed:
+                    log("== emulator: not all of them cross-compiled; the emulator builds "
+                        "the rest")
+                    break
+                tried.update(failed)
+                log("== emulator: %s didn't cross-compile; building %s in the system, then "
+                    "the other tools here again" % (" ".join(failed),
+                                                    "it" if len(failed) == 1 else "them"))
+                with emulate.Chroot(target, log) as chroot:
+                    runner.run_logged(job_id, step, log, emulate.chroot_argv(root, ["ldconfig"]))
+                    inner = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot",
+                                                "--keep-going", "--usepkg"] + failed, inside)
+                    log("$ " + " ".join(inner[inner.index("emerge"):]))
+                    if not runner.run_logged(job_id, step, log, inner):
+                        log("== emulator: not all of them built in the system; the emulator "
+                            "builds the rest with the packages")
+                        break
         with emulate.Chroot(target, log) as chroot:
             argv = emulate.chroot_argv(root, ["ldconfig"])
             runner.run_logged(job_id, step, log, argv)
