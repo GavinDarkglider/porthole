@@ -56,6 +56,7 @@
 import json
 import os
 import re
+import subprocess
 import sys
 
 from porthole.plugins.crossdev import checks
@@ -529,16 +530,38 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         log("!! %s" % e)
         return False
     try:
+        inside = emulate.emulated_env(target, helper_env)
+        # what building them in the system would bring in: mostly build
+        # tools (in a cross build those run on this computer). Those are
+        # cross-built here instead of compiled under qemu, with binary
+        # packages kept, outside the chroot: while it is set up, the root
+        # has this computer's /dev, /run and /sys mounted in it
         with emulate.Chroot(target, log) as chroot:
-            # the library cache first: without it nothing finds libgcc_s
             argv = emulate.chroot_argv(root, ["ldconfig"])
             log("$ " + " ".join(argv))
             if not runner.run_logged(job_id, step, log, argv):
                 log("!! The system's ldconfig didn't run")
                 return False
-            inside = emulate.emulated_env(target, helper_env)
-            argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going"]
-                                      + atoms, inside)
+            pretend = chroot.emerge_argv(["--pretend", "--oneshot", "--color=n"] + atoms, inside)
+            log("== emulator: working out what building them in the system needs")
+            result = subprocess.run(pretend, capture_output=True, text=True)
+        wanted = {emulate.cp_of(a) for a in atoms}
+        tools = [a for a in emulate.merge_list(result.stdout)
+                 if emulate.cp_of(a) not in wanted]
+        if tools:
+            argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--keep-going",
+                    "--buildpkg", "--usepkg", "--noreplace"] + tools
+            log("== emulator: %d build tool%s needed in the system: cross-building them "
+                "here (binary packages kept); any that won't cross-compile are built in "
+                "the emulator with the rest" % (len(tools), "" if len(tools) == 1 else "s"))
+            log("$ " + " ".join(argv))
+            if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+                log("== emulator: not all of them cross-compiled; the emulator builds the rest")
+        with emulate.Chroot(target, log) as chroot:
+            argv = emulate.chroot_argv(root, ["ldconfig"])
+            runner.run_logged(job_id, step, log, argv)
+            argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going",
+                                       "--usepkg"] + atoms, inside)
             log("== emulator: building %s in the system itself%s" % (
                 " ".join(atoms), ", compiling here over distcc" if "distcc" in
                 inside["FEATURES"].split() else ""))

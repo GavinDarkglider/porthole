@@ -219,6 +219,25 @@ def ldconfig(runner, job_id, step, log, target):
         helpers.stop(log)
 
 
+def merge_list(text):
+    """[=cat/pkg-ver] of an emerge --pretend's merge list (ebuilds only)"""
+    found = []
+    for line in _ANSI.sub("", text).splitlines():
+        match = re.match(r"^\[ebuild[^\]]*\]\s+([A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+?)(?::\S*)?"
+                         r"(?:::\S+)?(?:\s|$)", line)
+        if match:
+            atom = "=" + match.group(1)
+            if atom not in found:
+                found.append(atom)
+    return found
+
+
+def cp_of(atom):
+    """cat/pkg of =cat/pkg-ver"""
+    from portage.versions import cpv_getkey
+    return cpv_getkey(atom.lstrip("="))
+
+
 def emulated_env(target, helper_env):
     """The environment of emerge inside the root: distcc to the job's
     distccd when the root has distcc; no sandboxes that don't work under
