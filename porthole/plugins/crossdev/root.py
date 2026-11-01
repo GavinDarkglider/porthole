@@ -589,7 +589,8 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
                 with emulate.Chroot(target, log) as chroot:
                     runner.run_logged(job_id, step, log, emulate.chroot_argv(root, ["ldconfig"]))
                     inner = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot",
-                                                "--keep-going", "--usepkg"] + failed, inside)
+                                                "--keep-going", "--usepkg", "--noreplace"] + failed,
+                                               inside)
                     log("$ " + " ".join(inner[inner.index("emerge"):]))
                     if not runner.run_logged(job_id, step, log, inner):
                         log("== emulator: not all of them built in the system; the emulator "
@@ -599,7 +600,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             argv = emulate.chroot_argv(root, ["ldconfig"])
             runner.run_logged(job_id, step, log, argv)
             argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going",
-                                       "--usepkg"] + atoms, inside)
+                                       "--usepkg", "--noreplace"] + atoms, inside)
             log("== emulator: building %s in the system itself%s" % (
                 " ".join(atoms), ", compiling here over distcc" if "distcc" in
                 inside["FEATURES"].split() else ""))
