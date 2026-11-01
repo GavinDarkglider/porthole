@@ -530,6 +530,12 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         return False
     try:
         with emulate.Chroot(target, log) as chroot:
+            # the library cache first: without it nothing finds libgcc_s
+            argv = emulate.chroot_argv(root, ["ldconfig"])
+            log("$ " + " ".join(argv))
+            if not runner.run_logged(job_id, step, log, argv):
+                log("!! The system's ldconfig didn't run")
+                return False
             inside = emulate.emulated_env(target, helper_env)
             argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going"]
                                       + atoms, inside)
@@ -599,6 +605,11 @@ def step_firstboot(runner, job_id, step, log):
     target = roots.made_here().get(step.get("name", ""))
     if target is None:
         log("!! No system called %s was made here" % step.get("name"))
+        return False
+    # the library cache the system boots with (portage can't make it while
+    # cross-building)
+    from porthole.plugins.crossdev import emulate
+    if not emulate.ldconfig(runner, job_id, step, log, target):
         return False
     config = fb.read(target.name)
     if not config:

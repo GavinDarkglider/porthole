@@ -162,10 +162,61 @@ class Chroot:
 
     def emerge_argv(self, args, env):
         """argv running emerge inside the root, with a clean environment"""
-        keep = ["HOME=/root", "TERM=xterm", "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
-                "LANG=C.UTF-8"]
-        keep += ["%s=%s" % (k, v) for k, v in sorted(env.items())]
-        return ["chroot", self.root, "/usr/bin/env", "-i"] + keep + ["emerge"] + list(args)
+        return chroot_argv(self.root, ["emerge"] + list(args), env)
+
+
+def chroot_argv(root, command, env=None):
+    """argv running command inside root with a clean environment (LANG=C:
+    no locales are generated in a new system)"""
+    keep = ["HOME=/root", "TERM=xterm", "PATH=/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C"]
+    keep += ["%s=%s" % (k, v) for k, v in sorted((env or {}).items())]
+    return ["chroot", os.path.realpath(root), "/usr/bin/env", "-i"] + keep + list(command)
+
+
+def ldconfig(runner, job_id, step, log, target):
+    """The system's library cache (/etc/ld.so.cache), made by its own
+    ldconfig: portage can't run it while cross-building, and without it
+    nothing finds libraries outside the default folders (gcc's libgcc_s,
+    for one), in the emulator or when the system boots. Runs under qemu
+    (binfmt) when the system is for another CPU."""
+    from porthole.plugins.crossdev import build
+    from porthole.updater.ondemand import Helpers, HelperError
+    root = os.path.realpath(target.root)
+    if not any(os.path.exists(os.path.join(root, d, "ldconfig"))
+               for d in ("usr/bin", "usr/sbin", "sbin")):
+        log("No ldconfig in the system yet (sys-libs/glibc); library cache not made.")
+        return True
+    chost = build.chost_of(target)
+    helpers = Helpers(job_id, ["binfmt"] if chost != build.host_chost() else [])
+    try:
+        helpers.start(log)
+    except HelperError as e:
+        log("!! %s" % e)
+        return False
+    try:
+        # binfmt finds qemu at its own path inside the root (no F flag)
+        placeholder = None
+        for ident in build.dynamic_linkers(root):
+            qemu = build.qemu_for(ident)
+            host = shutil.which("qemu-" + qemu) if qemu else None
+            inside = os.path.join(root, "usr/bin", "qemu-" + qemu) if qemu else None
+            if host and chost != build.host_chost() and not os.path.lexists(inside):
+                shutil.copy2(host, inside)
+                placeholder = placeholder or []
+                placeholder.append(inside)
+        argv = chroot_argv(root, ["ldconfig"])
+        log("$ " + " ".join(argv))
+        ok = runner.run_logged(job_id, step, log, argv)
+        if ok:
+            log("Made the system's library cache (/etc/ld.so.cache)")
+        return ok
+    finally:
+        for path in placeholder or []:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        helpers.stop(log)
 
 
 def emulated_env(target, helper_env):
