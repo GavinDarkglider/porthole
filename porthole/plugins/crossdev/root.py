@@ -486,27 +486,109 @@ def step_build_check(runner, job_id, step, log):
     return True
 
 
+def _log_size(job_id):
+    from porthole.updater import runner as runner_module
+    try:
+        return os.path.getsize(os.path.join(runner_module.JOB_LOG_DIR, job_id + ".log"))
+    except OSError:
+        return 0
+
+
+def _log_since(job_id, offset):
+    from porthole.updater import runner as runner_module
+    try:
+        with open(os.path.join(runner_module.JOB_LOG_DIR, job_id + ".log"),
+                  errors="replace") as f:
+            f.seek(offset)
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _emulate(runner, job_id, step, log, target, env, atoms):
+    """Build atoms inside the system under qemu, compiling over distcc on
+    this computer; True when they all built"""
+    from porthole.plugins.crossdev import build as bd, emulate
+    from porthole.updater.ondemand import Helpers, HelperError
+    root = os.path.realpath(target.root)
+    missing = [cp for cp in emulate.NEEDED if not emulate.installed(root, cp)]
+    if missing:
+        # cross-built like everything else: the root's own linker, and distcc
+        argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--noreplace"] + missing
+        log("== emulator: first %s, cross-built, so the system can build in itself"
+            % " and ".join(missing))
+        log("$ " + " ".join(argv))
+        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+            log("!! %s didn't build; can't build in the emulator without it"
+                % " ".join(missing))
+            return False
+    helpers = Helpers(job_id, ["binfmt", "distcc"])
+    try:
+        helper_env = helpers.start(log)
+    except HelperError as e:
+        log("!! %s" % e)
+        return False
+    try:
+        with emulate.Chroot(target, log) as chroot:
+            inside = emulate.emulated_env(target, helper_env)
+            argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going"]
+                                      + atoms, inside)
+            log("== emulator: building %s in the system itself%s" % (
+                " ".join(atoms), ", compiling here over distcc" if "distcc" in
+                inside["FEATURES"].split() else ""))
+            log("$ " + " ".join(argv[argv.index("emerge"):]))
+            return runner.run_logged(job_id, step, log, argv)
+    except (emulate.EmulateError, OSError) as e:
+        log("!! The emulator couldn't be set up: %s" % e)
+        return False
+    finally:
+        helpers.stop(log)
+
+
 def step_build_stage(runner, job_id, step, log):
-    from porthole.plugins.crossdev import build as bd, roots
+    """One stage of the build, cross-compiled; packages that fail are built
+    in the system under qemu (compiling over distcc), then the stage runs
+    again to finish the rest of its dependency graph"""
+    from porthole.plugins.crossdev import build as bd, emulate, roots
     target = roots.made_here().get(step.get("name", ""))
     if target is None:
         log("!! No system called %s was made here" % step.get("name"))
         return False
+    stage = step.get("stage", "")
     try:
         env = _build_env(target, log)
-        argvs = bd.commands(target, step.get("stage", ""))
+        argvs = bd.commands(target, stage)
     except (bd.BuildError, OSError) as e:
         log("!! %s" % e)
         return False
     if not argvs:
         log("Nothing to do here.")
         return True
+    emulated = set()
     for argv in argvs:
-        log("$ " + " ".join(argv))
-        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
-            log("!! Some packages didn't build (above). Starting the build again picks up "
-                "where it stopped; packages that won't cross-compile will be built in the "
-                "emulator in a later version of Porthole.")
+        for attempt in range(6):
+            offset = _log_size(job_id)
+            log("$ " + " ".join(argv))
+            if runner.run_logged(job_id, step, log, argv, extra_env=env):
+                break
+            failed = emulate.failed_packages(_log_since(job_id, offset), target.root)
+            fresh = [a for a in failed if a not in emulated]
+            if stage == "base" or not fresh:
+                log("!! Some packages didn't build (above)%s. Starting the build again "
+                    "picks up where it stopped." % (
+                        ", also in the emulator" if failed and not fresh else ""))
+                return False
+            log("== %d package%s didn't cross-compile: %s; building %s in the emulator, "
+                "then this stage again for the rest" % (
+                    len(fresh), "" if len(fresh) == 1 else "s", " ".join(fresh),
+                    "it" if len(fresh) == 1 else "them"))
+            emulated.update(fresh)
+            if not _emulate(runner, job_id, step, log, target, env, fresh):
+                log("!! They didn't build in the emulator either (above).")
+                return False
+            env = _build_env(target, log)
+        else:
+            log("!! Still failing after several rounds; stopping here.")
             return False
     return True
 

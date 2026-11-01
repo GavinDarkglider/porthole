@@ -216,13 +216,17 @@ BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
 BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
-def bashrc_block(chost, root):
+def bashrc_block(chost, root, tools=None):
     return "\n".join([
         BASHRC_BEGIN,
         "# Only when this system is cross-built on another computer (CBUILD set to",
         "# that computer); building on the system itself, or in the emulator, has",
         "# nothing to do here.",
         'if [[ -n ${CBUILD} && ${CBUILD} != "${CHOST}" ]]; then',
+        "\t# Porthole's tools for this system first (compilers with --sysroot, an",
+        "\t# ldd for its programs): portage ignores the caller's PATH once the",
+        "\t# system's env.d sets one",
+        '\texport PATH="%s:${PATH}"' % tools if tools else "\t:",
         "	# gobject-introspection's g-ir-scanner compiles with $CC (else this",
         "	# computer's own compiler) and runs the program it built through",
         "	# GI_CROSS_LAUNCHER",
@@ -232,7 +236,7 @@ def bashrc_block(chost, root):
         BASHRC_END])
 
 
-def write_bashrc(target, chost):
+def write_bashrc(target, chost, base=None):
     """Porthole's block in the system's etc/portage/bashrc (portage reads it
     for the system's own packages only, not for tools built here)"""
     path = os.path.join(target.portage_dir, "bashrc")
@@ -241,7 +245,7 @@ def write_bashrc(target, chost):
             text = f.read()
     except OSError:
         text = ""
-    block = bashrc_block(chost, os.path.realpath(target.root))
+    block = bashrc_block(chost, os.path.realpath(target.root), wrappers_dir(target, base))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
         text = before + block + rest.split(BASHRC_END, 1)[1]
