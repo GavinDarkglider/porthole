@@ -323,7 +323,7 @@ def parse_pretend(text, root):
     root = os.path.realpath(root).rstrip("/")
     out = {"root": [], "host": [], "root_use": [], "host_use": [], "root_keywords": [],
            "host_keywords": [], "other": [], "ok": True}
-    side, section = "root", None
+    side, section, headed = "root", None, False
     for raw in text.splitlines():
         line = raw.rstrip()
         match = re.match(r"^\[(ebuild|binary)[^\]]*\]\s+(\S+)", line)
@@ -333,6 +333,7 @@ def parse_pretend(text, root):
             continue
         match = re.match(r"^For (/\S*):$", line)
         if match:
+            headed = True
             side = "root" if os.path.realpath(match.group(1)).startswith(root + "/") else "host"
             continue
         if "USE changes are necessary" in line:
@@ -358,11 +359,27 @@ def parse_pretend(text, root):
         if line.startswith(("!!!", "emerge: there are no")):
             out["ok"] = False
             out["other"].append(line.strip())
+    # changes printed without a "For <config dir>:" heading (emerge leaves
+    # it out when only one side needs any): the system's when the package
+    # is merged into it, else this computer's (a build tool that runs here)
+    if not headed:
+        merged = {_cp(c) for c in out["root"]}
+        for kind in ("use", "keywords"):
+            lines = out["root_" + kind]
+            out["root_" + kind] = [l for l in lines if _cp(l) in merged]
+            out["host_" + kind] = [l for l in lines if _cp(l) not in merged]
     if out["host_keywords"]:
         out["ok"] = False
         out["other"].append("Packages built on this computer would need testing versions: "
                             + ", ".join(out["host_keywords"]))
     return out
+
+
+def _cp(text):
+    """cat/pkg of a cpv, an atom or a package.use line"""
+    atom = re.sub(r"^(>=|<=|=|~|<|>)", "", text.split()[0])
+    atom = re.sub(r"(:[^/]*)?(::.*)?$", "", atom)
+    return re.sub(r"-\d[^/]*$", "", atom)
 
 
 def plan(target):
@@ -420,12 +437,82 @@ def write_changes(target, host_use, root_use, root_keywords, portage_dir="/etc/p
         merged = list(dict.fromkeys(old + lines))
         with open(path + ".new", "w") as f:
             f.write("# Porthole: changes building %s needs (%s),\n"
-                    "# agreed to before the build. Removed with the system.\n"
+                    "# agreed to in the Build dialog, or allowed there for the rest of the build.\n"
+                    "# Removed with the system.\n"
                     % (target.title, what) + "".join(l + "\n" for l in merged))
         os.chmod(path + ".new", 0o644)
         os.replace(path + ".new", path)
         written.append(path)
     return written
+
+
+# what the user allowed for the rest of a build (Build dialog), kept with
+# its tools: allow_python = build tools here may get the system's Python
+# version added (python_targets / python_single_target), without asking
+POLICY_NAME = "allow.json"
+_PYTHON_FLAG = re.compile(r"^python_(single_)?targets?_[a-z0-9_]+$")
+
+
+def policy_path(target, base=None):
+    return os.path.join(os.path.dirname(wrappers_dir(target, base)), POLICY_NAME)
+
+
+def write_policy(target, allow_python, base=None):
+    import json
+    path = policy_path(target, base)
+    os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+    with open(path + ".new", "w") as f:
+        json.dump({"allow_python": bool(allow_python)}, f)
+    os.replace(path + ".new", path)
+
+
+def read_policy(target, base=None):
+    import json
+    try:
+        with open(policy_path(target, base)) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def python_only(line):
+    """Whether a package.use line only adds Python targets"""
+    flags = line.split()[1:]
+    return bool(flags) and all(_PYTHON_FLAG.match(f) for f in flags)
+
+
+def allowed_changes(parsed, policy):
+    """(host_use, root_use) a build may write by itself: the system's USE
+    changes (its config is Porthole's), and this computer's only when
+    they just add a Python target and the user allowed that; plus what
+    is left that it may not"""
+    host_ok = [l for l in parsed["host_use"] if policy.get("allow_python") and python_only(l)]
+    left = ([l for l in parsed["host_use"] if l not in host_ok] + parsed["root_keywords"]
+            + parsed["host_keywords"] + parsed["other"])
+    return host_ok, list(parsed["root_use"]), left
+
+
+def apply_allowed(target, argv, env, log, portage_dir="/etc/portage", run=None):
+    """Before a cross build: emerge --pretend with autounmask over argv's
+    packages, and write the changes the build may make by itself
+    (allowed_changes). Returns True when nothing it can't make is left."""
+    run = run or subprocess.run
+    args = [a for a in argv[1:] if not a.startswith("--")]
+    pretend = ["emerge", "--pretend", "--color=n", "--autounmask=y", "--autounmask-backtrack=y",
+               "--autounmask-write=n"] + [a for a in argv[1:] if a in (
+                   "--oneshot", "--update", "--deep", "--newuse", "--noreplace", "--usepkg",
+                   "--nodeps")] + args
+    result = run(pretend, env=dict(os.environ, **env), capture_output=True, text=True)
+    parsed = parse_pretend(result.stdout + "\n" + result.stderr, target.root)
+    host_ok, root_ok, left = allowed_changes(parsed, read_policy(target))
+    if host_ok or root_ok:
+        for path in write_changes(target, host_ok, root_ok, [], portage_dir):
+            log("Wrote the changes this build needs in %s:" % path)
+        for line in host_ok + root_ok:
+            log("   " + line)
+    for line in left:
+        log("!! Not changed by itself (needs you): " + line)
+    return not left
 
 
 def remove_host_changes(target, portage_dir="/etc/portage"):

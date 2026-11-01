@@ -412,6 +412,7 @@ def build(args):
         for path in bd.write_changes(target, changes.get("host_use"), changes.get("root_use"),
                                      changes.get("root_keywords")):
             print("Wrote %s" % path)
+        bd.write_policy(target, bool(changes.get("allow_python")))
     except (ValueError, bd.BuildError, OSError) as e:
         print(e, file=sys.stderr)
         return 1
@@ -551,6 +552,9 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         if tools:
             argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--keep-going",
                     "--buildpkg", "--usepkg", "--noreplace"] + tools
+            # the tools may need changes the first plan didn't know of
+            # (another Python target here): those the user allowed
+            bd.apply_allowed(target, argv, env, log)
             log("== emulator: %d build tool%s needed in the system: cross-building them "
                 "here (binary packages kept); any that won't cross-compile are built in "
                 "the emulator with the rest" % (len(tools), "" if len(tools) == 1 else "s"))
@@ -616,6 +620,7 @@ def step_build_stage(runner, job_id, step, log):
                 log("!! They didn't build in the emulator either (above).")
                 return False
             env = _build_env(target, log)
+            bd.apply_allowed(target, argv, env, log)
         else:
             log("!! Still failing after several rounds; stopping here.")
             return False

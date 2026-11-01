@@ -719,16 +719,25 @@ class BuildDialog(Gtk.Dialog):
                 "with the system; nothing else on this computer changes." % target.name),
                 False, False, 0)
             box.pack_start(listing(plan["host_use"], 90), False, False, 0)
-            self.allow = Gtk.CheckButton(label="Allow these changes on this computer")
+            self.allow = Gtk.CheckButton(
+                label="Allow these changes on this computer, and the same kind later in "
+                      "this build (another Python version for build tools that run here)")
             self.allow.connect("toggled", lambda b: self.set_response_sensitive(
                 Gtk.ResponseType.OK, b.get_active()))
             box.pack_start(self.allow, False, False, 0)
+        self.allow_python = None
+        if not plan["host_use"]:
+            self.allow_python = Gtk.CheckButton(
+                label="If the build needs another Python version for build tools that run "
+                      "here, add it without asking (in porthole-cross-%s)" % target.name)
+            box.pack_start(self.allow_python, False, False, 0)
         self.add_button("Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("Build it", Gtk.ResponseType.OK)
         if self.allow is not None:
             self.set_response_sensitive(Gtk.ResponseType.OK, False)
         self.show_all()
         answer = self.run()
+        self.python_ok = bool(self.allow_python and self.allow_python.get_active())
         self.destroy()
         if answer == Gtk.ResponseType.OK:
             self.queue()
@@ -737,7 +746,8 @@ class BuildDialog(Gtk.Dialog):
         import json
         from porthole.updater.elevate import run_as_root, service
         changes = {"host_use": self.plan["host_use"], "root_use": self.plan["root_use"],
-                   "root_keywords": self.plan["root_keywords"]}
+                   "root_keywords": self.plan["root_keywords"],
+                   "allow_python": self.allow is not None or self.python_ok}
 
         def done(ok, output):
             if not ok:
