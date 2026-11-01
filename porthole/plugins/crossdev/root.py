@@ -442,6 +442,7 @@ def _build_env(target, log):
     if chost != bd.host_chost():
         bd.write_ldd(target, chost)
         bd.write_bashrc(target, chost)
+        bd.link_python_modules(target, log)
     return bd.environment(target, chost)
 
 

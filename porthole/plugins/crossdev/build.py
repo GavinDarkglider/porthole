@@ -212,12 +212,63 @@ def write_ldd(target, chost, base=None):
     return path
 
 
+def python_multiarch(root):
+    """The system's Python platform tag (aarch64-linux-gnu), from its own
+    _sysconfigdata file, or None (no Python in it yet)"""
+    import glob
+    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/python3.*",
+                                              "_sysconfigdata_*_linux_*.py"))):
+        return os.path.basename(path)[:-3].split("_linux_", 1)[1]
+    return None
+
+
+def host_multiarch():
+    import sysconfig
+    return sysconfig.get_config_var("MULTIARCH") or None
+
+
+def misnamed_python_modules(root, host=None, target=None):
+    """[(path, correct path)] of Python C modules in the system named with
+    this computer's platform tag (a cross build took the suffix from this
+    computer's Python): the system's Python doesn't find them"""
+    host = host or host_multiarch()
+    target = target or python_multiarch(root)
+    if not host or not target or host == target:
+        return []
+    found = []
+    suffix = "-%s.so" % host
+    for top in ("usr/lib", "usr/lib64"):
+        for folder, _dirs, files in os.walk(os.path.join(root, top)):
+            for name in files:
+                if ".cpython-3" in name and name.endswith(suffix):
+                    path = os.path.join(folder, name)
+                    found.append((path, path[:-len(suffix)] + "-%s.so" % target))
+    return found
+
+
+def link_python_modules(target, log=lambda m: None):
+    """For modules already installed under the wrong name: a link with the
+    right one next to each (the package's file list stays as it is)"""
+    made = 0
+    for path, correct in misnamed_python_modules(os.path.realpath(target.root)):
+        if os.path.lexists(correct):
+            continue
+        os.symlink(os.path.basename(path), correct)
+        made += 1
+    if made:
+        log("Linked %d Python module%s installed under this computer's platform name to "
+            "the system's (a cross build named them wrongly)" % (
+                made, "" if made == 1 else "s"))
+    return made
+
+
 BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
 BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
-def bashrc_block(chost, root, tools=None):
-    return "\n".join([
+def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None):
+    """Porthole's block in the system's bashrc: only when it is cross-built"""
+    lines = [
         BASHRC_BEGIN,
         "# Only when this system is cross-built on another computer (CBUILD set to",
         "# that computer); building on the system itself, or in the emulator, has",
@@ -227,13 +278,23 @@ def bashrc_block(chost, root, tools=None):
         "\t# ldd for its programs): portage ignores the caller's PATH once the",
         "\t# system's env.d sets one",
         '\texport PATH="%s:${PATH}"' % tools if tools else "\t:",
-        "	# gobject-introspection's g-ir-scanner compiles with $CC (else this",
-        "	# computer's own compiler) and runs the program it built through",
-        "	# GI_CROSS_LAUNCHER",
-        '	export CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
-        '	export GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root),
-        "fi",
-        BASHRC_END])
+        "\t# gobject-introspection's g-ir-scanner compiles with $CC (else this",
+        "\t# computer's own compiler) and runs the program it built through",
+        "\t# GI_CROSS_LAUNCHER",
+        '\texport CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
+        '\texport GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root)]
+    if host_tag and target_tag and host_tag != target_tag:
+        lines += [
+            "\t# Python C modules get this computer's platform name in a cross build",
+            "\t# (%s); the system's Python only looks for its own (%s)" % (host_tag, target_tag),
+            "\tpost_src_install() {",
+            "\t\tlocal f",
+            "\t\twhile IFS= read -r -d '' f; do",
+            '\t\t\tmv -- "${f}" "${f%%-%s.so}-%s.so" || die' % (host_tag, target_tag),
+            "\t\tdone < <(find \"${ED}\" -type f -name '*.cpython-3*-%s.so' -print0)" % host_tag,
+            "\t}"]
+    lines += ["fi", BASHRC_END]
+    return "\n".join(lines)
 
 
 def write_bashrc(target, chost, base=None):
@@ -245,7 +306,9 @@ def write_bashrc(target, chost, base=None):
             text = f.read()
     except OSError:
         text = ""
-    block = bashrc_block(chost, os.path.realpath(target.root), wrappers_dir(target, base))
+    root = os.path.realpath(target.root)
+    block = bashrc_block(chost, root, wrappers_dir(target, base), host_multiarch(),
+                         python_multiarch(root))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
         text = before + block + rest.split(BASHRC_END, 1)[1]
