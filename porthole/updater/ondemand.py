@@ -70,6 +70,42 @@ def safe_jobs(threads=None, memory_gb=None):
     return max(1, min(threads, memory_gb // 2))
 
 
+def _daemons(match):
+    """[pid] of distccd daemons (not their workers) whose --pid-file matches"""
+    found = []
+    for entry in os.listdir("/proc"):
+        if not entry.isdigit():
+            continue
+        pid = int(entry)
+        try:
+            with open("/proc/%d/cmdline" % pid, "rb") as f:
+                args = f.read().decode(errors="replace").split("\0")
+            with open("/proc/%d/stat" % pid) as f:
+                parent = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            continue
+        if not args or os.path.basename(args[0]) != "distccd" or "--pid-file" not in args:
+            continue
+        pid_file = args[args.index("--pid-file") + 1] if args.index("--pid-file") + 1 < len(
+            args) else ""
+        # a worker's parent is a distccd too: count the daemon only
+        if match(pid_file) and not _is_distccd(parent):
+            found.append(pid)
+    return found
+
+
+def stop_strays(run_dir, log=lambda m: None):
+    """Stop distccd daemons left by Porthole jobs that ended without
+    stopping them (their pid files are in run_dir)"""
+    prefix = os.path.join(run_dir, "distccd-")
+    for pid in _daemons(lambda pid_file: pid_file.startswith(prefix)):
+        try:
+            os.kill(pid, signal.SIGTERM)
+            log("== distcc: stopped one left by an earlier job (pid %d)" % pid)
+        except OSError:
+            pass
+
+
 class LocalDistcc:
     """A distccd for one job, on 127.0.0.1"""
 
@@ -94,15 +130,17 @@ class LocalDistcc:
                 "--port", str(self.port), "--jobs", str(self.jobs),
                 "--pid-file", self.pid_file, "--log-file", self.log_file,
                 "--log-level", "warning"]
+        stop_strays(os.path.dirname(self.pid_file), log)
         if os.geteuid() == 0:
-            # distccd won't compile as root; the pid file must be its to write
+            # distccd won't compile as root, and writes its pid file and log
+            # as distcc: both are made for it first (the folder stays root's)
             argv += ["--user", "distcc"]
             try:
                 import pwd
                 user = pwd.getpwnam("distcc")
-                os.chown(os.path.dirname(self.pid_file), 0, 0)
-                open(self.log_file, "a").close()
-                os.chown(self.log_file, user.pw_uid, user.pw_gid)
+                for path in (self.pid_file, self.log_file):
+                    open(path, "a").close()
+                    os.chown(path, user.pw_uid, user.pw_gid)
             except (KeyError, OSError) as e:
                 raise HelperError("distcc's user isn't set up: %s" % e)
         result = subprocess.run(argv, capture_output=True, text=True)
@@ -130,9 +168,13 @@ class LocalDistcc:
         try:
             with open(self.pid_file) as f:
                 pid = int(f.read().strip())
+            if _is_distccd(pid):
+                return pid
         except (OSError, ValueError):
-            return None
-        return pid if _is_distccd(pid) else None
+            pass
+        # no pid file (or a stale one): the daemon by its own --pid-file
+        found = _daemons(lambda pid_file: pid_file == self.pid_file)
+        return found[0] if found else None
 
     def stop(self, log):
         pid = self.pid()
