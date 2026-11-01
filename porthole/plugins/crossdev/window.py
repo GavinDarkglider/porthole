@@ -214,6 +214,12 @@ class SystemsWindow(Gtk.Window):
             "on this computer) first.")
         self.build_button.connect("clicked", lambda b: self.build_system())
         buttons.pack_start(self.build_button, False, False, 0)
+        self.reset_button = Gtk.Button(label="Start over…")
+        self.reset_button.set_tooltip_text(
+            "Empty the system to build it again from the beginning: its settings, package "
+            "list and binary packages are kept, so only what isn't packaged yet compiles")
+        self.reset_button.connect("clicked", lambda b: self.reset_system())
+        buttons.pack_start(self.reset_button, False, False, 0)
         self.remove_button = Gtk.Button(label="Delete…")
         self.remove_button.connect("clicked", lambda b: self.remove_system())
         buttons.pack_start(self.remove_button, False, False, 0)
@@ -259,6 +265,7 @@ class SystemsWindow(Gtk.Window):
 
     def update_buttons(self):
         self.remove_button.set_sensitive(self.selected() is not None)
+        self.reset_button.set_sensitive(self.selected() is not None)
         self.settings_button.set_sensitive(self.selected() is not None)
         self.build_button.set_sensitive(self.selected() is not None)
         self.toolchain_button.set_sensitive(self.selected() is not None)
@@ -392,6 +399,30 @@ class SystemsWindow(Gtk.Window):
             return False
         BuildDialog(self, target, plan)
         return False
+
+    def reset_system(self):
+        name = self.selected()
+        if not name:
+            return
+        dialog = Gtk.MessageDialog(
+            transient_for=self, modal=True, message_type=Gtk.MessageType.WARNING,
+            buttons=Gtk.ButtonsType.NONE, text="Start %s over?" % name)
+        dialog.format_secondary_text(
+            "Everything installed in it is removed. Its settings (etc/portage), package "
+            "list, first-boot setup and binary packages are kept: Build the system then "
+            "starts from the beginning and installs what is already packaged instead of "
+            "compiling it again.")
+        dialog.add_buttons("Keep it", Gtk.ResponseType.CANCEL, "Start over", Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+        from porthole.updater.elevate import run_as_root, service
+
+        def done(ok, output):
+            if not ok:
+                self.error("The system wasn't started over", output)
+        run_as_root(service("plugin", "crossdev", "reset-root", name), done)
 
     def remove_system(self):
         name = self.selected()

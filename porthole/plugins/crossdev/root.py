@@ -13,6 +13,9 @@
                                                a new system for another
                                                computer (roots.py)
         plugin crossdev remove-root NAME       queue a job deleting one
+        plugin crossdev reset-root NAME        queue starting one over: an empty
+                                               root, its settings and binary
+                                               packages kept
         plugin crossdev binpkgs NAME yes|no    keep binary packages of what is
                                                built for it, or just the system
         plugin crossdev toolchain NAME         queue a job building the cross
@@ -40,6 +43,7 @@
     Job steps (kind "plugin", plugin "crossdev"):
 
         remove-root   {"name": NAME}
+        reset-root    {"name": NAME}
         toolchain     {"name": NAME}
         build-check   {"name": NAME}   compiler wrappers; emerge --pretend
         build-stage   {"name": NAME, "stage": base|system|extra|world}
@@ -275,6 +279,29 @@ def step_toolchain(runner, job_id, step, log):
                                  ["distcc-config", "--update-masquerade-with-crossdev"]):
             return False
     return True
+
+
+def reset_root(args):
+    """plugin crossdev reset-root NAME: queue starting a system over"""
+    from porthole.plugins.crossdev import roots
+    if len(args) != 1:
+        print("usage: plugin crossdev reset-root NAME", file=sys.stderr)
+        return 2
+    try:
+        target = roots.check_removable(args[0])
+    except roots.RootError as e:
+        print(e, file=sys.stderr)
+        return 1
+    return _queue("Start %s over" % target.title, "reset-root", target.name)
+
+
+def step_reset_root(runner, job_id, step, log):
+    from porthole.plugins.crossdev import roots
+    try:
+        return roots.reset(step.get("name", ""), log=log)
+    except (roots.RootError, OSError) as e:
+        log("!! %s" % e)
+        return False
 
 
 def step_remove_root(runner, job_id, step, log):
@@ -707,9 +734,11 @@ def step_firstboot(runner, job_id, step, log):
 
 
 COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
-            "remove-root": remove_root, "toolchain": toolchain, "binpkgs": binpkgs,
+            "remove-root": remove_root, "reset-root": reset_root, "toolchain": toolchain,
+            "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
             "firstboot": firstboot, "packages": packages, "build": build}
-STEPS = {"remove-root": step_remove_root, "toolchain": step_toolchain,
+STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
+         "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": step_build_check,
          "build-stage": step_build_stage}

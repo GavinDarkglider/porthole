@@ -320,6 +320,57 @@ def check_removable(name, roots_dir=None, targets_file=None):
     return target
 
 
+# what a system keeps when it starts over: its settings and package list
+KEEP = ("etc/portage", "var/lib/portage/world")
+
+
+def reset(name, roots_dir=None, targets_file=None, repos=None, gentoo_key=None,
+          log=lambda m: None):
+    """Start a system over: an empty root again, with its settings (etc/portage,
+    its world file) kept, and its binary packages (outside the root), so the
+    next build is from the beginning but installs what is already packaged"""
+    import tempfile
+    target = check_removable(name, roots_dir, targets_file)
+    root = os.path.realpath(target.root)
+    profile = os.path.realpath(os.path.join(target.portage_dir, "make.profile"))
+    split_usr = "split-usr" in profile.split("/")
+    keep = tempfile.mkdtemp(prefix=".porthole-keep-", dir=os.path.dirname(root))
+    try:
+        for relative in KEEP:
+            source = os.path.join(root, relative)
+            if os.path.lexists(source):
+                os.makedirs(os.path.dirname(os.path.join(keep, relative)), exist_ok=True)
+                os.rename(source, os.path.join(keep, relative))
+        # one more look: nothing may have been mounted in the meantime
+        if mounts_under(root):
+            raise RootError("Something was mounted in %s; not emptying it" % root)
+        shutil.rmtree(root)
+        log("Emptied %s" % root)
+        os.mkdir(root, 0o755)
+        _skeleton(root, split_usr)
+        for relative in KEEP:
+            kept = os.path.join(keep, relative)
+            if os.path.lexists(kept):
+                os.makedirs(os.path.dirname(os.path.join(root, relative)), exist_ok=True)
+                os.rename(kept, os.path.join(root, relative))
+        for location in used_repos(target, repos).values():
+            os.makedirs(os.path.join(root, location.lstrip("/")), mode=0o755, exist_ok=True)
+        gentoo_key = gentoo_key or GENTOO_KEY
+        if os.path.isfile(gentoo_key):
+            keys = os.path.join(root, "usr", "share", "openpgp-keys")
+            os.makedirs(keys, mode=0o755, exist_ok=True)
+            shutil.copy2(gentoo_key, keys)
+        log("Kept its settings (%s) and binary packages" % ", ".join(KEEP))
+    finally:
+        # anything not put back (an error halfway) stays next to the root
+        leftover = [p for p in KEEP if os.path.lexists(os.path.join(keep, p))]
+        if leftover:
+            log("!! Kept files not put back are in %s" % keep)
+        else:
+            shutil.rmtree(keep, ignore_errors=True)
+    return True
+
+
 def remove(name, roots_dir=None, targets_file=None,
            binpkgs_dir=None, log=lambda m: None):
     """Delete a system: its targets.conf entry first (so nothing plans for

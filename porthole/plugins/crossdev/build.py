@@ -351,7 +351,11 @@ STAGES = (("base", "The kernel headers and C library"),
 
 def commands(target, stage):
     """[emerge arguments] for one stage of the build ([]: nothing to do)"""
-    common = ["emerge", "--verbose", "--color=y"]
+    # --usepkg: what the system's own package folder already has (a build
+    # started again, or a new system with the same settings) is installed
+    # from it instead of built again; portage only takes a package whose
+    # USE flags still match
+    common = ["emerge", "--verbose", "--color=y", "--usepkg"]
     if stage == "base":
         # one at a time, without their dependencies: in portage's order some
         # (timezone-data, libidn2) come before glibc, and they can't be
