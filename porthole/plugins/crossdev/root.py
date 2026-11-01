@@ -437,6 +437,9 @@ def _build_env(target, log):
     if not chost:
         raise bd.BuildError("%s's settings give no CHOST" % target.title)
     bd.write_wrappers(target, chost)
+    if chost != bd.host_chost():
+        bd.write_ldd(target, chost)
+        bd.write_bashrc(target, chost)
     return bd.environment(target, chost)
 
 
@@ -464,10 +467,7 @@ def step_build_check(runner, job_id, step, log):
             "%s %s" % kv for kv in sorted(built.items())) or "?"))
         # some builds run the programs they just made (meson's exe_wrapper,
         # gobject-introspection): Gentoo's eclasses run them with qemu-<arch>
-        cpu = chost.split("-")[0]
-        qemu = "qemu-" + ("arm" if cpu.startswith("arm") else "i386" if re.match(
-            r"i[3-6]86$", cpu) else {"powerpc64": "ppc64", "powerpc64le": "ppc64le",
-                                     "powerpc": "ppc"}.get(cpu, cpu))
+        qemu = bd.qemu_name(chost)
         if not shutil.which(qemu):
             log("!! Warning: %s isn't installed (app-emulation/qemu with qemu_user_targets "
                 "for it). Packages that run what they build while building (glib, "

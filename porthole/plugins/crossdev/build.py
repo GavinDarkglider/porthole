@@ -86,6 +86,111 @@ def write_wrappers(target, chost, base=None, search="/usr/bin"):
     return directory
 
 
+def qemu_name(chost):
+    """qemu's user-mode emulator for a CHOST's CPU"""
+    cpu = chost.split("-")[0]
+    if cpu.startswith("arm"):
+        return "qemu-arm"
+    if re.match(r"i[3-6]86$", cpu):
+        return "qemu-i386"
+    return "qemu-" + {"powerpc64": "ppc64", "powerpc64le": "ppc64le",
+                      "powerpc": "ppc"}.get(cpu, cpu)
+
+
+def elf_machine(path):
+    """The e_machine number of an ELF file, or None"""
+    import struct
+    try:
+        with open(path, "rb") as f:
+            head = f.read(20)
+    except OSError:
+        return None
+    if len(head) < 20 or head[:4] != b"\x7fELF":
+        return None
+    return struct.unpack("<H" if head[5] == 1 else ">H", head[18:20])[0]
+
+
+def dynamic_linker(root):
+    """The system's dynamic linker (as installed by its C library), or None"""
+    import glob
+    for path in sorted(glob.glob(os.path.join(root, "lib*", "ld-linux*.so*")) +
+                       glob.glob(os.path.join(root, "lib*", "ld-musl*.so*"))):
+        if os.path.exists(path):
+            return path
+    return None
+
+
+def write_ldd(target, chost, base=None):
+    """An ldd first in PATH that also lists the system's programs (through
+    qemu and the system's own ld.so --list); others go to the real ldd.
+    g-ir-scanner runs ldd on the program it builds."""
+    root = os.path.realpath(target.root)
+    linker = dynamic_linker(root)
+    path = os.path.join(wrappers_dir(target, base), "ldd")
+    machine = elf_machine(linker) if linker else None
+    if machine is None:
+        if os.path.exists(path):
+            os.unlink(path)
+        return None
+    with open(path + ".new", "w") as f:
+        f.write('#!/bin/sh\n'
+                '# Porthole: ldd that also lists programs built for %s (%s)\n'
+                'for last; do :; done\n'
+                'machine=$(od -An -tu2 -j18 -N2 "$last" 2>/dev/null | tr -d " ")\n'
+                'magic=$(od -An -c -j1 -N3 "$last" 2>/dev/null | tr -d " ")\n'
+                'if [ "$magic" = "ELF" ] && [ "$machine" = "%d" ]; then\n'
+                '\texec %s -L %s %s --list "$last"\n'
+                'fi\n'
+                'exec /usr/bin/ldd "$@"\n'
+                % (target.name, chost, machine, qemu_name(chost), root,
+                   os.path.realpath(linker)))
+    os.chmod(path + ".new", 0o755)
+    os.replace(path + ".new", path)
+    return path
+
+
+BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
+BASHRC_END = "# --- end of Porthole's cross build settings ---"
+
+
+def bashrc_block(chost, root):
+    return "\n".join([
+        BASHRC_BEGIN,
+        "# Only when this system is cross-built on another computer (CBUILD set to",
+        "# that computer); building on the system itself, or in the emulator, has",
+        "# nothing to do here.",
+        'if [[ -n ${CBUILD} && ${CBUILD} != "${CHOST}" ]]; then',
+        "	# gobject-introspection's g-ir-scanner compiles with $CC (else this",
+        "	# computer's own compiler) and runs the program it built through",
+        "	# GI_CROSS_LAUNCHER",
+        '	export CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
+        '	export GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root),
+        "fi",
+        BASHRC_END])
+
+
+def write_bashrc(target, chost):
+    """Porthole's block in the system's etc/portage/bashrc (portage reads it
+    for the system's own packages only, not for tools built here)"""
+    path = os.path.join(target.portage_dir, "bashrc")
+    try:
+        with open(path) as f:
+            text = f.read()
+    except OSError:
+        text = ""
+    block = bashrc_block(chost, os.path.realpath(target.root))
+    if BASHRC_BEGIN in text and BASHRC_END in text:
+        before, rest = text.split(BASHRC_BEGIN, 1)
+        text = before + block + rest.split(BASHRC_END, 1)[1]
+    else:
+        text = (text.rstrip("\n") + "\n\n" if text.strip() else "") + block + "\n"
+    with open(path + ".new", "w") as f:
+        f.write(text)
+    os.chmod(path + ".new", 0o644)
+    os.replace(path + ".new", path)
+    return path
+
+
 def environment(target, chost, base=None):
     """What emerge needs to build into the system"""
     root = os.path.realpath(target.root)
