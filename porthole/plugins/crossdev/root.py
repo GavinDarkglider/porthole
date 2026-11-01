@@ -633,6 +633,8 @@ def step_build_stage(runner, job_id, step, log):
                 break
             failed = emulate.failed_packages(_log_since(job_id, offset), target.root)
             fresh = [a for a in failed if a not in emulated]
+            if (runner.update(job_id) or {}).get("cancel"):
+                return False
             if stage == "base" or not fresh:
                 log("!! Some packages didn't build (above)%s. Starting the build again "
                     "picks up where it stopped." % (
