@@ -243,6 +243,38 @@ def cp_of(atom):
     return cpv_getkey(atom.lstrip("="))
 
 
+_COMPILER = re.compile(r"^(?:[a-z0-9_]+(?:-[a-z0-9_.]+){2,4}-)?(gcc|g\+\+|cc|c\+\+)(-\d+)?$")
+
+
+def distcc_links(root, log=lambda m: None):
+    """distcc's links in the system's /usr/lib/distcc (bin is a link to
+    it), one per compiler it has, as distcc-config --update-masquerade
+    makes them on the system itself: a cross-installed distcc can't, and
+    without them FEATURES=distcc compiles everything locally (here: under
+    qemu). Plain gcc/cc are fine too: distcc rewrites them to the full
+    CHOST name before sending. Returns how many there are."""
+    root = os.path.realpath(root)
+    if not os.path.exists(os.path.join(root, "usr/bin/distcc")):
+        return 0
+    folder = os.path.join(root, "usr/lib/distcc")
+    os.makedirs(folder, mode=0o755, exist_ok=True)
+    made = 0
+    for name in sorted(os.listdir(os.path.join(root, "usr/bin"))):
+        if not _COMPILER.match(name):
+            continue
+        link = os.path.join(folder, name)
+        if os.path.islink(link) and os.readlink(link) == "/usr/bin/distcc":
+            made += 1
+            continue
+        if os.path.lexists(link):
+            continue
+        os.symlink("/usr/bin/distcc", link)
+        made += 1
+    if made:
+        log("== distcc: %d compiler names in the system go to distcc" % made)
+    return made
+
+
 def emulated_env(target, helper_env):
     """The environment of emerge inside the root: distcc to the job's
     distccd when the root has distcc; no sandboxes that don't work under

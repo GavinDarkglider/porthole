@@ -129,7 +129,9 @@ class LocalDistcc:
         argv = [distccd, "--daemon", "--listen", "127.0.0.1", "--allow", "127.0.0.1",
                 "--port", str(self.port), "--jobs", str(self.jobs),
                 "--pid-file", self.pid_file, "--log-file", self.log_file,
-                "--log-level", "warning"]
+                # info: one summary line per compile (COMPILE_OK / _ERROR),
+                # counted when it stops
+                "--log-level", "info"]
         stop_strays(os.path.dirname(self.pid_file), log)
         if os.geteuid() == 0:
             # distccd won't compile as root, and writes its pid file and log
@@ -187,11 +189,24 @@ class LocalDistcc:
                 time.sleep(0.1)
             else:
                 os.kill(pid, signal.SIGKILL)
-            log("== distcc: stopped")
+            log("== distcc: stopped%s" % self.summary())
         try:
             os.unlink(self.pid_file)
         except OSError:
             pass
+
+    def summary(self):
+        """", N compiles done here (M failed)" from its log, or "" """
+        try:
+            with open(self.log_file, errors="replace") as f:
+                text = f.read()
+        except OSError:
+            return ""
+        ok, failed = text.count("COMPILE_OK"), text.count("COMPILE_ERROR")
+        if not ok and not failed:
+            return ", no compiles were sent to it"
+        return ", %d compile%s done here%s" % (ok, "" if ok == 1 else "s",
+                                                " (%d failed)" % failed if failed else "")
 
 
 class Binfmt:

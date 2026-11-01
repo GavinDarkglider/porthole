@@ -531,6 +531,9 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         log("!! %s" % e)
         return False
     try:
+        # distcc's compiler links in the system (a cross-installed distcc has
+        # none), so the emulated builds really hand their compiling here
+        emulate.distcc_links(root, log)
         inside = emulate.emulated_env(target, helper_env)
         # what building them in the system would bring in: mostly build
         # tools (in a cross build those run on this computer). Those are
