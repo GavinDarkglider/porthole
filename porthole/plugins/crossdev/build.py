@@ -324,9 +324,13 @@ def write_bashrc(target, chost, base=None):
 def environment(target, chost, base=None):
     """What emerge needs to build into the system"""
     root = os.path.realpath(target.root)
+    # QEMU_LD_PREFIX: with binfmt on during a cross build, a program it runs
+    # that was built for the system (help2man on a fresh binary, code
+    # generators, tests) runs through qemu with the system's own libraries
     return {"ROOT": root, "SYSROOT": root, "PORTAGE_CONFIGROOT": os.path.realpath(
                 target.config_root), "CBUILD": host_chost() or "", "CHOST": chost,
-            "PATH": wrappers_dir(target, base) + ":" + os.environ.get("PATH", "/usr/bin:/bin")}
+            "PATH": wrappers_dir(target, base) + ":" + os.environ.get("PATH", "/usr/bin:/bin"),
+            "QEMU_LD_PREFIX": root}
 
 
 def world_extra(target):

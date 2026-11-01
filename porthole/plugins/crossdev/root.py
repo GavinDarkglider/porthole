@@ -633,6 +633,23 @@ def step_build_stage(runner, job_id, step, log):
     if not argvs:
         log("Nothing to do here.")
         return True
+    # binfmt on for the whole stage when the system is for another CPU, so
+    # the system's programs a cross build runs work (with QEMU_LD_PREFIX)
+    from porthole.updater.ondemand import Helpers, HelperError
+    helpers = Helpers(job_id, ["binfmt"] if env["CHOST"] != env["CBUILD"] else [])
+    try:
+        helpers.start(log)
+    except HelperError as e:
+        log("!! %s (programs built for the system can't run during the cross build)" % e)
+        helpers = Helpers(job_id, [])
+    try:
+        return _run_stage(runner, job_id, step, log, target, stage, env, argvs)
+    finally:
+        helpers.stop(log)
+
+
+def _run_stage(runner, job_id, step, log, target, stage, env, argvs):
+    from porthole.plugins.crossdev import build as bd, emulate
     emulated = set()
     for argv in argvs:
         for attempt in range(6):
