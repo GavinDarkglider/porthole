@@ -617,7 +617,8 @@ def step_build_stage(runner, job_id, step, log):
                     "it" if len(fresh) == 1 else "them"))
             emulated.update(fresh)
             if not _emulate(runner, job_id, step, log, target, env, fresh):
-                log("!! They didn't build in the emulator either (above).")
+                if not (runner.update(job_id) or {}).get("cancel"):
+                    log("!! They didn't build in the emulator either (above).")
                 return False
             env = _build_env(target, log)
             bd.apply_allowed(target, argv, env, log)
