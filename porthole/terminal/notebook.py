@@ -32,6 +32,7 @@ import time
 
 import gi; gi.require_version('Gtk', '3.0')
 from gi.repository import Gdk
+from gi.repository import GLib
 from gi.repository import Gtk
 from gi.repository import Pango
 
@@ -324,6 +325,22 @@ class TerminalNotebook:
         self.user_scrolled[tab] = time.monotonic()
         return False  # let the widget handle it as usual
 
+    def button_down(self, tab):
+        """Whether a mouse button is pressed right now (asked, not
+        remembered: a release outside the view never reaches it, and a
+        remembered "holding" then stayed set for good)"""
+        try:
+            window = self.view[tab].get_window(Gtk.TextWindowType.WIDGET)
+            pointer = window.get_display().get_default_seat().get_pointer()
+            mask = window.get_device_position(pointer)[3]
+        except Exception:
+            return self.user_holding[tab]
+        held = bool(mask & (Gdk.ModifierType.BUTTON1_MASK | Gdk.ModifierType.BUTTON2_MASK
+                            | Gdk.ModifierType.BUTTON3_MASK))
+        if not held:
+            self.user_holding[tab] = False
+        return held
+
     def set_scroll(self, vadjustment, tab):
         """Follow new output while the user keeps the view at the bottom;
         stop when they scroll up"""
@@ -333,11 +350,15 @@ class TerminalNotebook:
                - vadjustment.get_value())
         if gap <= SLIDER_CLOSE_ENOUGH * vadjustment.get_page_size():
             self.auto_scroll[tab] = True
-        elif self.user_holding[tab] or time.monotonic() - self.user_scrolled[tab] < 1.5:
-            # GTK moves the view too while laying it out; that isn't the
-            # user asking to stop following (kinetic scrolling runs on
-            # for a moment after a swipe, hence the grace period)
+        elif self.button_down(tab) or time.monotonic() - self.user_scrolled[tab] < 1.5:
+            # the user moving it (kinetic scrolling runs on for a moment
+            # after a swipe, hence the grace period)
             self.auto_scroll[tab] = False
+        elif self.auto_scroll[tab]:
+            # GTK moved it while laying lines out (measuring long wrapped
+            # lines, a progress line rewritten): back to the bottom now,
+            # not only when the next output arrives
+            GLib.idle_add(lambda: self.keep_at_bottom(vadjustment, tab) and False)
         return
 
     def keep_at_bottom(self, vadjustment, tab):
