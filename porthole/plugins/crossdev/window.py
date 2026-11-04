@@ -11,6 +11,7 @@
 
 import re
 import threading
+import time
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -39,6 +40,10 @@ class ReadinessWindow(Gtk.Window):
         # the main window's install queue: installs are planned and reviewed there
         self.mainwindow = mainwindow
         self.results = []
+        # something was missing when it was checked: once all is there, the
+        # window has done its job and closes
+        self.was_missing = False
+        self.checked = 0.0
         self.set_default_size(720, 520)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=12)
         intro = Gtk.Label(xalign=0, wrap=True, max_width_chars=90)
@@ -75,9 +80,13 @@ class ReadinessWindow(Gtk.Window):
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         self.show_all()
+        # installs from the queue finish later: look again on coming back
+        self.connect("focus-in-event", lambda w, e: (
+            time.monotonic() - self.checked > 10 and self.refresh(), False)[1])
         self.refresh()
 
     def refresh(self):
+        self.checked = time.monotonic()
         for child in self.list.get_children():
             child.destroy()
         arch = self.arch.get_active_id()
@@ -111,6 +120,16 @@ class ReadinessWindow(Gtk.Window):
         self.list.show_all()
         self.all_button.set_visible(sum(bool(self.usable(c.action))
                                         and not self.queued(c.action) for c in results) > 1)
+        if results and all(c.ok for c in results):
+            if self.was_missing:
+                done = Gtk.Label(xalign=0)
+                done.set_markup("<b>Everything this computer needs is set up.</b> "
+                                "This window closes in a moment.")
+                self.list.pack_start(done, False, False, 0)
+                done.show()
+                GLib.timeout_add_seconds(4, lambda: (self.destroy(), False)[1])
+        else:
+            self.was_missing = True
         return False
 
     def usable(self, action):
@@ -316,7 +335,19 @@ class SystemsWindow(Gtk.Window):
         if not name:
             return
         from porthole.plugins.crossdev.settingswin import SystemSettingsWindow
-        SystemSettingsWindow(name, self, on_changed=self.refresh)
+        windows = self.__dict__.setdefault("settings_windows", {})
+        if name in windows:
+            windows[name].present()
+            return
+        window = windows[name] = SystemSettingsWindow(name, self, on_changed=self.refresh)
+        window.connect("destroy", lambda w: windows.pop(name, None))
+
+    def close_settings(self, name):
+        """Its build is queued: the system's settings window has done its job
+        (kept open if it has changes not saved yet)"""
+        window = self.__dict__.get("settings_windows", {}).get(name)
+        if window is not None and not window.dirty():
+            window.destroy()
 
     def build_toolchain(self):
         """Show what its profile allows (worked out as the user), then
@@ -801,6 +832,7 @@ class BuildDialog(Gtk.Dialog):
             if not ok:
                 self.parent_window.error("The build wasn't queued", output)
                 return
+            self.parent_window.close_settings(self.target.name)
             show_job(output)
         run_as_root(service("plugin", "crossdev", "build", self.target.name,
                             json.dumps(changes)), done)

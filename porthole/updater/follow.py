@@ -255,6 +255,9 @@ class Follower:
     def __init__(self, on_close=None):
         self.manager = None
         self.followed = set()
+        # jobs that were still to finish when this window started following
+        # them: only then does it close by itself once they all went well
+        self.watched = set()
         self.on_close = on_close
         from gi.repository import GLib
         # another launch asks us to show the window instead of opening one
@@ -269,16 +272,20 @@ class Follower:
             self.manager = ProcessManager(utils.environment())
             self.manager.job_window()
             self.followed = set()
+            self.watched = set()
         job = find(job_id)
         new_window = not self.followed
         if job and job["id"] not in self.followed:
             self.followed.add(job["id"])
+            if job["status"] in ACTIVE:
+                self.watched.add(job["id"])
             self.manager.add(job["title"], command(job["id"]), lambda: None,
                              "Job runner")
             if new_window:
                 self.manager.window.connect("destroy", self.closed)
         if new_window:
             self.add_paused_bar()
+            self.add_closing_bar()
         self.manager.window.present()
         os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
         with open(PIDFILE, "w") as f:
@@ -327,6 +334,54 @@ class Follower:
             return True
         refresh()
         GLib.timeout_add_seconds(3, refresh)
+
+    CLOSE_AFTER = 10
+
+    def add_closing_bar(self):
+        """Once every job this window watched has finished well and its
+        queue has nothing left: closing in CLOSE_AFTER seconds, unless Keep
+        open. A job that failed or was cancelled keeps it open."""
+        from gi.repository import GLib, Gtk
+        bar = Gtk.InfoBar(message_type=Gtk.MessageType.INFO)
+        label = Gtk.Label(xalign=0, wrap=True)
+        bar.get_content_area().add(label)
+        bar.add_button("Keep open", 1)
+        bar.set_no_show_all(True)
+        box = self.manager.wtree.get_object("vbox3")
+        box.pack_start(bar, False, False, 0)
+        box.reorder_child(bar, 1)
+        manager = self.manager
+        state = {"left": None, "keep": False}
+
+        def keep(widget, response):
+            state["keep"] = True
+            bar.hide()
+        bar.connect("response", keep)
+
+        def tick():
+            if self.manager is not manager or not manager.window_visible:
+                return False
+            jobs = {j["id"]: j for j in (read_json(JOBS_FILE, {}) or {}).get("jobs", [])}
+            watched = [jobs.get(job_id) for job_id in self.watched]
+            finished_well = (bool(watched) and not state["keep"]
+                             and all(j and j["status"] == "done" for j in watched)
+                             and manager.task_completed
+                             and not getattr(manager.process_queue, "process_iter", None))
+            if not finished_well:
+                state["left"] = None
+                bar.hide()
+                return True
+            if state["left"] is None:
+                state["left"] = self.CLOSE_AFTER
+            if state["left"] <= 0:
+                manager.confirm_delete()
+                return False
+            label.set_markup("<b>Finished.</b> This window closes in %d s." % state["left"])
+            label.show()
+            bar.show()
+            state["left"] -= 1
+            return True
+        GLib.timeout_add_seconds(1, tick)
 
     def closed(self, window):
         if running_follower() == os.getpid():
