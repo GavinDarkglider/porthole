@@ -9,6 +9,7 @@
     (at your option) any later version.
 """
 
+import re
 import threading
 
 import gi
@@ -19,6 +20,18 @@ from porthole.plugins.crossdev import checks
 
 ARCHES = ("arm64", "arm", "riscv", "ppc64", "x86", "loong")
 
+
+
+_JOB_ID = re.compile(r"^\d{8}-\d{6}-[a-z-]+-[0-9a-f]{4}$")
+
+
+def show_job(output):
+    """A build the user just started: bring up the job window following it
+    (the root command prints the new job's id last)"""
+    words = (output or "").split()
+    if words and _JOB_ID.match(words[-1]):
+        from porthole.updater.follow import show_in_terminal
+        show_in_terminal(words[-1])
 
 class ReadinessWindow(Gtk.Window):
     def __init__(self, mainwindow=None):
@@ -369,6 +382,8 @@ class SystemsWindow(Gtk.Window):
         def done(ok, output):
             if not ok:
                 self.error("The toolchain build wasn't queued", output)
+                return
+            show_job(output)
         run_as_root(service("plugin", "crossdev", "toolchain", target.name), done)
         return False
 
@@ -422,6 +437,8 @@ class SystemsWindow(Gtk.Window):
         def done(ok, output):
             if not ok:
                 self.error("The system wasn't started over", output)
+                return
+            show_job(output)
         run_as_root(service("plugin", "crossdev", "reset-root", name), done)
 
     def remove_system(self):
@@ -783,5 +800,7 @@ class BuildDialog(Gtk.Dialog):
         def done(ok, output):
             if not ok:
                 self.parent_window.error("The build wasn't queued", output)
+                return
+            show_job(output)
         run_as_root(service("plugin", "crossdev", "build", self.target.name,
                             json.dumps(changes)), done)
