@@ -86,9 +86,8 @@ def set_packages(config, name):
 def packages_of(name, config=None):
     """{name: Package} for a set, for the package view"""
     if config is None and name not in FROM_ROOT_CHECK and name != "smart-live-rebuild":
-        import portage
-        from portage._sets import load_default_config
-        config = load_default_config(portage.settings, portage.db[portage.root])
+        from porthole import backends
+        config = backends.portage_lib.settings.set_config()
     return {cp: db.db.get_package(cp) or Package(cp)
             for cp in sorted(set_packages(config, name))}
 
@@ -112,9 +111,8 @@ class SetListReader(CommonReader):
     def run( self ):
         """fill SETS tree"""
         debug.dprint("READERS: SetListReader(); process id = %d *******************" %os.getpid())
-        import portage
-        from portage._sets import load_default_config
-        config = load_default_config(portage.settings, portage.db[portage.root])
+        from porthole import backends
+        config = backends.portage_lib.settings.set_config()
         names = sorted(n for n in config.getSets() if n not in SKIPPED_SETS)
         grouped = [(group, [n for n in members if n in names]) for group, members in SET_GROUPS]
         known = {n for _group, members in grouped for n in members}

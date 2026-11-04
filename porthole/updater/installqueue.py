@@ -26,6 +26,7 @@ gi.require_version("Gtk", "3.0")
 from gi.repository import GLib, Gtk
 
 from porthole.updater.commands import icon_path
+from porthole.updater.targets import LOCAL
 
 QUEUE_FILE = os.path.join(
     os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state"),
@@ -42,7 +43,8 @@ class InstallQueue:
     """[{"name", "targets": [options and atoms], "requested": [settings]}],
     plus for an install that stopped part way (see resume.py) "resume":
     {"job", "started", "packages", "total"} and "world": the packages to
-    add to the world file"""
+    add to the world file. "system": the updater.targets name it is for,
+    when not this computer (the main window was showing another system)."""
 
     def __init__(self, path=QUEUE_FILE, offered_path=OFFERED_FILE):
         self.path = path
@@ -64,14 +66,25 @@ class InstallQueue:
         for listener in self.listeners:
             listener()
 
-    def add(self, name, targets, requested=()):
+    def add(self, name, targets, requested=(), system=None):
+        system = system if system and system != LOCAL else None
         atoms = [t for t in targets if not t.startswith("-")]
-        # the same packages again replace their earlier entry
+        # the same packages again (for the same system) replace their earlier entry
         self.items = [i for i in self.items
-                      if [t for t in i["targets"] if not t.startswith("-")] != atoms]
-        self.items.append({"name": name, "targets": list(targets),
-                           "requested": list(requested)})
+                      if [t for t in i["targets"] if not t.startswith("-")] != atoms
+                      or i.get("system") != system]
+        item = {"name": name, "targets": list(targets), "requested": list(requested)}
+        if system:
+            item["system"] = system
+        self.items.append(item)
         self.changed()
+
+    def systems(self):
+        """The systems queued items are for, in order (LOCAL: this computer)"""
+        return list(dict.fromkeys(i.get("system") or LOCAL for i in self.items))
+
+    def items_for(self, system=LOCAL):
+        return [i for i in self.items if (i.get("system") or LOCAL) == system]
 
     def prune(self):
         """Drop what unfinished installs have had built since; True if
@@ -120,8 +133,10 @@ class InstallQueue:
         del self.items[index]
         self.changed()
 
-    def clear(self):
-        self.items = []
+    def clear(self, system=None):
+        """Empty the queue, or only what is queued for system"""
+        self.items = [] if system is None else [
+            i for i in self.items if (i.get("system") or LOCAL) != system]
         self.changed()
 
     def combined(self):
@@ -135,7 +150,7 @@ class InstallQueue:
             self.changed()
         options, atoms, requested, lines = [], [], [], set()
         oneshot, world = [], []
-        for item in self.items:
+        for item in self.items_for(LOCAL):
             mine = [t for t in item["targets"] if not t.startswith("-")]
             one = "--oneshot" in item["targets"] or "-1" in item["targets"]
             if item.get("world"):
@@ -154,23 +169,23 @@ class InstallQueue:
                     lines.add(r["line"])
                     requested.append(r)
         world = [a for a in world if a not in oneshot]
-        if oneshot or any(i.get("world") for i in self.items):
+        if oneshot or any(i.get("world") for i in self.items_for(LOCAL)):
             options.append("--oneshot")
         else:
             world = []  # emerge adds them itself
         return options + atoms, requested, world
 
 
-def added_popup(parent, name, count, open_queue, detail=None, title=None):
+def added_popup(parent, name, count, open_queue, detail=None, title=None, for_system=None):
     """A short note that a package went into the queue; it closes itself"""
     dialog = Gtk.MessageDialog(transient_for=parent, modal=False,
                                message_type=Gtk.MessageType.INFO,
                                buttons=Gtk.ButtonsType.NONE,
                                text=title or "%s added to the install queue" % name)
     dialog.set_title("Porthole")
-    dialog.format_secondary_text(detail or (
+    dialog.format_secondary_text(("For %s. " % for_system if for_system else "") + (detail or (
         "%d package%s queued. Nothing is installed until you process the queue "
-        "(the Queue button) and approve the plan." % (count, "s" if count != 1 else "")))
+        "(the Queue button) and approve the plan." % (count, "s" if count != 1 else ""))))
     dialog.add_buttons("Open queue", 1, "OK", Gtk.ResponseType.OK)
     dialog.set_default_response(Gtk.ResponseType.OK)
 
@@ -193,23 +208,28 @@ def added_popup(parent, name, count, open_queue, detail=None, title=None):
 
 
 class InstallQueueWindow(Gtk.Window):
-    def __init__(self, queue, install):
+    def __init__(self, queue, install, install_into=None, shown=None):
         """install(name, targets, requested, on_queued, world) plans and
-        starts the queue; on_queued empties it"""
+        starts this computer's part of the queue; install_into(system,
+        items, on_queued) another system's. shown() is the system the main
+        window shows (its part is processed first). on_queued empties
+        that part."""
         super().__init__(title="Porthole: install queue")
         if icon_path():
             self.set_icon_from_file(icon_path())
         self.set_default_size(720, 360)
         self.queue = queue
         self.install = install
+        self.install_into = install_into
+        self.shown = shown or (lambda: LOCAL)
         self.connect("delete-event", lambda *a: self.hide() or True)
 
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, border_width=10)
         self.heading = Gtk.Label(xalign=0, wrap=True)
         box.pack_start(self.heading, False, False, 0)
-        self.store = Gtk.ListStore(str, str, str)
+        self.store = Gtk.ListStore(str, str, str, str)
         self.view = Gtk.TreeView(model=self.store)
-        for i, title in enumerate(("Package", "Install", "Settings")):
+        for i, title in enumerate(("Package", "Install", "Settings", "For")):
             cell = Gtk.CellRendererText()
             column = Gtk.TreeViewColumn(title, cell, text=i)
             column.set_resizable(True)
@@ -254,7 +274,9 @@ class InstallQueueWindow(Gtk.Window):
             info = item.get("resume")
             if info:
                 name += " (%d of %d left)" % (len(info["packages"]), info["total"])
-            self.store.append([name, " ".join(item["targets"]), settings])
+            self.store.append([name, " ".join(item["targets"]), settings,
+                               system_title(item.get("system") or LOCAL)])
+        self.view.get_column(3).set_visible(self.queue.systems() not in ([], [LOCAL]))
         count = len(self.queue.items)
         self.heading.set_text(
             "Nothing is queued. Emerge, Advanced Emerge and Upgrade add packages here."
@@ -264,14 +286,41 @@ class InstallQueueWindow(Gtk.Window):
             "there."
             % (count, "s" if count != 1 else ""))
         self.install_button.set_sensitive(bool(count))
+        system = self.next_system()
+        self.install_button.set_label(
+            "Process queue..." if system in (None, LOCAL)
+            else "Process queue for %s..." % system_title(system))
 
     def on_remove(self, button):
         model, _iter = self.view.get_selection().get_selected()
         if _iter is not None:
             self.queue.remove(model.get_path(_iter).get_indices()[0])
 
+    def next_system(self):
+        """The part of the queue Process queue works on: the shown system's
+        if anything is queued for it, else the first queued"""
+        systems = self.queue.systems()
+        if not systems:
+            return None
+        return self.shown() if self.shown() in systems else systems[0]
+
     def on_install(self, button):
-        targets, requested, world = self.queue.combined()
-        names = ", ".join(item["name"] for item in self.queue.items)
+        system = self.next_system()
+        if system is None:
+            return
         self.hide()
-        self.install(names, targets, requested, self.queue.clear, world)
+        if system != LOCAL:
+            self.install_into(system, self.queue.items_for(system),
+                              lambda: self.queue.clear(system))
+            return
+        targets, requested, world = self.queue.combined()
+        names = ", ".join(item["name"] for item in self.queue.items_for(LOCAL))
+        self.install(names, targets, requested, lambda: self.queue.clear(LOCAL), world)
+
+
+def system_title(system):
+    if system == LOCAL:
+        return "This computer"
+    from porthole.updater import targets
+    target = targets.load().get(system)
+    return target.title if target else system

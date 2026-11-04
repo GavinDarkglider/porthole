@@ -181,6 +181,7 @@ class MainWindow(PluginHandler):
         self.setup_install_queue()
         self.setup_emerge_choices()
         self.setup_lock_button()
+        self.setup_system_switcher()
         self.warn_unsafe_location()
         # first start: how should updates be run? (until someone answers)
         from porthole.updater.settings import ask_automation
@@ -218,6 +219,74 @@ class MainWindow(PluginHandler):
         button.show()
         self.was_unlocked = False
         SESSION.listeners.append(self.lock_changed)
+
+    def setup_system_switcher(self):
+        """System: this computer, or another system Porthole manages (a
+        crossdev system; later remote machines). The package lists then
+        show that system: what is installed there, its USE flags, its
+        world; Emerge queues installs for it. Shown only once there is
+        another system."""
+        toolbar = self.wtree.get_object("toolbar")
+        item = Gtk.ToolItem()
+        box = Gtk.Box(spacing=6, margin_start=6, margin_end=6)
+        box.pack_start(Gtk.Label(label=_("System:")), False, False, 0)
+        self.system_combo = Gtk.ComboBoxText()
+        self.system_combo.set_tooltip_text(_("The system the package lists show and "
+                                             "Emerge installs into"))
+        box.pack_start(self.system_combo, False, False, 0)
+        item.add(box)
+        queue = self.wtree.get_object("btn_queue")
+        toolbar.insert(item, toolbar.get_item_index(queue) + 2)
+        self.system_item = item
+        self.main_title = self.mainwindow.get_title()
+        self.system_handler = self.system_combo.connect("changed", self.on_system_changed)
+        self.fill_systems()
+        # a system made meanwhile (Systems window) shows up on coming back
+        self.mainwindow.connect("focus-in-event", lambda w, e: (self.fill_systems(), False)[1])
+
+    def fill_systems(self):
+        from porthole.updater import targets
+        shown = PMS_LIB.settings.target_name
+        systems = [t for t in targets.load().values()
+                   if not t.local and os.path.isdir(t.root)]
+        names = [targets.LOCAL] + [t.name for t in systems]
+        if names == getattr(self, "system_names", None):
+            return
+        self.system_names = names
+        self.system_combo.handler_block(self.system_handler)
+        self.system_combo.remove_all()
+        self.system_combo.append(targets.LOCAL, _("This computer"))
+        for t in systems:
+            self.system_combo.append(t.name, t.title)
+        self.system_combo.set_active_id(shown if shown in names else targets.LOCAL)
+        self.system_combo.handler_unblock(self.system_handler)
+        self.system_item.set_visible(len(names) > 1)
+        if shown not in names:  # the system shown was deleted
+            self.on_system_changed(self.system_combo)
+
+    def on_system_changed(self, combo):
+        from porthole.updater import targets
+        target = targets.load().get(combo.get_active_id() or targets.LOCAL)
+        if (target.name if target else targets.LOCAL) == PMS_LIB.settings.target_name:
+            return
+        self.status.set_statusbar2(_("Reading %s...") % (target.title if target else ""))
+        try:
+            PMS_LIB.settings.use_target(target)
+        except Exception as e:
+            debug.dprint("MAINWINDOW: on_system_changed(): %s" % e)
+            PMS_LIB.settings.use_target(None)
+            combo.handler_block(self.system_handler)
+            combo.set_active_id(targets.LOCAL)
+            combo.handler_unblock(self.system_handler)
+            SingleButtonDialog(_("Can't show that system"), self.mainwindow,
+                               _("Porthole couldn't read %s: %s") % (target.title, e),
+                               None, _("OK"))
+        other = PMS_LIB.settings.target
+        self.mainwindow.set_title(self.main_title if other is None else
+                                  "%s: %s" % (self.main_title, other.title))
+        # updates are worked out for this computer (another system is built)
+        self.widget["btn_sync"].set_sensitive(other is None)
+        self.reload_db()
 
     def lock_changed(self):
         """On unlocking, the Sets view's root-only set (@preserved-rebuild)

@@ -726,11 +726,13 @@ class BuildDialog(Gtk.Dialog):
     """What building a system installs, and the changes it needs (this
     computer's only with the user's tick)"""
 
-    def __init__(self, parent, target, plan):
+    def __init__(self, parent, target, plan, owner=None):
+        """owner: what reports errors (error(text, detail)) and has the
+        system's settings window (close_settings), if not parent"""
         super().__init__(title="Porthole: build %s" % target.title, transient_for=parent,
                          modal=True)
         self.set_default_size(720, 560)
-        self.parent_window, self.target, self.plan = parent, target, plan
+        self.parent_window, self.target, self.plan = owner or parent, target, plan
         area = self.get_content_area()
         area.set_border_width(12)
         area.set_spacing(8)
@@ -832,7 +834,118 @@ class BuildDialog(Gtk.Dialog):
             if not ok:
                 self.parent_window.error("The build wasn't queued", output)
                 return
-            self.parent_window.close_settings(self.target.name)
+            close_settings = getattr(self.parent_window, "close_settings", None)
+            if close_settings:
+                close_settings(self.target.name)
             show_job(output)
         run_as_root(service("plugin", "crossdev", "build", self.target.name,
                             json.dumps(changes)), done)
+
+
+# -- installing from Porthole's main window --------------------------------------------
+
+class _Reporter:
+    """error() for a window that isn't one of this plugin's"""
+
+    def __init__(self, window):
+        self.window = window
+
+    def error(self, text, detail=None):
+        dialog = Gtk.MessageDialog(transient_for=self.window, modal=True,
+                                   message_type=Gtk.MessageType.ERROR,
+                                   buttons=Gtk.ButtonsType.CLOSE, text=text)
+        dialog.format_secondary_text(detail or "")
+        dialog.run()
+        dialog.destroy()
+
+
+def merge_queue(target, items):
+    """(world, use, notes): the system's package list and USE flags with
+    the install queue's items added, and what of them a system's list
+    can't hold the way the queue has it"""
+    from portage.dep import Atom
+    from portage.exception import InvalidAtom
+    from porthole.plugins.crossdev import packages as pk
+    world, use, notes = pk.read_world(target), pk.read_use(target), []
+    for item in items:
+        oneshot = "--oneshot" in item["targets"] or "-1" in item["targets"]
+        for word in item["targets"]:
+            if word.startswith("-"):
+                continue
+            try:
+                atom = Atom(word)
+            except InvalidAtom:
+                notes.append("%s: not a package name; left out" % word)
+                continue
+            entry = atom.cp + (":" + atom.slot if atom.slot else "")
+            if atom.operator:
+                notes.append("%s: the system's list holds packages, not versions; it gets "
+                             "the newest version it can build" % word)
+            if oneshot:
+                notes.append("%s: one-shot isn't possible on a system's list; it is added "
+                             "to the list" % entry)
+            if entry not in world:
+                world.append(entry)
+        for setting in item.get("requested") or []:
+            words = setting["line"].split()
+            if setting["kind"] == "use" and len(words) >= 2:
+                try:
+                    cp = Atom(words[0]).cp
+                except InvalidAtom:
+                    continue
+                flags = [f for f in use.get(cp, []) if f.lstrip("-") not in
+                         {w.lstrip("-") for w in words[1:]}]
+                use[cp] = flags + words[1:]
+            else:
+                notes.append("%s (%s) isn't set for a system from here: set it in the "
+                             "system's settings, Files tab" % (setting["line"], setting["kind"]))
+    return world, use, notes
+
+
+def install_into(parent, target, items, on_queued):
+    """The main window's install queue for this system: its packages go on
+    the system's list (one password), then the build is worked out as the
+    user and shown, as Build in the Systems window. The queue's part is
+    emptied once the list has them."""
+    import json
+    world, use, notes = merge_queue(target, items)
+    if notes:
+        dialog = Gtk.MessageDialog(transient_for=parent, modal=True,
+                                   message_type=Gtk.MessageType.QUESTION,
+                                   buttons=Gtk.ButtonsType.NONE,
+                                   text="Installing into %s" % target.title)
+        dialog.format_secondary_text("\n".join(notes))
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Go on", Gtk.ResponseType.OK)
+        answer = dialog.run()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+    from porthole.updater.elevate import run_as_root, service
+    reporter = _Reporter(parent)
+
+    def saved(ok, output):
+        if not ok:
+            reporter.error("The packages weren't added to %s's list" % target.title, output)
+            return
+        on_queued()
+
+        def work():
+            from porthole.plugins.crossdev import build
+            try:
+                plan = build.plan(target)
+                GLib.idle_add(confirm, plan, None)
+            except Exception as e:
+                GLib.idle_add(confirm, None, "%s: %s" % (type(e).__name__, e))
+
+        def confirm(plan, problem):
+            busy.destroy()
+            if problem:
+                reporter.error("Porthole couldn't work out the build", problem)
+            else:
+                BuildDialog(parent, target, plan, owner=reporter)
+            return False
+        from porthole.updater.review import working
+        busy = working(parent, "Working out what building %s needs..." % target.title)
+        threading.Thread(target=work, daemon=True).start()
+    run_as_root(service("plugin", "crossdev", "packages", target.name,
+                        json.dumps({"world": world, "use": use})), saved)

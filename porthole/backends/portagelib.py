@@ -108,7 +108,7 @@ def get_make_conf(want_linelist=False, savecopy=False):
     If savecopy is true, a copy of make.conf is saved in make.conf.bak.
     """
     debug.dprint("PORTAGELIB: get_make_conf()")
-    _file = open(os.path.join(portage.root, portage_const.MAKE_CONF_FILE), "r")
+    _file = open(os.path.join(settings.config_root, portage_const.MAKE_CONF_FILE), "r")
     if savecopy:
         file2 = open(portage_const.MAKE_CONF_FILE + ".bak", "w")
         file2.write(_file.read())
@@ -172,7 +172,7 @@ def set_make_conf(property, add="", remove="", replace="", callback=None):
         remove = " ".join(remove)
     if isinstance(replace, list):
         replace = " ".join(replace)
-    if not os.access(os.path.join(portage.root, portage_const.MAKE_CONF_FILE), os.W_OK):
+    if not os.access(os.path.join(settings.config_root, portage_const.MAKE_CONF_FILE), os.W_OK):
         # Porthole doesn't change make.conf as root: global USE changes go in
         # package.use/00-porthole-global (Settings > System)
         debug.dprint(" * PORTAGELIB: set_make_conf(); refused (make.conf is the user's)")
@@ -882,6 +882,12 @@ class PortageSettings:
             self.user_config_dir
         ) = self._world = self.SystemUseFlags = None
         self.virtuals = self.keys = self.UseFlagDict = None
+        # the system shown (updater.targets): this computer, or another
+        # system's config root and root (a crossdev system's, later a
+        # remote one's), passed to portage instead of changing os.environ,
+        # which the commands Porthole runs inherit
+        self.target = None
+        self.root_env = {}
         if PORTAGE22:  # then use the imported module
             self.my_load_emerge_config = _load_emerge_config
         else:  # use the one copied from the non import-able emerge
@@ -890,17 +896,18 @@ class PortageSettings:
 
     def reset_use_flags(self):
         debug.dprint("PORTAGELIB: Settings.reset_use_flags();")
-        self.SystemUseFlags = portage.settings["USE"].split()
+        self.SystemUseFlags = self.settings["USE"].split()
         # debug.dprint("PORTAGELIB: Settings.reset_use_flags(); SystemUseFlags = " + str(SystemUseFlags))
 
-    def load_emerge_config(self, trees=None):
+    def load_emerge_config(self, trees=None, env=None):
         # Taken from /usr/bin/emerge portage-2.1.2.2  ...Brian  >=portage-2.2* it is import-able
+        env = os.environ if env is None else env
         kwargs = {}
         for k, envvar in (
             ("config_root", "PORTAGE_CONFIGROOT"),
             ("target_root", "ROOT"),
         ):
-            kwargs[k] = os.environ.get(envvar, None)
+            kwargs[k] = env.get(envvar, None)
         trees = portage.create_trees(trees=trees, **kwargs)
         settings = trees["/"]["vartree"].settings
         for myroot in trees:
@@ -916,7 +923,11 @@ class PortageSettings:
     def reset(self):
         """reset remaining run once variables after a sync or other mods"""
         debug.dprint("PORTAGELIB: reset_globals();")
-        self.settings, self.trees, self.mtimedb = self.my_load_emerge_config()
+        if self.root_env:
+            loaded = self.my_load_emerge_config(env=dict(os.environ, **self.root_env))
+        else:
+            loaded = self.my_load_emerge_config()
+        self.settings, self.trees, self.mtimedb = loaded
         self.portdb = self.trees[self.settings["ROOT"]]["porttree"].dbapi
         sqlite_per_thread(self.portdb)
         self.portdir = self.settings.repositories.mainRepoLocation()
@@ -933,6 +944,29 @@ class PortageSettings:
         self.UseFlagDict = get_use_flag_dict(self.portdir)
         self.create_repos()
         return
+
+    def use_target(self, target):
+        """Show another system (an updater.targets.Target; None or the local
+        one: this computer). The caller reloads the package database."""
+        if target is None or target.local:
+            self.target, self.root_env = None, {}
+        else:
+            self.target = target
+            self.root_env = {"PORTAGE_CONFIGROOT": target.config_root, "ROOT": target.root,
+                             "SYSROOT": target.sysroot}
+        self.reset()
+
+    @property
+    def target_name(self):
+        """updater.targets name of the system shown"""
+        from porthole.updater.targets import LOCAL
+        return self.target.name if self.target else LOCAL
+
+    def set_config(self):
+        """portage's set configuration of the system shown"""
+        from portage._sets import load_default_config
+        root = self.settings["EROOT"] if "EROOT" in self.settings else self.settings["ROOT"]
+        return load_default_config(self.settings, self.trees[root])
 
     def create_repos(self):
         # reverse the treemap's key:data for easy name lookup
@@ -954,7 +988,7 @@ class PortageSettings:
         world = []
         try:
             _file = open(
-                os.path.join("/", portage.WORLD_FILE), "r"
+                os.path.join(self.settings["EROOT"], portage.WORLD_FILE), "r"
             )  # "/var/lib/portage/world", "r")
             world = _file.read().split()
             _file.close()

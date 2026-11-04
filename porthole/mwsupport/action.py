@@ -78,6 +78,14 @@ class ActionHandler(CategoryHandler):
             # an install: worked out (and its fixes verified) before it runs
             self.request_install(package_name, targets)
             return True
+        if PMS_LIB.settings.target is not None:
+            SingleButtonDialog(_("Not for this system yet"), self.mainwindow,
+                               _("Porthole shows %s. Installing into it goes through its "
+                                 "install queue; removing packages and other commands work "
+                                 "on this computer only, for now. Choose This computer "
+                                 "under System to run it here.")
+                               % PMS_LIB.settings.target.title, None, _("OK"))
+            return True
         from porthole.updater.elevate import run_as_root, service
         run_as_root(service("submit", "emerge", "--", *tokens),
                     lambda ok, out: self.runner_submitted(package_name, ok, out))
@@ -86,16 +94,19 @@ class ActionHandler(CategoryHandler):
     def request_install(self, package_name, targets, requested=()):
         """Emerge, Advanced Emerge and Upgrade: add to the install queue,
         which is planned and installed as a whole"""
-        self.install_queue.add(package_name, targets, requested)
+        system = PMS_LIB.settings.target
+        self.install_queue.add(package_name, targets, requested,
+                               system=system.name if system else None)
         from porthole.updater.installqueue import added_popup
         added_popup(self.mainwindow, package_name, len(self.install_queue.items),
-                    self.show_install_queue)
+                    self.show_install_queue, for_system=system.title if system else None)
 
     def show_install_queue(self, *widget):
         from porthole.updater.installqueue import InstallQueueWindow
         if self.install_queue_window is None:
-            self.install_queue_window = InstallQueueWindow(self.install_queue,
-                                                           self.plan_install)
+            self.install_queue_window = InstallQueueWindow(
+                self.install_queue, self.plan_install, self.install_into_system,
+                lambda: PMS_LIB.settings.target_name)
         self.install_queue_window.present()
 
     def plan_install(self, package_name, targets, requested, on_queued=None, world=()):
@@ -122,6 +133,28 @@ class ActionHandler(CategoryHandler):
             UpdateAssistant(self.mainwindow, self, plan_file=plan_file,
                             on_queued=on_queued).present_plan()
         plan_as_user(request, planned)
+
+    def install_into_system(self, system, items, on_queued):
+        """The install queue's part for another system: a system built here
+        by the crossdev plugin gets the packages on its list, then its
+        build, worked out and shown as in its Systems window"""
+        from porthole import plugins
+        from porthole.updater import targets
+        target = targets.load().get(system)
+        made_by = None
+        if target is not None and "crossdev" in plugins.enabled():
+            from porthole.plugins.crossdev import roots
+            if system in roots.made_here():
+                made_by = "crossdev"
+        if made_by is None:
+            SingleButtonDialog(_("Can't install there from here"), self.mainwindow,
+                               _("Porthole can install into systems the crossdev plugin "
+                                 "built on this computer; %s isn't one (or the plugin is "
+                                 "off). Its queued packages stay in the queue.")
+                               % (target.title if target else system), None, _("OK"))
+            return
+        from porthole.plugins.crossdev.window import install_into
+        install_into(self.mainwindow, target, items, on_queued)
 
     def install_planned(self, ok, output, on_queued=None):
         if not ok:

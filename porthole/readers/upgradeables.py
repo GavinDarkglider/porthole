@@ -81,7 +81,13 @@ class UpgradableListReader(CommonReader):
         # dependency pins and the world graph included), not a comparison
         # with the newest version of any slot
         from porthole.updater.service import latest_plan
-        plan, _path = latest_plan()
+        from porthole import backends
+        if backends.portage_lib.settings.target is not None:
+            # the plan is this computer's; another system is brought up to
+            # date by building it (its Systems window)
+            plan = {}
+        else:
+            plan, _path = latest_plan()
         plan = plan or {}
         wanted = [m["cp"] for m in plan.get("merge_list") or []]
         wanted += [m["cp"] for m in (plan.get("preserved") or {}).get("merge_list") or []]
