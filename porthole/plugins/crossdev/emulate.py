@@ -27,8 +27,13 @@ import re
 import shutil
 import subprocess
 
-# what the root needs to build in itself (a compiler it has from @system)
-NEEDED = ("sys-devel/binutils", "sys-devel/distcc")
+# what the root needs to build in itself, cross-built first when missing:
+# its linker, distcc to hand compiling here, and portage itself (with
+# Python and the rest it needs). Right after Start over the first package
+# that won't cross-compile can come before @system brought portage in,
+# and emerge wasn't there to run in the chroot. (Its compiler comes with
+# @system before anything can fail.)
+NEEDED = ("sys-devel/binutils", "sys-devel/distcc", "sys-apps/portage")
 _FAILED = re.compile(r"\(([A-Za-z0-9+_.-]+/[A-Za-z0-9+_.:/-]+?)(?::[^,]*)?(?:::[A-Za-z0-9_-]+)?, "
                      r"(?:ebuild|binary) scheduled for merge to '([^']+)'\)")
 _ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07")

@@ -543,14 +543,18 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
     root = os.path.realpath(target.root)
     missing = [cp for cp in emulate.NEEDED if not emulate.installed(root, cp)]
     if missing:
-        # cross-built like everything else: the root's own linker, and distcc
-        argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--noreplace"] + missing
+        # cross-built like everything else: the root's own linker, distcc,
+        # and portage (emerge must exist in the chroot)
+        argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--noreplace", "--usepkg",
+                "--keep-going"] + missing
         log("== emulator: first %s, cross-built, so the system can build in itself"
             % " and ".join(missing))
         log("$ " + " ".join(argv))
-        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
-            log("!! %s didn't build; can't build in the emulator without it"
-                % " ".join(missing))
+        runner.run_logged(job_id, step, log, argv, extra_env=env)
+        still = [cp for cp in emulate.NEEDED if not emulate.installed(root, cp)]
+        if still:
+            log("!! %s didn't build; can't build in the emulator without %s"
+                % (" and ".join(still), "it" if len(still) == 1 else "them"))
             return False
     helpers = Helpers(job_id, ["binfmt", "distcc"])
     try:
