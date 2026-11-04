@@ -52,6 +52,7 @@ from gi.repository import GLib
 from gi.repository import Gtk
 from gi.repository import GObject
 
+import time
 from gettext import gettext as _
 
 from types import (
@@ -78,9 +79,12 @@ from porthole.dialogs.simple import SingleButtonDialog
 
 FUNCTIONTYPES = [FunctionType, MethodType, BuiltinFunctionType, BuiltinMethodType]
 
-class QueueModel(Gtk.ListStore):
+class QueueModel(Gtk.TreeStore):
+    """The queue: top-level rows are queued commands; a row following a
+    runner job has the job's steps as its children (rows with 'step' set),
+    which are only shown, never run, moved or removed"""
     def __init__(self):
-        Gtk.ListStore.__init__(self, GdkPixbuf.Pixbuf,           # hold the status icon
+        Gtk.TreeStore.__init__(self, GdkPixbuf.Pixbuf,           # hold the status icon
                                         GObject.TYPE_STRING,     # package name/ command name
                                         GObject.TYPE_STRING,     # command
                                         GObject.TYPE_INT,        # entry id
@@ -88,7 +92,10 @@ class QueueModel(Gtk.ListStore):
                                         GObject.TYPE_BOOLEAN,    # killed
                                         GObject.TYPE_PYOBJECT,   # callback function
                                         GObject.TYPE_BOOLEAN,    # completed
-                                        GObject.TYPE_INT         # killed_id
+                                        GObject.TYPE_INT,        # killed_id
+                                        GObject.TYPE_DOUBLE,     # started (time.time(), 0 = not yet)
+                                        GObject.TYPE_DOUBLE,     # finished (0 = not yet)
+                                        GObject.TYPE_BOOLEAN     # a job step, not a queue item
                                         )
         self.column = {'icon': 0,
                                 'name':  1,
@@ -98,7 +105,10 @@ class QueueModel(Gtk.ListStore):
                                 'killed': 5,
                                 'callback': 6,
                                 'completed': 7,
-                                'killed_id': 8
+                                'killed_id': 8,
+                                'started': 9,
+                                'finished': 10,
+                                'step': 11
                                 }
 
     def copy(self, path,  mytype = 'tuple'):
@@ -219,7 +229,19 @@ class TerminalQueue:
         column.pack_start(text, expand = True)
         column.add_attribute(text, "text", self.queue_model.column['sender'])
         self.queue_tree.append_column(column)
+        column = Gtk.TreeViewColumn(_("Time"))
+        text = Gtk.CellRendererText()
+        column.pack_start(text, expand = False)
+        column.set_cell_data_func(text, self.time_cell)
+        self.queue_tree.append_column(column)
+        # a followed job's steps open under its row, not under the id
+        self.queue_tree.set_expander_column(self.queue_tree.get_column(1))
         self.queue_tree.set_model(self.queue_model)
+        # queue ids whose job steps were opened once (the user may close them)
+        self.expanded = set()
+        # queue id -> runner job, for rows following "the current job"
+        self.row_jobs = {}
+        GLib.timeout_add_seconds(2, self.refresh_jobs)
         self.new_window = False
         # set the buttons and menu options sensitive state
         self.update_pause_play_state(self.queue_paused)
@@ -279,7 +301,7 @@ class TerminalQueue:
             self.new_window = False
         if self.resume_string is None:
             # add to the queue tab
-            insert_iter = self.queue_model.append() #insert_before(None, None)
+            insert_iter = self.queue_model.append(None)
             self.queue_model.set_data(insert_iter,{'icon':None, 'name':str(package_name), 'command':str(command_string),
                                                                             'id':self.next_id, 'sender':str(sender), 'callback':callback, 'completed': False})
             if self.queue_paused and self.paused_iter == None:
@@ -367,6 +389,8 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: There are pending processes, running now..id = " + str(self.process_id) + ". [" + command + "]" )
         self.task_completed = False
         self.set_process(EXECUTE)
+        self.queue_model.set_value(self.process_iter, self.queue_model.column['started'], time.time())
+        self.queue_model.set_value(self.process_iter, self.queue_model.column['finished'], 0)
         self._run(command, self.process_id)
         self.last_run_iter = self.process_iter.copy()
 
@@ -419,6 +443,8 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: Switching queue items.")
         # get the selected iter
         selected_iter = get_treeview_selection(self.queue_tree)
+        if not selected_iter or self.is_step(selected_iter):
+            return
         # get its path
         path = self.queue_model.get_path(selected_iter)[0]
         # only move up if it's not the first entry,
@@ -457,6 +483,8 @@ class TerminalQueue:
 
     def move_item_top(self, widget):
         debug.dprint("TERM_QUEUE: move_item_top()")
+        if self.is_step(get_treeview_selection(self.queue_tree)):
+            return False
         # pause the queue so it does not get messed up while we are moving things
         paused = self.pause()
         my_paused_id = self.queue_model.get_value(self.paused_iter, self.queue_model.column['id'])
@@ -483,6 +511,8 @@ class TerminalQueue:
 
     def move_item_bottom(self, widget):
         debug.dprint("TERM_QUEUE: move_item_bottom()")
+        if self.is_step(get_treeview_selection(self.queue_tree)):
+            return False
         # pause the queue so it does not get messed up while we are moving things
         paused = self.pause()
         my_paused_id = self.queue_model.get_value(self.paused_iter, self.queue_model.column['id'])
@@ -516,6 +546,8 @@ class TerminalQueue:
         """ Remove the selected item from the queue """
         # get the selected iter
         selected_iter = get_treeview_selection(self.queue_tree)
+        if not selected_iter or self.is_step(selected_iter):
+            return
         path = self.queue_model.get_path(selected_iter)[0]
         # find if this item is still in our process list
         name = get_treeview_selection(self.queue_tree, self.queue_model.column['name'])
@@ -557,6 +589,10 @@ class TerminalQueue:
         debug.dprint("TERM_QUEUE: clicked()")
         # get the selected iter
         selected_iter = get_treeview_selection(self.queue_tree)
+        if self.is_step(selected_iter):
+            # a job's step: shown only, nothing to move or remove
+            self.set_queue_moves([False] * 5)
+            return
         # get its path
         try:
             path = self.queue_model.get_path(selected_iter)[0]
@@ -619,6 +655,9 @@ class TerminalQueue:
                 self.pause()
             return
         self.queue_model.clear()
+        # ids start again from 1
+        self.expanded = set()
+        self.row_jobs = {}
         self.set_queue_moves([False, False, False, False, False, False])
         if self.queue_paused:
             self.paused_id = 1
@@ -729,6 +768,9 @@ class TerminalQueue:
 
     def done( self, result):
         debug.dprint("TERM_QUEUE: done(); result = " + str(result))
+        if self.process_iter and not self.queue_model.get_value(
+                self.process_iter, self.queue_model.column['finished']):
+            self.queue_model.set_value(self.process_iter, self.queue_model.column['finished'], time.time())
         self.set_process(result)
         if self.last_run_iter:
             self.last_run_iter = self.process_iter.copy() #self.queue_model.iter_next(self.last_run_iter)
@@ -743,6 +785,110 @@ class TerminalQueue:
         if self.term.tab_showing[TAB_QUEUE]:
             # update the queue tree
             self.clicked()
+
+    # -- timing, and the steps of followed runner jobs --
+
+    STEP_ICONS = {"running": Gtk.STOCK_EXECUTE, "done": Gtk.STOCK_APPLY,
+                  "failed": Gtk.STOCK_STOP, "cancelled": Gtk.STOCK_CANCEL}
+    STEP_WORDS = {"queued": _("waiting"), "running": _("running"), "done": _("done"),
+                  "failed": _("failed"), "cancelled": _("cancelled"), "not run": _("not run")}
+
+    def is_step(self, _iter):
+        return bool(_iter) and self.queue_model.get_value(_iter, self.queue_model.column['step'])
+
+    @staticmethod
+    def duration(seconds):
+        seconds = int(max(0, seconds))
+        if seconds >= 3600:
+            return "%dh %02dm" % (seconds // 3600, seconds % 3600 // 60)
+        if seconds >= 60:
+            return "%dm %02ds" % (seconds // 60, seconds % 60)
+        return "%ds" % seconds
+
+    def time_cell(self, column, cell, model, _iter, data=None):
+        """Time taken once finished; time so far (with "…") while running"""
+        started = model.get_value(_iter, self.queue_model.column['started'])
+        finished = model.get_value(_iter, self.queue_model.column['finished'])
+        if not started:
+            cell.set_property("text", "")
+        elif finished:
+            cell.set_property("text", self.duration(finished - started))
+        else:
+            cell.set_property("text", self.duration(time.time() - started) + "…")
+
+    def refresh_jobs(self):
+        """Every 2 seconds: rows that follow a runner job get the job's
+        steps (the runner can add steps while it runs) and times; clocks of
+        running rows move on. Keeps itself running (returns True)."""
+        try:
+            self._refresh_jobs()
+        except Exception as e:  # never let the timer die
+            debug.dprint("TERM_QUEUE: refresh_jobs(): %s" % e)
+        return True
+
+    def _refresh_jobs(self):
+        from porthole.updater import follow
+        model, column = self.queue_model, self.queue_model.column
+        rows, running = [], False
+        _iter = model.get_iter_first()
+        while _iter:
+            match = follow._FOLLOW.search(model.get_value(_iter, column['command']) or "")
+            started = model.get_value(_iter, column['started'])
+            if match and started:
+                rows.append((_iter, match.group(1)))
+            if started and not model.get_value(_iter, column['finished']):
+                running = True
+            _iter = model.iter_next(_iter)
+        if rows:
+            jobs = {j["id"]: j for j in (follow.read_json(follow.JOBS_FILE, {}) or {}).get("jobs", [])}
+            for _iter, job_id in rows:
+                queue_id = model.get_value(_iter, column['id'])
+                if not job_id:
+                    # "the current job": the one it found when it started
+                    job_id = self.row_jobs.get(queue_id)
+                    if not job_id:
+                        job = follow.find(None)
+                        job_id = self.row_jobs[queue_id] = job["id"] if job else None
+                job = jobs.get(job_id)
+                if job:
+                    running = self._sync_steps(_iter, queue_id, job) or running
+        if running:
+            self.queue_tree.queue_draw()
+
+    def _sync_steps(self, parent, queue_id, job):
+        """Make the row's children the job's steps, in order; True while
+        the job is still going"""
+        model, column = self.queue_model, self.queue_model.column
+        if job.get("started"):
+            # the job's own times, not the follower's
+            model.set_value(parent, column['started'], job["started"])
+            model.set_value(parent, column['finished'], job.get("finished") or 0)
+        steps = job.get("steps") or []
+        child = model.iter_children(parent)
+        for index, step in enumerate(steps):
+            if child is None:
+                child = model.append(parent)
+                model.set_value(child, column['step'], True)
+                model.set_value(child, column['id'], 0)
+            status = step.get("status", "queued")
+            shown = status in ("running", "done", "failed", "cancelled")
+            icon = self.STEP_ICONS.get(status)
+            model.set_value(child, column['icon'], self.render_icon(icon) if icon else None)
+            model.set_value(child, column['name'], "%d. %s" % (index + 1, step.get("title", "")))
+            model.set_value(child, column['command'], self.STEP_WORDS.get(status, status))
+            model.set_value(child, column['sender'], "")
+            model.set_value(child, column['started'], (step.get("started") or 0) if shown else 0)
+            model.set_value(child, column['finished'],
+                            (step.get("finished") or 0) if status != "running" else 0)
+            child = model.iter_next(child)
+        while child is not None:  # steps the job no longer has
+            if not model.remove(child):
+                child = None
+        active = job.get("status") in ("queued", "running")
+        if steps and queue_id not in self.expanded:
+            self.expanded.add(queue_id)
+            self.queue_tree.expand_row(model.get_path(parent), False)
+        return active
 
     def show_duplicates(self):
         """One dialog for every package that was already queued"""
