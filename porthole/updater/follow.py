@@ -72,7 +72,15 @@ def follow(job_id=None, out=None):
         if size > REPLAY_BYTES:
             log.seek(size - REPLAY_BYTES)
             log.readline()  # from a line start
-            out.write(b"*** (earlier output not shown)\n")
+            start = log.tell()
+            # the terminal's warnings, cautions and messages tabs still get
+            # everything: from the part not shown, its lines for those tabs
+            out.write(b"*** (earlier output not shown; its warnings and messages:)\n")
+            out.flush()
+            log.seek(0)
+            count = earlier_messages(log, start, out)
+            out.write(b"*** (end of the earlier %d lines; the output from here on:)\n" % count)
+            log.seek(start)
         while True:
             data = log.read(65536)
             if data:
@@ -100,6 +108,57 @@ def follow(job_id=None, out=None):
                   b"to remove the ones you tick.\n")
     out.flush()
     return 0 if status == "done" else 1
+
+
+def _filters():
+    """Porthole's terminal's line filters (config/configuration.xml), or
+    None when they can't be found"""
+    import contextlib
+    import io
+    # Porthole's modules print debug lines as they load: not into the log
+    with contextlib.redirect_stdout(io.StringIO()):
+        from porthole import config
+        if getattr(config.Config, "emerge_re", None) is None:
+            here = os.path.dirname(os.path.dirname(os.path.abspath(__file__))) + "/"
+            for data_path in (here, "/usr/share/porthole/"):
+                if os.path.exists(data_path + "config/configuration.xml"):
+                    config.Config.set_path(data_path)
+                    config.Config.load()
+                    break
+            else:
+                return None
+    return config.Config
+
+
+def earlier_messages(log, end, out):
+    """Write the lines of log (from where it is to byte end) that the
+    terminal shows in its warnings, cautions or messages tabs, each after
+    the ">>> Emerging" line it came under. Returns how many."""
+    from porthole.updater.runner import ANSI
+    filters = _filters()
+    if filters is None:
+        return 0
+    tests = (filters.isInfo, filters.isWarning, filters.isCaution, filters.isAction)
+    count, emerging = 0, None
+    while log.tell() < end:
+        raw = log.readline()
+        if not raw:
+            break
+        # what the line ends up as on screen: colours gone, and only the
+        # last of what carriage returns wrote over
+        line = ANSI.sub(b"", raw).rstrip(b"\r\n").rsplit(b"\r", 1)[-1]
+        text = line.decode("utf-8", "replace")
+        if filters.isEmerge(text):
+            emerging = line
+            continue
+        if any(test(text) for test in tests):
+            if emerging is not None:
+                out.write(emerging + b"\n")
+                emerging = None
+            out.write(line + b"\n")
+            count += 1
+    out.flush()
+    return count
 
 
 def _removes(job):
