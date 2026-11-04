@@ -53,6 +53,12 @@ GRACE = 60
 PROGRESS_EVERY = 2.0
 
 ACTIVE = ("queued", "running")
+# a step that failed but added steps to fix it and run it again returns this
+AGAIN = "again"
+# how many times one step may be run again that way
+MAX_ATTEMPTS = 6
+# what a step keeps of itself when it is run again (the rest is from its run)
+_RUN_KEYS = ("status", "started", "finished", "cancel")
 EMERGING = re.compile(rb">>> Emerging (?:binary )?\((\d+) of (\d+)\) (\S+)")
 # terminal escapes (colours, window titles, ESC E and the like), removed
 # before looking for emerge's progress
@@ -579,6 +585,8 @@ class Runner:
     def __init__(self):
         self.lock = None
         self.window_job = False
+        # the step running now (add_steps puts steps after it)
+        self.step_index = None
 
     def run(self):
         os.makedirs(os.path.dirname(RUNNER_LOCK), exist_ok=True)
@@ -708,21 +716,47 @@ class Runner:
                 self.update_step(job_id, index, status="not run")
                 continue
             log("\n== Step %d: %s" % (index + 1, step["title"]))
+            self.step_index = index
             try:
-                ok = getattr(self, "step_" + step["kind"].replace("-", "_"))(
+                result = getattr(self, "step_" + step["kind"].replace("-", "_"))(
                     job_id, step, log)
             except Exception as e:  # report it in the job, don't kill the runner
                 log("!! %s: %s" % (type(e).__name__, e))
-                ok = False
+                result = False
             cancelled = self.update(job_id, pid=None).get("cancel")
-            self.update_step(job_id, index, status="done" if ok else
-                             "cancelled" if cancelled else "failed",
+            # AGAIN: it failed, but added what fixes it and itself again
+            again = result == AGAIN and not cancelled
+            self.update_step(job_id, index, status="cancelled" if cancelled else
+                             "fixed" if again else "done" if result else "failed",
                              finished=time.time())
             if cancelled:
                 status = "cancelled"
-            elif not ok:
+            elif not result:
                 status = "failed"
         return status
+
+    def add_steps(self, job_id, steps, again=None, why=None):
+        """Put steps into the running job right after the step running now,
+        and (again: a dict, maybe empty, of what changes in it) that step
+        once more after them. For a step that failed in a way it can fix:
+        it adds the fix and itself, then returns AGAIN. False when the step
+        has been run again too often already (nothing is added then)."""
+        with jobs_state() as state:
+            job = find_job(state, job_id)
+            index = self.step_index
+            current = job["steps"][index]
+            new = [dict(s, status="queued", added=why or True) for s in steps]
+            if again is not None:
+                attempt = current.get("attempt", 1)
+                if attempt >= MAX_ATTEMPTS:
+                    return False
+                title = current.get("first_title", current["title"])
+                copy = {k: v for k, v in current.items() if k not in _RUN_KEYS}
+                copy.update(again, status="queued", attempt=attempt + 1, first_title=title,
+                            title="%s (again)" % title, added=why or True)
+                new.append(copy)
+            job["steps"][index + 1:index + 1] = new
+        return True
 
     # -- steps: each returns True on success --
 
@@ -797,7 +831,8 @@ class Runner:
         if action is None:
             log("!! The %s plugin has no step %s" % (step.get("plugin"), step.get("action")))
             return False
-        return bool(action(self, job_id, step, log))
+        result = action(self, job_id, step, log)
+        return AGAIN if result == AGAIN else bool(result)
 
     def step_repo_name(self, job_id, step, log):
         """After a sync: if the repository calls itself something else,

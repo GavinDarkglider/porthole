@@ -17,7 +17,8 @@ from porthole.updater.runner import JOBS_FILE
 from porthole.updater.service import read_json
 
 STATUS_WORDS = {"queued": "Waiting", "running": "Running", "done": "Finished",
-                "failed": "Failed", "cancelled": "Cancelled", "not run": "Not run"}
+                "failed": "Failed", "cancelled": "Cancelled", "not run": "Not run",
+                "fixed": "Failed, fixed by the steps after it"}
 
 
 def read_jobs():

@@ -789,9 +789,12 @@ class TerminalQueue:
     # -- timing, and the steps of followed runner jobs --
 
     STEP_ICONS = {"running": Gtk.STOCK_EXECUTE, "done": Gtk.STOCK_APPLY,
-                  "failed": Gtk.STOCK_STOP, "cancelled": Gtk.STOCK_CANCEL}
+                  "failed": Gtk.STOCK_STOP, "cancelled": Gtk.STOCK_CANCEL,
+                  "fixed": Gtk.STOCK_REDO}
     STEP_WORDS = {"queued": _("waiting"), "running": _("running"), "done": _("done"),
-                  "failed": _("failed"), "cancelled": _("cancelled"), "not run": _("not run")}
+                  "failed": _("failed"), "cancelled": _("cancelled"), "not run": _("not run"),
+                  # failed, and added steps that fix it and run it again
+                  "fixed": _("failed, fixed below")}
 
     def is_step(self, _iter):
         return bool(_iter) and self.queue_model.get_value(_iter, self.queue_model.column['step'])
@@ -871,7 +874,7 @@ class TerminalQueue:
                 model.set_value(child, column['step'], True)
                 model.set_value(child, column['id'], 0)
             status = step.get("status", "queued")
-            shown = status in ("running", "done", "failed", "cancelled")
+            shown = status in ("running", "done", "failed", "cancelled", "fixed")
             icon = self.STEP_ICONS.get(status)
             model.set_value(child, column['icon'], self.render_icon(icon) if icon else None)
             model.set_value(child, column['name'], "%d. %s" % (index + 1, step.get("title", "")))

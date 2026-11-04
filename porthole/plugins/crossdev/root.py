@@ -689,24 +689,37 @@ def step_build_stage(runner, job_id, step, log):
 CYCLE_FILE = "zz-porthole-cycle"
 
 
-def _break_cycle(runner, job_id, step, log, target, env, text, done):
-    """emerge stopped on a circular dependency and suggested a USE change
-    (pam -elogind while elogind needs pam): build that one package with
-    it, from a temporary package.use file of the system's, then take the
-    file away; the stage run again rebuilds it with its own flags. True
-    when it did (the caller runs the stage again)."""
-    from porthole.plugins.crossdev import emulate
-    for cpv, flags in emulate.cycle_suggestions(text):
-        if cpv in done:
-            continue
-        done.add(cpv)
-        path = os.path.join(target.portage_dir, "package.use", CYCLE_FILE)
+def _fix_step(step, action, title, **more):
+    """A step that fixes what a stage ran into, for the same system"""
+    return dict({"kind": "plugin", "title": title, "plugin": "crossdev", "action": action,
+                 "name": step.get("name", "")}, **more)
+
+
+def step_break_cycle(runner, job_id, step, log):
+    """emerge stopped on a circular dependency and suggested USE changes
+    (pam -elogind while elogind needs pam): build the first package that
+    builds that way with it, from a temporary package.use file of the
+    system's, then take the file away; the stage, run again next, rebuilds
+    it with its own flags"""
+    from porthole.plugins.crossdev import roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    from porthole.plugins.crossdev import build as bd
+    try:
+        env = _build_env(target, log)
+    except (bd.BuildError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    path = os.path.join(target.portage_dir, "package.use", CYCLE_FILE)
+    for cpv, flags in step.get("suggestions") or []:
         os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
         with open(path, "w") as f:
             f.write("# Porthole: for breaking a circular dependency, only while it builds\n"
                     "=%s %s\n" % (cpv, flags))
-        log("== circular dependency: building %s with USE \"%s\" first (emerge's "
-            "suggestion), then the stage again with its usual flags" % (cpv, flags))
+        log("== building %s with USE \"%s\" (emerge's suggestion); the stage after this "
+            "builds it again with its usual flags" % (cpv, flags))
         argv = ["emerge", "--verbose", "--color=y", "--oneshot", "=" + cpv]
         log("$ " + " ".join(argv))
         try:
@@ -715,46 +728,89 @@ def _break_cycle(runner, job_id, step, log, target, env, text, done):
             os.unlink(path)
         if ok:
             return True
+        if (runner.update(job_id) or {}).get("cancel"):
+            return False
         log("!! %s didn't build that way either" % cpv)
     return False
 
 
+def step_emulate(runner, job_id, step, log):
+    """Build packages that didn't cross-compile inside the system, under
+    qemu (compiling over distcc on this computer)"""
+    from porthole.plugins.crossdev import roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    from porthole.plugins.crossdev import build as bd
+    try:
+        env = _build_env(target, log)
+    except (bd.BuildError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    if _emulate(runner, job_id, step, log, target, env, list(step.get("atoms") or [])):
+        return True
+    if not (runner.update(job_id) or {}).get("cancel"):
+        log("!! They didn't build in the emulator either (above).")
+    return False
+
+
 def _run_stage(runner, job_id, step, log, target, stage, env, argvs):
+    """The stage's emerge commands in turn. When one fails in a way the
+    build can fix, the fix goes into the job as the next step (circular
+    dependency broken; packages built in the emulator), then this stage
+    again from that command: AGAIN. What earlier rounds already fixed comes
+    with the step, so the same fix isn't tried twice."""
     from porthole.plugins.crossdev import build as bd, emulate
-    emulated, cycles = set(), set()
-    for argv in argvs:
-        for attempt in range(6):
-            offset = _log_size(job_id)
-            log("$ " + " ".join(argv))
-            if runner.run_logged(job_id, step, log, argv, extra_env=env):
-                break
-            text = _log_since(job_id, offset)
-            failed = emulate.failed_packages(text, target.root)
-            fresh = [a for a in failed if a not in emulated]
-            if (runner.update(job_id) or {}).get("cancel"):
-                return False
-            if not failed and _break_cycle(runner, job_id, step, log, target, env, text,
-                                           cycles):
-                continue
-            if stage == "base" or not fresh:
-                log("!! Some packages didn't build (above)%s. Starting the build again "
-                    "picks up where it stopped." % (
-                        ", also in the emulator" if failed and not fresh else ""))
-                return False
-            log("== %d package%s didn't cross-compile: %s; building %s in the emulator, "
-                "then this stage again for the rest" % (
-                    len(fresh), "" if len(fresh) == 1 else "s", " ".join(fresh),
-                    "it" if len(fresh) == 1 else "them"))
-            emulated.update(fresh)
-            if not _emulate(runner, job_id, step, log, target, env, fresh):
-                if not (runner.update(job_id) or {}).get("cancel"):
-                    log("!! They didn't build in the emulator either (above).")
-                return False
-            env = _build_env(target, log)
-            bd.apply_allowed(target, argv, env, log)
-        else:
-            log("!! Still failing after several rounds; stopping here.")
+    from porthole.updater.runner import AGAIN
+    emulated, cycles = set(step.get("emulated") or ()), set(step.get("cycles") or ())
+    first = min(int(step.get("start_at") or 0), len(argvs) - 1)
+    if step.get("attempt", 1) > 1:
+        # what the fix built may let the build make changes it can make itself
+        bd.apply_allowed(target, argvs[first], env, log)
+    for index in range(first, len(argvs)):
+        argv = argvs[index]
+        offset = _log_size(job_id)
+        log("$ " + " ".join(argv))
+        if runner.run_logged(job_id, step, log, argv, extra_env=env):
+            continue
+        if (runner.update(job_id) or {}).get("cancel"):
             return False
+        text = _log_since(job_id, offset)
+        failed = emulate.failed_packages(text, target.root)
+        fresh = [a for a in failed if a not in emulated]
+        again = {"start_at": index}
+        if not failed:
+            suggestions = [[cpv, flags] for cpv, flags in emulate.cycle_suggestions(text)
+                           if cpv not in cycles]
+            if suggestions:
+                log("== circular dependency: emerge suggests building %s with other USE "
+                    "flags first. That is the next step, then this stage again."
+                    % " or ".join(c for c, _f in suggestions))
+                again.update(cycles=sorted(cycles | {c for c, _f in suggestions}),
+                             emulated=sorted(emulated))
+                fix = _fix_step(step, "break-cycle", "Break a circular dependency: %s"
+                                % suggestions[0][0], suggestions=suggestions)
+                if runner.add_steps(job_id, [fix], again, why="circular dependency"):
+                    return AGAIN
+                log("!! This stage has been run again too often; stopping here.")
+                return False
+        if stage == "base" or not fresh:
+            log("!! Some packages didn't build (above)%s. Starting the build again "
+                "picks up where it stopped." % (
+                    ", also in the emulator" if failed and not fresh else ""))
+            return False
+        log("== %d package%s didn't cross-compile: %s. Building %s in the emulator is the "
+            "next step, then this stage again for the rest." % (
+                len(fresh), "" if len(fresh) == 1 else "s", " ".join(fresh),
+                "it" if len(fresh) == 1 else "them"))
+        again.update(emulated=sorted(emulated | set(fresh)), cycles=sorted(cycles))
+        fix = _fix_step(step, "emulate", "Build in the emulator: %s" % " ".join(fresh),
+                        atoms=fresh)
+        if runner.add_steps(job_id, [fix], again, why="didn't cross-compile"):
+            return AGAIN
+        log("!! This stage has been run again too often; stopping here.")
+        return False
     return True
 
 
@@ -789,4 +845,5 @@ COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
 STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": step_build_check,
-         "build-stage": step_build_stage}
+         "build-stage": step_build_stage, "emulate": step_emulate,
+         "break-cycle": step_break_cycle}
