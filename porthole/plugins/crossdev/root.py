@@ -470,6 +470,7 @@ def _build_env(target, log):
         bd.write_ldd(target, chost)
         bd.write_bashrc(target, chost)
         bd.link_python_modules(target, log)
+        bd.repair_perl_modules(target, log)
     return bd.environment(target, chost)
 
 
@@ -591,6 +592,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             if emulate.cp_of(atom) in wanted:
                 break
             tools.append(atom)
+        tried = set()  # failed tools the loop below builds in the system
         if tools:
             argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--keep-going",
                     "--buildpkg", "--usepkg", "--noreplace"] + tools
@@ -599,7 +601,6 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             bd.apply_allowed(target, argv, env, log)
             log("== emulator: %d build tool%s needed in the system: cross-building them "
                 "here (binary packages kept)" % (len(tools), "" if len(tools) == 1 else "s"))
-            tried = set()
             for _round in range(4):
                 offset = _log_size(job_id)
                 log("$ " + " ".join(argv))
@@ -621,8 +622,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
                 with emulate.Chroot(target, log) as chroot:
                     runner.run_logged(job_id, step, log, emulate.chroot_argv(root, ["ldconfig"]))
                     inner = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot",
-                                                "--keep-going", "--usepkg", "--noreplace"] + failed,
-                                               inside)
+                                                "--keep-going", "--usepkg"] + failed, inside)
                     log("$ " + " ".join(inner[inner.index("emerge"):]))
                     if not runner.run_logged(job_id, step, log, inner):
                         log("== emulator: not all of them built in the system; the emulator "
@@ -631,10 +631,17 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         with emulate.Chroot(target, log) as chroot:
             argv = emulate.chroot_argv(root, ["ldconfig"])
             runner.run_logged(job_id, step, log, argv)
+            # what failed to cross-compile, built again here even when that
+            # version is installed: emerge wanted it rebuilt (changed USE, a
+            # subslot), and --noreplace left nothing to do (seen: pulseaudio-
+            # daemon going back and forth). Not what the tool loop just built.
+            left = [a for a in atoms if a not in tried]
+            if not left:
+                return True
             argv = chroot.emerge_argv(["--verbose", "--color=y", "--oneshot", "--keep-going",
-                                       "--usepkg", "--noreplace"] + atoms, inside)
+                                       "--usepkg"] + left, inside)
             log("== emulator: building %s in the system itself%s" % (
-                " ".join(atoms), ", compiling here over distcc" if "distcc" in
+                " ".join(left), ", compiling here over distcc" if "distcc" in
                 inside["FEATURES"].split() else ""))
             log("$ " + " ".join(argv[argv.index("emerge"):]))
             return runner.run_logged(job_id, step, log, argv)
@@ -679,19 +686,56 @@ def step_build_stage(runner, job_id, step, log):
         helpers.stop(log)
 
 
+CYCLE_FILE = "zz-porthole-cycle"
+
+
+def _break_cycle(runner, job_id, step, log, target, env, text, done):
+    """emerge stopped on a circular dependency and suggested a USE change
+    (pam -elogind while elogind needs pam): build that one package with
+    it, from a temporary package.use file of the system's, then take the
+    file away; the stage run again rebuilds it with its own flags. True
+    when it did (the caller runs the stage again)."""
+    from porthole.plugins.crossdev import emulate
+    for cpv, flags in emulate.cycle_suggestions(text):
+        if cpv in done:
+            continue
+        done.add(cpv)
+        path = os.path.join(target.portage_dir, "package.use", CYCLE_FILE)
+        os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+        with open(path, "w") as f:
+            f.write("# Porthole: for breaking a circular dependency, only while it builds\n"
+                    "=%s %s\n" % (cpv, flags))
+        log("== circular dependency: building %s with USE \"%s\" first (emerge's "
+            "suggestion), then the stage again with its usual flags" % (cpv, flags))
+        argv = ["emerge", "--verbose", "--color=y", "--oneshot", "=" + cpv]
+        log("$ " + " ".join(argv))
+        try:
+            ok = runner.run_logged(job_id, step, log, argv, extra_env=env)
+        finally:
+            os.unlink(path)
+        if ok:
+            return True
+        log("!! %s didn't build that way either" % cpv)
+    return False
+
+
 def _run_stage(runner, job_id, step, log, target, stage, env, argvs):
     from porthole.plugins.crossdev import build as bd, emulate
-    emulated = set()
+    emulated, cycles = set(), set()
     for argv in argvs:
         for attempt in range(6):
             offset = _log_size(job_id)
             log("$ " + " ".join(argv))
             if runner.run_logged(job_id, step, log, argv, extra_env=env):
                 break
-            failed = emulate.failed_packages(_log_since(job_id, offset), target.root)
+            text = _log_since(job_id, offset)
+            failed = emulate.failed_packages(text, target.root)
             fresh = [a for a in failed if a not in emulated]
             if (runner.update(job_id) or {}).get("cancel"):
                 return False
+            if not failed and _break_cycle(runner, job_id, step, log, target, env, text,
+                                           cycles):
+                continue
             if stage == "base" or not fresh:
                 log("!! Some packages didn't build (above)%s. Starting the build again "
                     "picks up where it stopped." % (

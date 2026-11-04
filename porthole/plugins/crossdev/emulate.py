@@ -66,6 +66,23 @@ def failed_packages(text, root):
     return found
 
 
+_CYCLE_FIX = re.compile(r"^\s*\*?\s*- ([A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+?)(?::\S+)?"
+                        r" \(Change USE: ([^)]+)\)", re.M)
+
+
+def cycle_suggestions(text):
+    """[(cpv, "flags")] emerge suggested for breaking a circular dependency
+    ("It might be possible to break this cycle by applying ... - sys-libs/
+    pam-1.7.2 (Change USE: -elogind)"), in its order, from the last such
+    message in text"""
+    text = _ANSI.sub("", text)
+    start = text.rfind("break this cycle")
+    if start < 0:
+        return []
+    return [(m.group(1), " ".join(m.group(2).split()))
+            for m in _CYCLE_FIX.finditer(text[start:start + 4000])]
+
+
 def installed(root, cp):
     import glob
     return bool(glob.glob(os.path.join(root, "var/db/pkg", cp + "-[0-9]*")))

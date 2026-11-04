@@ -35,6 +35,7 @@
 
 import os
 import re
+import shutil
 import subprocess
 
 WRAPPERS_DIR = "/var/lib/porthole/cross"
@@ -262,11 +263,76 @@ def link_python_modules(target, log=lambda m: None):
     return made
 
 
+def perl_arch(root):
+    """The system's perl architecture folder name (aarch64-linux): the one
+    with its Config.pm, or None (no perl in it yet)"""
+    import glob
+    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/perl5/*/*/Config.pm"))):
+        return os.path.basename(os.path.dirname(path))
+    return None
+
+
+def host_perl_arch():
+    try:
+        return subprocess.run(["perl", "-MConfig", "-e", "print $Config{archname}"],
+                              capture_output=True, text=True, timeout=30).stdout.strip() or None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
+def repair_perl_modules(target, log=lambda m: None, host=None):
+    """Perl modules already installed in this computer's perl folder
+    (vendor_perl/<version>/x86_64-linux) by cross builds: moved into the
+    system's own (aarch64-linux), with a link left at the old place so the
+    packages' file lists stay valid. Also undoes a link the other way (the
+    system's folder pointing at this computer's), keeping what was set
+    aside next to it (<arch>.1)."""
+    import glob
+    root = os.path.realpath(target.root)
+    host = host or host_perl_arch()
+    arch = perl_arch(root)
+    if not host or not arch or host == arch:
+        return 0
+    moved = 0
+    for top in glob.glob(os.path.join(root, "usr/lib*/perl5/*/*")):
+        wrong, right = os.path.join(top, host), os.path.join(top, arch)
+        if not os.path.isdir(top) or not os.path.lexists(wrong) or os.path.islink(wrong):
+            continue
+        if os.path.islink(right):
+            os.unlink(right)
+            aside = right + ".1"
+            if os.path.isdir(aside) and not os.path.islink(aside):
+                os.rename(aside, right)
+        os.makedirs(right, mode=0o755, exist_ok=True)
+        for folder, dirs, files in os.walk(wrong):
+            into = os.path.join(right, os.path.relpath(folder, wrong))
+            os.makedirs(into, exist_ok=True)
+            for name in files + [d for d in dirs if os.path.islink(os.path.join(folder, d))]:
+                source, dest = os.path.join(folder, name), os.path.join(into, name)
+                if os.path.lexists(dest):
+                    continue  # the system's own build of it wins
+                shutil.copy2(source, dest, follow_symlinks=False)
+                if name == ".packlist":
+                    with open(dest) as f:
+                        text = f.read()
+                    with open(dest, "w") as f:
+                        f.write(text.replace("/%s/" % host, "/%s/" % arch))
+                moved += 1
+        shutil.rmtree(wrong)
+        os.symlink(arch, wrong)
+    if moved:
+        log("Moved %d perl module file%s from this computer's perl folder (%s) to the "
+            "system's (%s); a cross build put them there" % (
+                moved, "" if moved == 1 else "s", host, arch))
+    return moved
+
+
 BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
 BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
-def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None):
+def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None,
+                 host_perl=None, target_perl=None):
     """Porthole's block in the system's bashrc: only when it is cross-built"""
     lines = [
         BASHRC_BEGIN,
@@ -283,16 +349,36 @@ def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None):
         "\t# GI_CROSS_LAUNCHER",
         '\texport CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
         '\texport GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root)]
+    body = []
     if host_tag and target_tag and host_tag != target_tag:
-        lines += [
-            "\t# Python C modules get this computer's platform name in a cross build",
-            "\t# (%s); the system's Python only looks for its own (%s)" % (host_tag, target_tag),
-            "\tpost_src_install() {",
-            "\t\tlocal f",
+        body += [
+            "\t\t# Python C modules get this computer's platform name in a cross",
+            "\t\t# build (%s); the system's Python looks for its own (%s)"
+            % (host_tag, target_tag),
             "\t\twhile IFS= read -r -d '' f; do",
             '\t\t\tmv -- "${f}" "${f%%-%s.so}-%s.so" || die' % (host_tag, target_tag),
-            "\t\tdone < <(find \"${ED}\" -type f -name '*.cpython-3*-%s.so' -print0)" % host_tag,
-            "\t}"]
+            "\t\tdone < <(find \"${ED}\" -type f -name '*.cpython-3*-%s.so' -print0)"
+            % host_tag]
+    if host_perl and target_perl and host_perl != target_perl:
+        body += [
+            "\t\t# perl modules with C code go to this computer's perl folder (%s)"
+            % host_perl,
+            "\t\t# in a cross build; the system's perl looks in its own (%s)" % target_perl,
+            "\t\tfor d in \"${ED}\"/usr/lib*/perl5/{vendor_perl,site_perl}/*/%s; do"
+            % host_perl,
+            "\t\t\t[[ -d ${d} && ! -L ${d} ]] || continue",
+            '\t\t\tmkdir -p "${d%%/*}/%s" || die' % target_perl,
+            '\t\t\tcp -a "${d}"/. "${d%%/*}/%s"/ && rm -r "${d}" || die' % target_perl,
+            "\t\tdone",
+            "\t\twhile IFS= read -r -d '' f; do",
+            '\t\t\tsed -i "s:/%s/:/%s/:g" "${f}" || die' % (host_perl, target_perl),
+            "\t\tdone < <(find \"${ED}\" -type f -name .packlist -print0)"]
+    if body:
+        lines += [
+            "\t# Fixed when the package is merged, so binary packages made before",
+            "\t# (with the wrong names) are fixed as they are installed too",
+            "\tpre_pkg_preinst() {",
+            "\t\tlocal d f"] + body + ["\t}"]
     lines += ["fi", BASHRC_END]
     return "\n".join(lines)
 
@@ -308,7 +394,7 @@ def write_bashrc(target, chost, base=None):
         text = ""
     root = os.path.realpath(target.root)
     block = bashrc_block(chost, root, wrappers_dir(target, base), host_multiarch(),
-                         python_multiarch(root))
+                         python_multiarch(root), host_perl_arch(), perl_arch(root))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
         text = before + block + rest.split(BASHRC_END, 1)[1]
