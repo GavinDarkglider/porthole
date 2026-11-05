@@ -54,6 +54,9 @@ VERIFY_ARGS = ["--autounmask=n", "--backtrack=50"]
 # updated as their own stage before anything else
 TOOLCHAIN = ("sys-devel/binutils", "sys-kernel/linux-headers", "sys-libs/glibc",
              "sys-libs/musl", "sys-devel/gcc")
+# updated on its own before anything else: a new portage may be needed to
+# read the ebuilds of the rest (new EAPIs), and portage asks for it first
+PORTAGE = "sys-apps/portage"
 # programs still linked to libraries an update replaced
 PRESERVED_ARGS = ["--oneshot", "@preserved-rebuild"]
 # rounds of removing what holds the update back
@@ -696,21 +699,6 @@ class Analyzer:
                          + ["=" + cpv for cpv in tc["packages"]]],
             "verified": tc.get("verified", False),
         }]
-        gcc = tc.get("gcc") or {}
-        if gcc.get("switch_to") and "gcc-switch" not in self.choices["decline"]:
-            stages.append({
-                "key": "gcc-switch",
-                "title": "Switch from GCC %s to GCC %s" % (gcc["current_major"], gcc["major"]),
-                "approval": True,
-                "why": "Portage never switches to a new major GCC version by itself. "
-                       "The stages after this one build with the new compiler.",
-                "commands": [
-                    ["gcc-config", gcc["switch_to"]],
-                    ["env-update"],
-                    ["emerge", "--oneshot", "dev-build/libtool"],
-                ],
-                "verified": "after previous stage",
-            })
         return stages
 
     def toolchain_notes(self, tc, system):
@@ -718,34 +706,114 @@ class Analyzer:
         if tc.get("libc"):
             notes.append("The C library is being updated. Programs that are already running "
                          "keep using the old one until restarted, so reboot when convenient.")
-        gcc = tc.get("gcc") or {}
-        if gcc.get("switch_to"):
-            modules = system.get("module_packages") or []
-            if modules:
-                notes.append(
-                    "These packages install kernel modules: %s. Kernel modules must be "
-                    "built with the same compiler as the kernel, so after switching GCC "
-                    "rebuild your kernel, then run: emerge @module-rebuild"
-                    % ", ".join(modules))
-            notes.append("Once everything works with GCC %s you can remove GCC %s: "
-                         "emerge --depclean sys-devel/gcc:%s"
-                         % (gcc["major"], gcc["current_major"], gcc["current_major"]))
-            flags = " ".join((system.get("build_flags") or {}).values())
-            lto = "-flto" in flags
-            full_rebuild = {
-                "recommended": lto,
-                "reason": (
-                    "Your build flags use -flto. LTO objects in static libraries built "
-                    "by GCC %s can't be read by GCC %s, so rebuilding everything is "
-                    "recommended." % (gcc["current_major"], gcc["major"])
-                    if lto else
-                    "Not required: packages built with GCC %s keep working. Only worth it "
-                    "if you want everything built by the new compiler." % gcc["current_major"]
-                ),
-                "installed_count": system.get("installed_count"),
-                "commands": [["emerge", "--emptytree", "--keep-going"] + self.options() + ["@world"]],
-            }
         return notes, full_rebuild
+
+    # -- portage first -----------------------------------------------------
+
+    def portage_stage(self, merge, fixes, temp_use, verified):
+        """Portage updated on its own before the rest, as portage itself asks
+        (emerge --oneshot sys-apps/portage: not --deep, its dependencies'
+        own updates come with the rest)"""
+        options = self.root_options() + [o for o in self.binpkg_options()]
+        stage = {
+            "title": "Update Portage first: " + merge["cpv"],
+            "why": "A new Portage can be needed to read the rest of the update "
+                   "(newer ebuild formats), so it is installed on its own first.",
+            "commands": [["emerge", "--oneshot"] + options + ["=" + merge["cpv"]]],
+            "verified": False,
+        }
+        if verified:
+            self.log("Verifying the Portage stage on its own...")
+            check = self.verify(fixes, temp_use, ["--oneshot"] + options + ["=" + merge["cpv"]])
+            stage["verified"] = bool(check.get("success"))
+        return stage
+
+    # -- a new profile or compiler ------------------------------------------
+
+    def switch_offers(self, merges, system, fixes, temp_use):
+        """(offers for the review, stages of the ones chosen, the check of
+        the full rebuild or None). Only for this computer's world update."""
+        from porthole.updater import switches
+        if self.config_root != "/" or self.target_root() != "/" \
+                or "@world" not in self.targets:
+            return [], [], None
+        try:
+            gcc = switches.gcc_offer(self.current_gcc(), system.get("chost"), merges)
+        except Exception as e:
+            self.log("Couldn't check for a new GCC: %s" % e)
+            gcc = None
+        try:
+            profile = switches.profile_offer("/")
+            if profile and not switches.eselect_profile_ok(profile["eselect"]):
+                profile = None
+        except Exception as e:
+            self.log("Couldn't check for a new profile: %s" % e)
+            profile = None
+        if not gcc and not profile:
+            return [], [], None
+        try:
+            estimate = switches.rebuild_estimate()
+        except Exception:
+            estimate = None
+        offers, chosen = [], {}
+        for kind, offer in (("profile", profile), ("gcc", gcc)):
+            if not offer:
+                continue
+            key = switches.offer_key(kind, offer)
+            accepted = key in self.choices["accept"] and key not in self.choices["decline"]
+            if accepted:
+                chosen[kind] = offer
+            if kind == "gcc":
+                title = "Switch from GCC %d to GCC %d" % (offer["current_major"], offer["major"])
+                why = ["GCC %d is %s, but GCC %d is still the one selected: portage never "
+                       "switches to a new major version by itself." % (
+                           offer["major"], "available to install" if offer["install"]
+                           else "installed", offer["current_major"])]
+                modules = system.get("module_packages") or []
+                if modules:
+                    why.append("These install kernel modules, which must be built by the "
+                               "kernel's compiler: %s. Rebuild your kernel with GCC %d "
+                               "afterwards, then run emerge @module-rebuild."
+                               % (", ".join(modules), offer["major"]))
+                why.append("Once everything works you can remove GCC %d: emerge --depclean "
+                           "sys-devel/gcc:%d" % (offer["current_major"], offer["current_major"]))
+            else:
+                title = "Switch the profile from %s to %s" % (offer["from"], offer["to"])
+                why = (["Your profile is deprecated; Gentoo names %s as its replacement."
+                        % offer["to"]] if offer["deprecated"] else
+                       ["A newer version of your profile is available."])
+                if offer["instructions"]:
+                    why.append("Gentoo's notes for it:\n" + offer["instructions"])
+                if system.get("news_unread") or news_unread():
+                    why.append("Read the unread news items first (eselect news read): "
+                               "profile changes come with instructions there.")
+            offers.append({"kind": kind, "key": key, "title": title, "why": why,
+                           "accepted": accepted, "rebuild": estimate,
+                           "eselect": offer.get("eselect"), "to": offer.get("to"),
+                           "major": offer.get("major")})
+        if not chosen:
+            return offers, [], None
+        options = self.root_options()
+        stages = switches.stages(chosen.get("profile"), chosen.get("gcc"), options,
+                                 switches.libc_installed())
+        # the full rebuild, worked out now (with the new profile when switching)
+        self.log("Verifying the full rebuild after the switch...")
+        args = ["--emptytree", "--usepkg=n", "--getbinpkg=n"] + options + ["@world"]
+        with ScratchConfig(self.config_root) as scratch:
+            for fix in fixes:
+                scratch.add_lines(fix["kind"], [fix["line"]])
+            if temp_use:
+                scratch.add_lines("use", list(temp_use), TEMP_NAME)
+            if chosen.get("profile"):
+                link = os.path.join(scratch.portage_dir, "make.profile")
+                if os.path.lexists(link):
+                    os.unlink(link)
+                os.symlink(os.path.join(chosen["profile"]["profiles_dir"],
+                                        chosen["profile"]["to"]), link)
+            check = run_worker(VERIFY_ARGS + self.world_args(args), scratch.root)
+        stages[-1]["verified"] = bool(check.get("success"))
+        stages[-1]["count"] = len(check.get("merge_list") or [])
+        return offers, stages, check
 
     # -- old libraries ----------------------------------------------------
 
@@ -1408,6 +1476,11 @@ class Analyzer:
                 stages = []  # nothing left after the toolchain stage
             stages = self.toolchain_stages(tc) + stages
             plan["notes"], plan["full_rebuild"] = self.toolchain_notes(tc, system)
+        merge = next((m for m in plan["merge_list"] if m["cp"] == PORTAGE), None)
+        if merge:
+            if len(plan["merge_list"]) == 1:
+                stages = []  # nothing else to update
+            stages = [self.portage_stage(merge, fixes, temp_use, verified)] + stages
         if temp_use:
             # the temporary USE changes are in place from the first stage on
             stages[0]["config"] = {"use": temp_use, "file": TEMP_NAME}
@@ -1422,6 +1495,13 @@ class Analyzer:
         plan["held_by_you"] += self.follow_on_holds
         plan["missing_world"] = [w for w in result.get("missing_world") or []
                                  if w not in {r["cp"] for r in self.removed}]
+
+        # a new profile or compiler, if chosen: after the update, before the rest
+        plan["offers"], switch_stages, switch_check = self.switch_offers(
+            plan["merge_list"], system, fixes, temp_use)
+        stages += switch_stages
+        if switch_check is not None and not switch_check.get("success") and verified:
+            verified, check = False, switch_check
 
         live = self.live_changes(fixes, temp_use)
         plan["live"] = live
@@ -1461,7 +1541,7 @@ class Analyzer:
             plan["remaining"] = remaining
             plan["verify_error"] = check.get("error")
 
-        nothing = not (plan["merge_list"] or rebuilds or lives or removing)
+        nothing = not (plan["merge_list"] or rebuilds or lives or removing or switch_stages)
         if nothing and plan["held_back"]:
             plan["status"] = "needs-help"  # not up to date: updates are stuck
         elif nothing:
@@ -1474,6 +1554,11 @@ class Analyzer:
             plan["status"] = "ready"
         plan["seconds"] = round(time.monotonic() - started, 1)
         return plan
+
+
+def _needs_approval(stage):
+    """An approval stage other than a switch's (that one was chosen)"""
+    return bool(stage.get("approval")) and not str(stage.get("key", "")).startswith("switch-")
 
 
 # -- approving a plan made by someone else ------------------------------------
@@ -1530,7 +1615,10 @@ def format_report(plan):
                  "Ready to remove packages nothing needs any more.",
         "needs-approval": "%d updates; %d change(s) need your approval (verified to work)."
                           % (len(merges), len(plan["fixes"]) + len(plan.get("cycles_broken") or [])
-                             + sum(1 for st in plan["stages"] if st.get("approval"))),
+                             + sum(1 for st in plan["stages"] if _needs_approval(st)))
+                          if plan["fixes"] or plan.get("cycles_broken") or any(
+                              _needs_approval(st) for st in plan["stages"]) else
+                          "%d updates, with the switch you chose." % len(merges),
         "needs-help": "%d updates; could not find a verified solution automatically."
                       % (len(merges) + len(rebuilds)) if not plan.get("verified", True) else
                       "%d updates; fix the problem(s) below before building."
@@ -1621,14 +1709,11 @@ def format_report(plan):
 
     for note in plan.get("notes") or []:
         out.append("\nNote: " + note)
-    full = plan.get("full_rebuild")
-    if full:
-        out.append("\nOptional full rebuild (%s, %s installed packages):"
-                   % ("recommended" if full["recommended"] else "not required",
-                      full.get("installed_count", "?")))
-        out.append("  " + full["reason"])
-        for command in full["commands"]:
-            out.append("  $ " + " ".join(command))
+    for offer in plan.get("offers") or []:
+        out.append("\n%s%s (choice %s, rebuilds everything):" % (
+            offer["title"], " - chosen" if offer["accepted"] else "", offer["key"]))
+        for line in offer["why"]:
+            out.append("  " + line.replace("\n", "\n  "))
 
     if status == "needs-help" and not plan.get("verified", True):
         out.append("\nStill unresolved with the changes above applied:")
@@ -1691,7 +1776,7 @@ def summarize(plan):
     status = plan.get("status")
     count = len(merges) + len(rebuilds) + len(lives)
     changes = (len(plan.get("fixes") or []) + len(plan.get("cycles_broken") or [])
-               + sum(1 for s in plan.get("stages") or [] if s.get("approval")))
+               + sum(1 for s in plan.get("stages") or [] if _needs_approval(s)))
     problems = [c for c in plan.get("checks") or [] if c["severity"] == "error"]
     if status == "ready" and not count:
         title = "Remove packages nothing needs"
@@ -1717,7 +1802,8 @@ def summarize(plan):
     elif status == "needs-approval":
         title = "%d updates available" % count
         body = ["%d change%s need%s your approval first (already tested to work)."
-                % (changes, "s" if changes != 1 else "", "" if changes != 1 else "s")]
+                % (changes, "s" if changes != 1 else "", "" if changes != 1 else "s")
+                ] if changes else ["No configuration changes are needed."]
     elif status == "needs-help" and problems:
         title = "%d updates need attention" % count
         body = ["Fix this first or the build will fail: %s."
@@ -1743,9 +1829,9 @@ def summarize(plan):
     held = len(plan.get("held_back") or [])
     if held and status in ("ready", "needs-approval"):
         body.append("%d more update%s held back." % (held, "s are" if held != 1 else " is"))
-    gcc = (plan.get("toolchain") or {}).get("gcc") or {}
-    if gcc.get("switch_to"):
-        body.append("Includes a new compiler: GCC %s." % gcc["major"])
+    for offer in plan.get("offers") or []:
+        body.append(("Includes: %s." if offer["accepted"] else "Can be chosen: %s.")
+                    % offer["title"])
     if plan.get("news_unread"):
         body.append("%d unread news item%s." % (plan["news_unread"],
                                                 "s" if plan["news_unread"] != 1 else ""))

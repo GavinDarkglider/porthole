@@ -1810,7 +1810,8 @@ def submit_binpkg_job(action):
 
 # -- choices -------------------------------------------------------------------
 
-_STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$")
+_STAGE_KEY = re.compile(r"^(remove|replace|depclean):[A-Za-z0-9+_.-]+/[A-Za-z0-9+_-]+$|^gcc-switch$"
+                        r"|^switch-gcc:\d+$|^switch-profile:[A-Za-z0-9+_.-]+(/[A-Za-z0-9+_.-]+)*$")
 
 
 def set_choices(text):

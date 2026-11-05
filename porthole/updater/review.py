@@ -225,6 +225,7 @@ class UpdateAssistant(Gtk.Window):
             self._held_back(plan)
             self._stages(plan)
             self._notes(plan)
+        self._offers(plan)
         self._held_by_you(plan)
         self._left_by_auto(plan)
         self._unneeded(plan)
@@ -259,7 +260,9 @@ class UpdateAssistant(Gtk.Window):
 
     def _approvals(self, plan):
         fixes = plan.get("fixes") or []
-        approvals = [s for s in plan.get("stages") or [] if s.get("approval")]
+        # a switch's stages are chosen in their own section (_offers)
+        approvals = [s for s in plan.get("stages") or [] if s.get("approval")
+                     and not str(s.get("key", "")).startswith("switch-")]
         if not fixes and not approvals:
             return
         box, inner = _section("Changes that need your approval")
@@ -294,6 +297,45 @@ class UpdateAssistant(Gtk.Window):
             inner.pack_start(_label(
                 "Temporarily %s to break the circular dependency %s"
                 % (cycle["temp_use"], " → ".join(cycle["cycle"]))), False, False, 0)
+        self.content.pack_start(box, False, False, 0)
+
+    def _offers(self, plan):
+        """A new profile or compiler, to choose; switching rebuilds everything"""
+        offers = plan.get("offers") or []
+        if not offers:
+            return
+        box, inner = _section("New profile or compiler")
+        inner.pack_start(_label(
+            "Gentoo never switches these by itself. Choosing one adds the switch after "
+            "the update, then builds every package again with it (emerge --emptytree "
+            "@world, no binary packages)."), False, False, 0)
+        rebuild = next((o["rebuild"] for o in offers if o.get("rebuild")), None)
+        if rebuild:
+            hours = rebuild["seconds"] / 3600.0
+            text = "Building everything again: %d packages" % rebuild["packages"]
+            if rebuild["seconds"]:
+                text += ", about %s from how long they took last time (emerge.log)" % (
+                    "%.0f hours" % hours if hours >= 2 else "%.0f minutes" % (hours * 60))
+                if rebuild["unknown"]:
+                    text += ", plus %d with no build recorded" % rebuild["unknown"]
+            inner.pack_start(_label(text + "."), False, False, 0)
+        full = next((s for s in plan.get("stages") or []
+                     if str(s.get("key", "")).startswith("switch-")
+                     and "--emptytree" in s["commands"][-1]), None)
+        for offer in offers:
+            item = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2, margin_start=12)
+            item.pack_start(self._choice(_label(offer["title"], bold=True), "accept",
+                                         offer["key"]), False, False, 0)
+            for line in offer["why"]:
+                item.pack_start(_label(line, selectable=True, margin_start=28),
+                                False, False, 0)
+            inner.pack_start(item, False, False, 0)
+        if full:
+            inner.pack_start(_label(
+                "Checked: the full rebuild works out (%d packages)." % full.get("count", 0)
+                if full.get("verified") else
+                "The full rebuild doesn't work out as things are (see above); untick the "
+                "switch to update without it."), False, False, 0)
         self.content.pack_start(box, False, False, 0)
 
     def _held_back(self, plan):
@@ -364,7 +406,9 @@ class UpdateAssistant(Gtk.Window):
             kind, _sep, cp = key.partition(":")
             text = {"remove": "Keep %s installed" % cp,
                     "replace": "Keep %s rather than let an update replace it" % cp,
-                    "gcc-switch": "Stay on the current GCC"}.get(kind, key)
+                    "gcc-switch": "Stay on the current GCC",
+                    "switch-gcc": "Stay on the current GCC",
+                    "switch-profile": "Stay on the current profile"}.get(kind, key)
             inner.pack_start(self._choice(_label(text), "decline", key), False, False, 0)
         inner.pack_start(_label("Untick to offer the update again."), False, False, 0)
         self.content.pack_start(box, False, False, 0)

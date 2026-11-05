@@ -54,7 +54,8 @@ def refusals(plan, allow_testing=False):
             found["reject_fixes"].append(fix["line"])
             seen[fix["line"]] = {"type": "fix", **fix}
     for stage in plan.get("stages") or []:
-        if stage.get("approval") and stage.get("key"):
+        if stage.get("approval") and stage.get("key") and stage["key"] not in seen:
+            # a switch has several stages under one key: the first names it
             found["decline"].append(stage["key"])
             seen[stage["key"]] = {"type": "stage", **stage}
     return found, seen
@@ -122,6 +123,11 @@ def _refused_text(item, portage_dir="/etc/portage"):
                     "so it is always your decision.",
                     "Open Updates and click Check now: the switch is offered there "
                     "for you to approve.")
+        if key.startswith(("switch-gcc:", "switch-profile:")):
+            return ("Left it as it is: %s" % item["title"],
+                    "Switching the profile or compiler rebuilds everything, so it is "
+                    "always your decision.",
+                    "Open Updates: the switch is offered there for you to choose.")
         if key.startswith("remove:"):
             return ("Did not remove %s; what it holds back stays at its installed "
                     "version." % key.split(":", 1)[1],
