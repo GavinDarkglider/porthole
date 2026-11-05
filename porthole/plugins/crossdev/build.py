@@ -39,7 +39,6 @@ import shutil
 import subprocess
 
 WRAPPERS_DIR = "/var/lib/porthole/cross"
-TOOLS = ("gcc", "g++", "cc", "c++", "cpp", "gfortran", "ld", "ld.bfd")
 BASE = ("sys-kernel/linux-headers", "sys-libs/glibc")
 HOST_FILE = "porthole-cross-%s"
 ROOT_FILE = "00-porthole-build"
@@ -67,24 +66,69 @@ def wrappers_dir(target, base=None):
     return os.path.join(base or WRAPPERS_DIR, target.name, "bin")
 
 
-def write_wrappers(target, chost, base=None, search="/usr/bin"):
-    """The compiler wrappers adding --sysroot=<root>; returns their folder"""
+# the system's programs that are given its root as their sysroot (the rest
+# of a toolchain, ar or strip, gets no --sysroot)
+_SYSROOT_TOOL = re.compile(r"^(gcc|g\+\+|cc|c\+\+|cpp|gfortran|ld(\.bfd|\.gold)?)(-[0-9.]+)?$")
+
+
+def write_wrappers(target, chost, base=None, search="/usr/bin", toolchain=None):
+    """The system's toolchain programs under its own names (<chost>-gcc,
+    <chost>-ar, ...), each running the toolchain's (toolchain: its tuple,
+    by default the system's CHOST), compilers and linkers with
+    --sysroot=<root>. Wrappers of programs the toolchain doesn't have are
+    taken away. Returns their folder."""
     directory = wrappers_dir(target, base)
     os.makedirs(directory, mode=0o755, exist_ok=True)
     root = os.path.realpath(target.root)
-    for tool in TOOLS:
-        real = os.path.join(search, "%s-%s" % (chost, tool))
-        path = os.path.join(directory, "%s-%s" % (chost, tool))
-        if not os.path.exists(real):
-            if os.path.exists(path):
-                os.unlink(path)
+    toolchain = toolchain or chost
+    prefix = toolchain + "-"
+    wanted = set()
+    for name in sorted(os.listdir(search)) if os.path.isdir(search) else []:
+        real = os.path.join(search, name)
+        if not name.startswith(prefix) or not os.access(real, os.X_OK) or os.path.isdir(real):
             continue
+        if os.path.basename(os.path.realpath(real)).startswith("cross-"):
+            continue  # crossdev's helpers (emerge, pkg-config, ...), not the toolchain's
+        tool = name[len(prefix):]
+        path = os.path.join(directory, "%s-%s" % (chost, tool))
+        wanted.add(path)
+        sysroot = " --sysroot=%s" % root if _SYSROOT_TOOL.match(tool) else ""
         with open(path + ".new", "w") as f:
-            f.write("#!/bin/sh\n# Porthole: %s for the system in %s (its root is its sysroot)\n"
-                    'exec %s --sysroot=%s "$@"\n' % (tool, root, real, root))
+            f.write("#!/bin/sh\n# Porthole: %s for the system in %s (toolchain %s)\n"
+                    'exec %s%s "$@"\n' % (tool, root, toolchain, real, sysroot))
         os.chmod(path + ".new", 0o755)
         os.replace(path + ".new", path)
+    # pkg-config for the system: crossdev's generic one works out the
+    # system from CHOST and SYSROOT (portage sets both), whatever toolchain
+    cross_pkg_config = os.path.join(search, "cross-pkg-config")
+    if os.path.exists(cross_pkg_config):
+        path = os.path.join(directory, chost + "-pkg-config")
+        if os.path.lexists(path) and os.path.realpath(path) != cross_pkg_config:
+            os.unlink(path)
+        if not os.path.lexists(path):
+            os.symlink(cross_pkg_config, path)
+        wanted.add(path)
+    for name in os.listdir(directory):
+        path = os.path.join(directory, name)
+        if name.startswith(chost + "-") and path not in wanted and not name.endswith(".new"):
+            os.unlink(path)
     return directory
+
+
+def distcc_names(chost, masquerade="/usr/lib/distcc"):
+    """distccd only runs compilers named in its masquerade folder: the
+    system's compiler names (its builds in the emulator ask for those),
+    made there if missing. Returns the names made."""
+    made = []
+    if not os.path.isdir(masquerade):
+        return made
+    distcc = shutil.which("distcc") or "/usr/bin/distcc"
+    for tool in ("gcc", "g++", "cc", "c++", "cpp"):
+        link = os.path.join(masquerade, "%s-%s" % (chost, tool))
+        if not os.path.lexists(link):
+            os.symlink(distcc, link)
+            made.append(os.path.basename(link))
+    return made
 
 
 def qemu_name(chost):

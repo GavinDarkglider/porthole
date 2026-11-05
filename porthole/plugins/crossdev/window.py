@@ -439,29 +439,46 @@ class SystemsWindow(Gtk.Window):
             dialog.run()
             dialog.destroy()
             return False
-        rows = tc.compare(resolved)
-        if all(built == version for _t, version, _r, built in rows):
-            text = "The toolchain for %s is built and up to date." % target.title
-            build = "Build it again"
+        existing = tc.find(resolved)
+        tuple_ = existing or tc.new_name(resolved)
+        rows = tc.compare(resolved, tuple_=tuple_)
+        sharing = [n for n in tc.users(tuple_) if n != target.name] if existing else []
+        again = False
+        if existing:
+            text = "%s can use the toolchain %s" % (target.title, existing)
+            build = "Use it"
         else:
-            text = "Build the toolchain for %s?" % target.title
+            text = "Build a toolchain for %s?" % target.title
             build = "Build it"
         lines = ["%s %s (from %s)%s" % (title, version, repo,
                                         "" if built is None else
-                                        ", built now" if built == version else
-                                        ", %s built now" % built)
+                                        ", built" if built == version else
+                                        ", %s built" % built)
                  for title, version, repo, built in rows]
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
                                    message_type=Gtk.MessageType.QUESTION,
                                    buttons=Gtk.ButtonsType.NONE, text=text)
-        dialog.format_secondary_text(
-            "Cross compiler for %s, the versions %s's profile allows:\n\n%s\n\n"
-            "crossdev builds it as a job; it takes an hour or more." % (
-                resolved["tuple"], target.title, "\n".join(lines)))
-        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL, build, Gtk.ResponseType.OK)
+        if existing:
+            detail = ("Its settings want the gcc and binutils of %s%s, already built here:"
+                      "\n\n%s\n\nSystems wanting the same compiler share one toolchain; "
+                      "a system whose settings ask for another gcc gets a new one, so the "
+                      "others keep theirs." % (existing, " (used by %s)" % ", ".join(sharing)
+                                                 if sharing else "", "\n".join(lines)))
+        else:
+            detail = ("Cross compiler for %s, the versions %s's profile allows, built here "
+                      "as %s (its own: no other system's toolchain changes):\n\n%s\n\n"
+                      "crossdev builds it as a job; it takes an hour or more." % (
+                          resolved["tuple"], target.title, tuple_, "\n".join(lines)))
+        dialog.format_secondary_text(detail)
+        dialog.add_buttons("Cancel", Gtk.ResponseType.CANCEL)
+        if existing:
+            dialog.add_buttons("Build it again", 2)
+        dialog.add_buttons(build, Gtk.ResponseType.OK)
         answer = dialog.run()
         dialog.destroy()
-        if answer != Gtk.ResponseType.OK:
+        if answer == 2:
+            again = True
+        elif answer != Gtk.ResponseType.OK:
             return False
         from porthole.updater.elevate import run_as_root, service
 
@@ -470,7 +487,8 @@ class SystemsWindow(Gtk.Window):
                 self.error("The toolchain build wasn't queued", output)
                 return
             show_job(output)
-        run_as_root(service("plugin", "crossdev", "toolchain", target.name), done)
+        run_as_root(service("plugin", "crossdev", "toolchain", target.name,
+                            *(["again"] if again else [])), done)
         return False
 
     def build_system(self):

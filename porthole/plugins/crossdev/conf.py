@@ -282,12 +282,13 @@ def cpu_option(chost):
     return "-mcpu" if chost.startswith(("aarch64", "arm")) else "-march"
 
 
-def cpus(chost, host_chost=None):
-    """[cpu names] the system's gcc can tune for (asked from the cross gcc,
-    or this computer's own when the system is for the same CHOST), or None
-    when there is no such gcc yet"""
+def cpus(chost, host_chost=None, compiler=None):
+    """[cpu names] the system's gcc can tune for (asked from its cross gcc,
+    compiler: by name, or this computer's own when the system is for the
+    same CHOST), or None when there is no such gcc yet"""
     import shutil
-    gcc = shutil.which(chost + "-gcc") or (shutil.which("gcc") if chost == host_chost else None)
+    gcc = (shutil.which(compiler) if compiler else None) or shutil.which(chost + "-gcc") \
+        or (shutil.which("gcc") if chost == host_chost else None)
     if not gcc:
         return None
     option = cpu_option(chost)

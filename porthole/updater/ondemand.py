@@ -111,8 +111,11 @@ class LocalDistcc:
 
     name = "distcc"
 
-    def __init__(self, job_id, run_dir=None, log_dir=None, jobs=None):
+    def __init__(self, job_id, run_dir=None, log_dir=None, jobs=None, path=None):
         self.job_id = job_id
+        # a folder of compilers first in distccd's PATH (a system's own
+        # toolchain under its names), or None: this computer's
+        self.path = path
         run_dir, log_dir = run_dir or RUN_DIR, log_dir or LOG_DIR
         self.pid_file = os.path.join(run_dir, "distccd-%s.pid" % job_id)
         self.log_file = os.path.join(log_dir, "distccd-%s.log" % job_id)
@@ -145,7 +148,10 @@ class LocalDistcc:
                     os.chown(path, user.pw_uid, user.pw_gid)
             except (KeyError, OSError) as e:
                 raise HelperError("distcc's user isn't set up: %s" % e)
-        result = subprocess.run(argv, capture_output=True, text=True)
+        env = None
+        if self.path:
+            env = dict(os.environ, PATH=self.path + ":" + os.environ.get("PATH", "/usr/bin:/bin"))
+        result = subprocess.run(argv, capture_output=True, text=True, env=env)
         from porthole.updater import recipe
         recipe.note("distccd: a compile server on this computer, for this job only. The\n"
                     "build's compiler names (gcc, aarch64-...-gcc) lead to distcc, which\n"

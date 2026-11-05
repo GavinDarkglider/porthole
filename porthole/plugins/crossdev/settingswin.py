@@ -135,14 +135,22 @@ class SystemSettingsWindow(Gtk.Window):
             info["iuse"] = system.all_iuse(locations)
             info["values"] = {n: system.expand_values(n, locations) for n in conf.HARDWARE}
             chost = conf.effective(info, "CHOST")
-            info["cpus"] = conf.cpus(chost, toolchain.host_chost()) if chost else None
             info["needs_cross"] = chost != toolchain.host_chost()
-            info["toolchain"] = None
+            info["toolchain"] = info["toolchain_name"] = None
+            info["toolchain_users"] = []
+            compiler = None
             if info["needs_cross"]:
                 try:
-                    info["toolchain"] = toolchain.compare(toolchain.resolve(target))
+                    resolved = toolchain.resolve(target)
+                    found = toolchain.find(resolved)
+                    info["toolchain"] = toolchain.compare(resolved, tuple_=found)
+                    info["toolchain_name"] = found
+                    info["toolchain_users"] = [n for n in toolchain.users(found)
+                                               if n != target.name] if found else []
+                    compiler = found and found + "-gcc"
                 except toolchain.ToolchainError as e:
                     info["toolchain"] = str(e)
+            info["cpus"] = conf.cpus(chost, toolchain.host_chost(), compiler) if chost else None
             info["files"] = conf.files(target)
             from porthole.plugins.crossdev import firstboot
             info["firstboot"] = firstboot.read_public(target.name)
@@ -342,13 +350,17 @@ class SystemSettingsWindow(Gtk.Window):
             toolchain = "Couldn't be worked out: " + parts
         elif not any(built for _t, _w, _r, built in parts):
             toolchain = "Not built yet (Systems window: Build its toolchain)"
+        elif not info.get("toolchain_name"):
+            # the gcc and binutils its settings want aren't built yet
+            toolchain = "Not built for the gcc and binutils its settings want yet " \
+                        "(Systems window: Build its toolchain)"
         else:
-            # one toolchain per CHOST: another system may have built other versions
-            other = ["%s %s (built: %s)" % (title, wanted, built or "none")
-                     for title, wanted, _repo, built in parts if built != wanted]
-            toolchain = ("Built, the versions its profile allows" if not other else
-                         "Built for another system with the same CHOST; this one wants "
-                         + ", ".join(other))
+            toolchain = "%s (gcc %s, binutils %s)%s" % (
+                info["toolchain_name"],
+                next((w for t, w, _r, _b in parts if t == "gcc"), "?"),
+                next((w for t, w, _r, _b in parts if t == "binutils"), "?"),
+                ", shared with " + ", ".join(info["toolchain_users"])
+                if info.get("toolchain_users") else "")
         box.pack_start(_facts([("Name", target.name), ("Folder", target.root),
                                ("Profile", info["profile_name"]),
                                ("Repositories", ", ".join(info["repos"]) or "?"),

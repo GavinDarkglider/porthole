@@ -213,7 +213,15 @@ def shell(args):
     except BlockingIOError:
         print("A shell is already open in %s." % target.title, file=sys.stderr)
         return 1
-    helpers = Helpers("shell-" + target.name, ["binfmt", "distcc"])
+    from porthole.plugins.crossdev import build as bd
+    try:
+        _build_env(target, print)
+    except (bd.BuildError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    bd.distcc_names(bd.chost_of(target))
+    helpers = Helpers("shell-" + target.name, ["binfmt", "distcc"],
+                      distcc={"path": bd.wrappers_dir(target)})
     try:
         helper_env = helpers.start(print)
     except HelperError as e:
@@ -287,11 +295,11 @@ def remove_root(args):
     return _queue("Delete the system %s" % target.title, "remove-root", target.name)
 
 
-def _queue(title, action, name):
+def _queue(title, action, name, **more):
     from porthole.updater import runner
-    job = runner.new_job("plugin", title, [{"kind": "plugin", "title": title,
-                                            "plugin": "crossdev", "action": action,
-                                            "name": name}], recheck=False)
+    job = runner.new_job("plugin", title, [dict({"kind": "plugin", "title": title,
+                                                 "plugin": "crossdev", "action": action,
+                                                 "name": name}, **more)], recheck=False)
     with runner.jobs_state() as state:
         state["jobs"].append(job)
         runner.prune(state)
@@ -301,16 +309,19 @@ def _queue(title, action, name):
 
 
 def toolchain(args):
+    """plugin crossdev toolchain NAME [again]: the toolchain its settings
+    want (shared when one with the same gcc and binutils is built; again:
+    build that one again anyway)"""
     from porthole.plugins.crossdev import roots
-    if len(args) != 1:
-        print("usage: plugin crossdev toolchain NAME", file=sys.stderr)
+    if len(args) not in (1, 2) or args[1:] not in ([], ["again"]):
+        print("usage: plugin crossdev toolchain NAME [again]", file=sys.stderr)
         return 2
     target = roots.made_here().get(args[0])
     if target is None:
         print("No system called %s was made here" % args[0], file=sys.stderr)
         return 1
     return _queue("Build the cross toolchain for %s" % target.title, "toolchain",
-                  target.name)
+                  target.name, **({"again": True} if args[1:] else {}))
 
 
 def step_toolchain(runner, job_id, step, log):
@@ -344,11 +355,25 @@ def step_toolchain(runner, job_id, step, log):
             log("!! crossdev's repository couldn't be made: %s" % e)
             return False
         output = checks.repos().get(checks.REPO_NAME)
-    log("The toolchain %s's profile allows, for %s:" % (target.title, resolved["tuple"]))
-    for title, version, repo, built in tc.compare(resolved):
+    # one toolchain per compiler: an installed one with the same gcc and
+    # binutils is shared; otherwise a new one under a name of its own, so
+    # the toolchains other systems use are never replaced
+    existing = tc.find(resolved)
+    if existing and not step.get("again"):
+        tc.remember(existing, resolved, target.name)
+        log("%s uses the toolchain %s: the same gcc and binutils its settings want are "
+            "built there%s. Nothing to build." % (target.title, existing, (
+                " (shared with %s)" % ", ".join(n for n in tc.users(existing)
+                                                 if n != target.name))
+                if len(tc.users(existing)) > 1 else ""))
+        return True
+    tuple_ = existing or tc.new_name(resolved)
+    log("The toolchain %s's profile allows, for %s, built as %s:"
+        % (target.title, resolved["tuple"], tuple_))
+    for title, version, repo, built in tc.compare(resolved, tuple_=tuple_):
         log("   %-15s %-22s from %s%s" % (title, version, repo,
                                           "  (built: %s)" % built if built else ""))
-    argv = tc.command(resolved, output)
+    argv = tc.command(resolved, output, tuple_)
     # crossdev's settings first, then Porthole's unmask for the pinned
     # versions (crossdev's own "live" mask hides 9999.N ones), then a
     # check that all of them can be emerged, before hours of building
@@ -356,14 +381,14 @@ def step_toolchain(runner, job_id, step, log):
     if not runner.run_logged(job_id, step, log, argv + ["--init-target"]):
         return False
     try:
-        path = tc.write_unmask(resolved)
+        path = tc.write_unmask(resolved, tuple_=tuple_)
     except (tc.ToolchainError, OSError) as e:
         log("!! %s" % e)
         return False
     log("Unmasked exactly these versions in %s:" % path)
-    for line in tc.unmask_lines(resolved):
+    for line in tc.unmask_lines(resolved, tuple_):
         log("   " + line)
-    check = tc.pretend_command(resolved)
+    check = tc.pretend_command(resolved, tuple_)
     log("$ " + " ".join(check))
     if not runner.run_logged(job_id, step, log, check):
         log("!! The toolchain packages can't be emerged as they are (above); nothing "
@@ -372,6 +397,8 @@ def step_toolchain(runner, job_id, step, log):
     log("$ " + " ".join(argv))
     if not runner.run_logged(job_id, step, log, argv):
         return False
+    tc.remember(tuple_, resolved, target.name)
+    log("%s builds with the toolchain %s from now on" % (target.title, tuple_))
     if shutil.which("distcc-config"):
         # distccd runs only the compilers listed in its masquerade directory
         log("$ distcc-config --update-masquerade-with-crossdev")
@@ -584,7 +611,24 @@ def _build_env(target, log):
     chost = bd.chost_of(target)
     if not chost:
         raise bd.BuildError("%s's settings give no CHOST" % target.title)
-    bd.write_wrappers(target, chost)
+    tc_name = None
+    if chost != bd.host_chost():
+        from porthole.plugins.crossdev import toolchain as tc
+        try:
+            tc_name, _resolved = tc.for_system(target)
+        except tc.ToolchainError as e:
+            raise bd.BuildError(str(e))
+        if tc_name is None:
+            raise bd.BuildError("There is no cross toolchain for what %s's settings want "
+                                "yet: build its toolchain first (Systems window)"
+                                % target.title)
+        try:
+            # which system uses which (an existing one is taken on without a job)
+            if tc.read_registry()["systems"].get(target.name) != tc_name:
+                tc.remember(tc_name, _resolved, target.name)
+        except OSError as e:
+            log("!! couldn't note which toolchain %s uses: %s" % (target.title, e))
+    bd.write_wrappers(target, chost, toolchain=tc_name)
     if chost != bd.host_chost():
         bd.write_ldd(target, chost)
         bd.write_bashrc(target, chost)
@@ -679,16 +723,20 @@ def _record_settings(target, chost):
         record.folder(wrappers)
     if chost != bd.host_chost():
         record.heading("The cross toolchain (built earlier, by its own job)")
-        installed = tc.installed(chost)
-        if installed:
-            record.note("Installed: " + ", ".join("%s %s" % kv for kv in sorted(installed.items())))
         try:
-            resolved = tc.resolve(target)
+            tuple_, resolved = tc.for_system(target)
+            tuple_ = tuple_ or chost
+            record.note("Systems wanting the same gcc and binutils share one toolchain, under a\n"
+                        "name of its own (%s); the wrappers above run its programs under\n"
+                        "the system's names (%s-gcc, ...)." % (tuple_, chost))
+            installed = tc.installed(tuple_)
+            if installed:
+                record.note("Installed: " + ", ".join("%s %s" % kv
+                                                      for kv in sorted(installed.items())))
             output = checks.repos().get(checks.REPO_NAME)
             if output:
-                record.note("Built with:\n  " + shlex.join(tc.command(resolved, output)))
-            unmask = os.path.join("/etc/portage/package.unmask",
-                                  "porthole-cross-" + resolved["tuple"])
+                record.note("Built with:\n  " + shlex.join(tc.command(resolved, output, tuple_)))
+            unmask = os.path.join("/etc/portage/package.unmask", "porthole-cross-" + tuple_)
             if os.path.isfile(unmask):
                 record.file_contents(unmask)
         except Exception:
@@ -714,13 +762,12 @@ def step_build_check(runner, job_id, step, log):
     except Exception as e:  # the record is a help, never a reason to stop
         log("!! couldn't note the settings in the command record: %s" % e)
     if env["CBUILD"] != chost:
-        if not shutil.which(chost + "-gcc"):
-            log("!! There is no cross compiler for %s yet: build its toolchain first "
-                "(Systems window)" % chost)
-            return False
-        built = tc.installed(chost)
-        log("Cross toolchain for %s: %s" % (chost, ", ".join(
-            "%s %s" % kv for kv in sorted(built.items())) or "?"))
+        tc_name, _resolved = tc.for_system(target)
+        built = tc.installed(tc_name)
+        sharing = [n for n in tc.users(tc_name) if n != target.name]
+        log("Cross toolchain %s (as %s): %s%s" % (tc_name, chost, ", ".join(
+            "%s %s" % kv for kv in sorted(built.items())) or "?",
+            "; shared with " + ", ".join(sharing) if sharing else ""))
         # some builds run the programs they just made (meson's exe_wrapper,
         # gobject-introspection): Gentoo's eclasses run them with qemu-<arch>
         qemu = bd.qemu_name(chost)
@@ -782,7 +829,9 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             log("!! %s didn't build; can't build in the emulator without %s"
                 % (" and ".join(still), "it" if len(still) == 1 else "them"))
             return False
-    helpers = Helpers(job_id, ["binfmt", "distcc"])
+    helpers = Helpers(job_id, ["binfmt", "distcc"],
+                      distcc={"path": bd.wrappers_dir(target)})
+    bd.distcc_names(bd.chost_of(target))
     try:
         helper_env = helpers.start(log)
     except HelperError as e:
