@@ -213,37 +213,67 @@ def write_ldd(target, chost, base=None):
     return path
 
 
-def python_multiarch(root):
-    """The system's Python platform tag (aarch64-linux-gnu), from its own
-    _sysconfigdata file, or None (no Python in it yet)"""
+_PYTHON_ASK = "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '')"
+
+
+def _python_suffix(argv):
+    """The ending a Python gives its C modules (.cpython-313-x86_64-linux-gnu.so),
+    asked of that Python, or None"""
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
+    try:
+        out = subprocess.run(argv + ["-I", "-c", _PYTHON_ASK], env=env,
+                             capture_output=True, text=True, timeout=60).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return out if out.endswith(".so") else None
+
+
+def system_pythons(root):
+    """The system's Python programs (python3.13, python3.13t, ...): the real
+    programs in its usr/bin, not the scripts or links next to them"""
     import glob
-    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/python3.*",
-                                              "_sysconfigdata_*_linux_*.py"))):
-        return os.path.basename(path)[:-3].split("_linux_", 1)[1]
-    return None
-
-
-def host_multiarch():
-    import sysconfig
-    return sysconfig.get_config_var("MULTIARCH") or None
-
-
-def misnamed_python_modules(root, host=None, target=None):
-    """[(path, correct path)] of Python C modules in the system named with
-    this computer's platform tag (a cross build took the suffix from this
-    computer's Python): the system's Python doesn't find them"""
-    host = host or host_multiarch()
-    target = target or python_multiarch(root)
-    if not host or not target or host == target:
-        return []
     found = []
-    suffix = "-%s.so" % host
+    for path in sorted(glob.glob(os.path.join(root, "usr/bin/python3.*"))):
+        if not os.path.islink(path) and elf_id(path):
+            found.append(os.path.basename(path))
+    return found
+
+
+def python_suffix_moves(root):
+    """[(this computer's C module ending, the system's)] for each Python the
+    system has and this computer has the same version of, where they differ
+    (a cross build names its modules with this computer's ending). Each
+    Python is asked: this computer's directly, the system's through qemu."""
+    moves = []
+    for name in system_pythons(root):
+        program = os.path.join(root, "usr/bin", name)
+        qemu = qemu_for(elf_id(program))
+        here = shutil.which(name)
+        if not qemu or not shutil.which("qemu-" + qemu) or not here:
+            continue
+        theirs = _python_suffix(["qemu-" + qemu, "-L", root, program])
+        mine = _python_suffix([here])
+        if theirs and mine and theirs != mine and (mine, theirs) not in moves:
+            moves.append((mine, theirs))
+    return moves
+
+
+def misnamed_python_modules(root, moves=None):
+    """[(path, correct path)] of Python C modules in the system named with
+    this computer's ending (a cross build took it from this computer's
+    Python): the system's Python doesn't find them"""
+    moves = python_suffix_moves(root) if moves is None else moves
+    found = []
+    if not moves:
+        return found
     for top in ("usr/lib", "usr/lib64"):
         for folder, _dirs, files in os.walk(os.path.join(root, top)):
             for name in files:
-                if ".cpython-3" in name and name.endswith(suffix):
-                    path = os.path.join(folder, name)
-                    found.append((path, path[:-len(suffix)] + "-%s.so" % target))
+                for mine, theirs in moves:
+                    if name.endswith(mine):
+                        path = os.path.join(folder, name)
+                        found.append((path, path[:-len(mine)] + theirs))
+                        break
     return found
 
 
@@ -469,8 +499,7 @@ BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
 BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
-def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None,
-                 perl_moves=()):
+def bashrc_block(chost, root, tools=None, python_moves=(), perl_moves=()):
     """Porthole's block in the system's bashrc: only when it is cross-built"""
     lines = [
         BASHRC_BEGIN,
@@ -488,15 +517,15 @@ def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None,
         '\texport CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
         '\texport GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root)]
     body = []
-    if host_tag and target_tag and host_tag != target_tag:
+    if python_moves:
         body += [
-            "\t\t# Python C modules get this computer's platform name in a cross",
-            "\t\t# build (%s); the system's Python looks for its own (%s)"
-            % (host_tag, target_tag),
-            "\t\twhile IFS= read -r -d '' f; do",
-            '\t\t\tmv -- "${f}" "${f%%-%s.so}-%s.so" || die' % (host_tag, target_tag),
-            "\t\tdone < <(find \"${ED}\" -type f -name '*.cpython-3*-%s.so' -print0)"
-            % host_tag]
+            "\t\t# Python C modules get this computer's Python's ending in a cross",
+            "\t\t# build (sysconfig EXT_SUFFIX); the system's Python looks for its own"]
+        for mine, theirs in python_moves:
+            body += [
+                "\t\twhile IFS= read -r -d '' f; do",
+                '\t\t\tmv -- "${f}" "${f%%%s}%s" || die' % (mine, theirs),
+                "\t\tdone < <(find \"${ED}\" -type f -name '*%s' -print0)" % mine]
     if perl_moves:
         body += [
             "\t\t# perl modules go to this computer's perl folders in a cross build",
@@ -533,8 +562,7 @@ def write_bashrc(target, chost, base=None):
     except OSError:
         text = ""
     root = os.path.realpath(target.root)
-    block = bashrc_block(chost, root, wrappers_dir(target, base), host_multiarch(),
-                         python_multiarch(root),
+    block = bashrc_block(chost, root, wrappers_dir(target, base), python_suffix_moves(root),
                          perl_dir_moves(host_perl_dirs(), system_perl_dirs(root)))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
