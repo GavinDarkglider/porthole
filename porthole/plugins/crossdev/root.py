@@ -60,6 +60,7 @@
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -474,6 +475,102 @@ def _build_env(target, log):
     return bd.environment(target, chost)
 
 
+# what each step does, for the job's command record (recipe.py)
+RECIPE_NOTES = {
+    "toolchain": (
+        "crossdev builds a cross toolchain: binutils, gcc, the kernel headers and the\n"
+        "C library for another CPU, installed beside this computer's own compiler\n"
+        "(as <CHOST>-gcc). Its ebuilds go into a local repository of their own."),
+    "reset-root": (
+        "Starting over: the system's folder is emptied, its settings kept."),
+    "build-check": (
+        "Before anything is built, Porthole writes what a cross build needs and asks\n"
+        "portage to work the whole build out (emerge --pretend). How portage is told\n"
+        "to build for another computer, all in the exported settings below:\n"
+        "  ROOT                where packages are installed (the system's folder)\n"
+        "  SYSROOT             where the compiler finds the system's headers and\n"
+        "                      libraries (the same folder)\n"
+        "  PORTAGE_CONFIGROOT  whose /etc/portage applies: the system's, not this\n"
+        "                      computer's (its profile, make.conf, package.use ...)\n"
+        "  CHOST / CBUILD      the computer built for / the computer building\n"
+        "  PATH                Porthole's compiler wrappers first (they add --sysroot)\n"
+        "  QEMU_LD_PREFIX      the system's libraries, for its programs run by qemu"),
+    ("build-stage", "base"): (
+        "The kernel headers and the C library first: everything else is compiled\n"
+        "against them. --usepkg installs a binary package already made with the same\n"
+        "USE flags instead of compiling again."),
+    ("build-stage", "system"): (
+        "@system: the base set the profile lists (shell, coreutils, portage's own\n"
+        "needs ...), cross-compiled into the system."),
+    ("build-stage", "extra"): (
+        "What the First boot choices need that the system's list doesn't have yet."),
+    ("build-stage", "world"): (
+        "@world: the system's own list of packages (its var/lib/portage/world) and\n"
+        "everything they need."),
+    "emulate": (
+        "Some packages can't be cross-compiled: their build runs what it just built, or\n"
+        "their build system doesn't support it. They are built inside the system itself:\n"
+        "chroot into its folder (with /proc, /sys, /dev and the repositories mounted\n"
+        "in), its arm64 programs run by qemu through binfmt_misc, while the compiling\n"
+        "goes back to this computer's cross compiler over distcc."),
+    "break-cycle": (
+        "emerge stopped on a circular dependency (A needs B, B needs A) and suggested\n"
+        "USE flags to turn off for a first build. That build uses a temporary\n"
+        "package.use file; the stage then runs again, building it with its usual flags."),
+    "firstboot": (
+        "The library cache (ldconfig, run in the system), then the First boot setup\n"
+        "written into it: the device name, accounts and services chosen. Those files\n"
+        "aren't copied here: they hold password hashes."),
+}
+
+
+def recipe_note(step):
+    """(note, key it is given once under) for the job's command record"""
+    action = step.get("action")
+    key = (action, step.get("stage")) if action == "build-stage" else action
+    note = RECIPE_NOTES.get(key)
+    return (note, key) if note else (None, None)
+
+
+def _record_settings(target, chost):
+    """The system's settings as portage reads them, into the command record
+    (once a job): what writing them by hand would take"""
+    from porthole.updater import recipe
+    from porthole.plugins.crossdev import build as bd, toolchain as tc
+    record = recipe.current()
+    if record is None or "settings" in record.explained:
+        return
+    record.explained.add("settings")
+    record.heading("Settings portage reads for %s (PORTAGE_CONFIGROOT=%s), as they were "
+                   "when the build started" % (target.title, target.config_root))
+    record.note("make.profile picks the profile; make.conf the system-wide settings;\n"
+                "package.* per package; repos.conf the repositories; bashrc runs in each\n"
+                "package's build (Porthole's part fixes names a cross build gets wrong).")
+    record.folder(target.portage_dir)
+    wrappers = bd.wrappers_dir(target)
+    if os.path.isdir(wrappers):
+        record.heading("Porthole's compiler wrappers (first in PATH)")
+        record.note("Each runs the cross compiler with --sysroot, so it uses the system's\n"
+                    "headers and libraries, never this computer's.")
+        record.folder(wrappers)
+    if chost != bd.host_chost():
+        record.heading("The cross toolchain (built earlier, by its own job)")
+        installed = tc.installed(chost)
+        if installed:
+            record.note("Installed: " + ", ".join("%s %s" % kv for kv in sorted(installed.items())))
+        try:
+            resolved = tc.resolve(target)
+            output = checks.repos().get(checks.REPO_NAME)
+            if output:
+                record.note("Built with:\n  " + shlex.join(tc.command(resolved, output)))
+            unmask = os.path.join("/etc/portage/package.unmask",
+                                  "porthole-cross-" + resolved["tuple"])
+            if os.path.isfile(unmask):
+                record.file_contents(unmask)
+        except Exception:
+            pass
+
+
 def step_build_check(runner, job_id, step, log):
     import shutil
     from porthole.plugins.crossdev import build as bd, toolchain as tc
@@ -488,6 +585,10 @@ def step_build_check(runner, job_id, step, log):
         log("!! %s" % e)
         return False
     chost = env["CHOST"]
+    try:
+        _record_settings(target, chost)
+    except Exception as e:  # the record is a help, never a reason to stop
+        log("!! couldn't note the settings in the command record: %s" % e)
     if env["CBUILD"] != chost:
         if not shutil.which(chost + "-gcc"):
             log("!! There is no cross compiler for %s yet: build its toolchain first "
@@ -582,6 +683,8 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             pretend = chroot.emerge_argv(["--pretend", "--oneshot", "--color=n"] + atoms, inside)
             log("== emulator: working out what building them in the system needs")
             result = subprocess.run(pretend, capture_output=True, text=True)
+            from porthole.updater import recipe
+            recipe.ran(pretend, result.returncode)
         wanted = {emulate.cp_of(a) for a in atoms}
         # what they need to be built: what emerge merges before the first of
         # them. What comes after needs them (shared-mime-info after glib): a
@@ -718,6 +821,9 @@ def step_break_cycle(runner, job_id, step, log):
         with open(path, "w") as f:
             f.write("# Porthole: for breaking a circular dependency, only while it builds\n"
                     "=%s %s\n" % (cpv, flags))
+        from porthole.updater import recipe
+        if recipe.current() is not None:
+            recipe.current().file_contents(path)
         log("== building %s with USE \"%s\" (emerge's suggestion); the stage after this "
             "builds it again with its usual flags" % (cpv, flags))
         argv = ["emerge", "--verbose", "--color=y", "--oneshot", "=" + cpv]
@@ -726,6 +832,7 @@ def step_break_cycle(runner, job_id, step, log):
             ok = runner.run_logged(job_id, step, log, argv, extra_env=env)
         finally:
             os.unlink(path)
+            recipe.ran(["rm", path])
         if ok:
             return True
         if (runner.update(job_id) or {}).get("cancel"):

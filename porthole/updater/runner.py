@@ -228,10 +228,12 @@ def prune(state):
     finished = [job for job in state["jobs"] if job["status"] not in ACTIVE]
     for job in finished[:-KEEP_JOBS]:
         state["jobs"].remove(job)
-        try:
-            os.unlink(job["log"])
-        except OSError:
-            pass
+        from porthole.updater import recipe
+        for path in (job["log"], recipe.record_path(job["log"])):
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
 
 
 # -- submitting ------------------------------------------------------------
@@ -649,6 +651,8 @@ class Runner:
             job = dict(find_job(state, job_id))
         log = JobLog(job["log"])
         log("== %s (requested by %s)" % (job["title"], job["by"]))
+        from porthole.updater import recipe
+        recipe.start(job["log"], dict(job, started=job.get("started") or time.time()))
         status = "done"
         # services the job needs only while it runs (ondemand.py): stopped
         # after its last step whatever happens
@@ -676,6 +680,12 @@ class Runner:
         if status != "done":
             extra["preserved_rebuild"] = preserved_rebuild_packages(log)
         self.update(job_id, status=status, finished=time.time(), **extra)
+        try:
+            with jobs_state(write=False) as state:
+                recipe.finish(dict(find_job(state, job_id)))
+        except Exception as e:
+            log("!! the command record (%s) couldn't be finished: %s"
+                % (recipe.record_path(job["log"]), e))
         with jobs_state(write=False) as state:
             news_item = find_job(state, job_id).get("news")  # added after queuing
         if news_item:
@@ -717,6 +727,7 @@ class Runner:
                 continue
             log("\n== Step %d: %s" % (index + 1, step["title"]))
             self.step_index = index
+            self.record_step(index, step)
             try:
                 result = getattr(self, "step_" + step["kind"].replace("-", "_"))(
                     job_id, step, log)
@@ -734,6 +745,31 @@ class Runner:
             elif not result:
                 status = "failed"
         return status
+
+    def record_step(self, index, step):
+        """The step's heading in the command record, with what it does (a
+        plugin's recipe_note)"""
+        from porthole.updater import recipe
+        record = recipe.current()
+        if record is None:
+            return
+        note, key = None, None
+        if step.get("kind") == "plugin":
+            try:
+                from porthole import plugins
+                module = plugins.root_module(step.get("plugin"))
+                if hasattr(module, "recipe_note"):
+                    note, key = module.recipe_note(step)
+            except Exception:
+                pass
+        if key is not None and key in record.explained:
+            note = None
+        record.section("Step %d: %s" % (index + 1, step["title"]))
+        if note:
+            record.note(note, once=key)
+        if step.get("added"):
+            record.note("Porthole added this step itself: %s" % (
+                step["added"] if isinstance(step["added"], str) else "to fix the step before"))
 
     def add_steps(self, job_id, steps, again=None, why=None):
         """Put steps into the running job right after the step running now,
@@ -884,6 +920,7 @@ class Runner:
             _fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 50, 160, 0, 0))
         except OSError:
             pass
+        began = time.monotonic()
         proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=slave,
                                 stderr=slave, start_new_session=True)
         os.close(slave)
@@ -944,6 +981,10 @@ class Runner:
             self.update(job_id, paused=None)
         code = proc.wait()
         log("(exit status %d)" % code)
+        from porthole.updater import recipe
+        if recipe.current() is not None:
+            recipe.current().command(argv, dict(getattr(self, "job_env", {}), **(extra_env or {})),
+                                     code, time.monotonic() - began)
         return code == 0
 
 

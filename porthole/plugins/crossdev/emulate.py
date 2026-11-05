@@ -99,7 +99,9 @@ class Chroot:
         self.created = []   # placeholder files to remove
 
     def _run(self, argv):
+        from porthole.updater import recipe
         result = subprocess.run(argv, capture_output=True, text=True)
+        recipe.ran(argv, result.returncode)
         if result.returncode != 0:
             raise EmulateError("%s: %s" % (" ".join(argv), (result.stderr or
                                                           result.stdout).strip()))
@@ -168,6 +170,8 @@ class Chroot:
         problems = []
         for point in reversed(self.mounted):
             result = subprocess.run(["umount", "-R", point], capture_output=True, text=True)
+            from porthole.updater import recipe
+            recipe.ran(["umount", "-R", point], result.returncode)
             if result.returncode != 0:
                 # busy (a process left behind): detach it rather than keep it
                 lazy = subprocess.run(["umount", "-R", "-l", point], capture_output=True,

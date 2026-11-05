@@ -146,6 +146,11 @@ class LocalDistcc:
             except (KeyError, OSError) as e:
                 raise HelperError("distcc's user isn't set up: %s" % e)
         result = subprocess.run(argv, capture_output=True, text=True)
+        from porthole.updater import recipe
+        recipe.note("distccd: a compile server on this computer, for this job only. The\n"
+                    "build's compiler names (gcc, aarch64-...-gcc) lead to distcc, which\n"
+                    "hands each compile to it.", once="distccd")
+        recipe.ran(argv, result.returncode)
         if result.returncode != 0:
             raise HelperError("distccd didn't start: %s" % (result.stderr.strip()
                                                              or result.returncode))
@@ -241,6 +246,10 @@ class Binfmt:
         if not running:
             result = subprocess.run(["rc-service", self.SERVICE, "start"],
                                     capture_output=True, text=True)
+            from porthole.updater import recipe
+            recipe.note("binfmt_misc: the kernel hands programs built for another CPU\n"
+                        "to qemu, so the system's own programs run here.", once="binfmt")
+            recipe.ran(["rc-service", self.SERVICE, "start"], result.returncode)
             if result.returncode != 0:
                 raise HelperError("%s didn't start: %s" % (
                     self.SERVICE, (result.stdout + result.stderr).strip()))
