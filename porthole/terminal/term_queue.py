@@ -829,6 +829,20 @@ class TerminalQueue:
             debug.dprint("TERM_QUEUE: refresh_jobs(): %s" % e)
         return True
 
+    def selected_job(self):
+        """The id of the job of the selected row (a step's: its job's), or None"""
+        from porthole.updater import follow
+        _iter = get_treeview_selection(self.queue_tree)
+        if _iter is None:
+            return None
+        model, column = self.queue_model, self.queue_model.column
+        if self.is_step(_iter):
+            _iter = model.iter_parent(_iter)
+        match = follow._FOLLOW.search(model.get_value(_iter, column['command']) or "")
+        if not match:
+            return None
+        return match.group(1) or self.row_jobs.get(model.get_value(_iter, column['id']))
+
     def _refresh_jobs(self):
         from porthole.updater import follow
         model, column = self.queue_model, self.queue_model.column

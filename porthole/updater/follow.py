@@ -254,6 +254,7 @@ class Follower:
 
     def __init__(self, on_close=None):
         self.manager = None
+        self.latest = None
         self.followed = set()
         # jobs that were still to finish when this window started following
         # them: only then does it close by itself once they all went well
@@ -273,7 +274,10 @@ class Follower:
             self.manager.job_window()
             self.followed = set()
             self.watched = set()
+            self.latest = None
         job = find(job_id)
+        if job:
+            self.latest = job["id"]
         new_window = not self.followed
         if job and job["id"] not in self.followed:
             self.followed.add(job["id"])
@@ -286,10 +290,22 @@ class Follower:
         if new_window:
             self.add_paused_bar()
             self.add_closing_bar()
+            self.add_commands_tab()
         self.manager.window.present()
         os.makedirs(os.path.dirname(PIDFILE), exist_ok=True)
         with open(PIDFILE, "w") as f:
             f.write(str(os.getpid()))
+
+    def add_commands_tab(self):
+        """The Commands tab: the command record of the job selected in the
+        queue, else of the job followed last"""
+        from porthole.updater.commandtab import CommandsTab
+
+        def job_for():
+            queue = getattr(self.manager, "process_queue", None)
+            selected = queue.selected_job() if queue is not None else None
+            return find(selected or self.latest) if (selected or self.latest) else None
+        self.commands_tab = CommandsTab(self.manager.notebook, job_for)
 
     def add_paused_bar(self):
         """A bar while a followed build is paused for someone at the computer,
