@@ -175,6 +175,27 @@ def binpkgs(args):
     return 0
 
 
+def health(args):
+    """plugin crossdev health NAME: check a system as the last build step
+    does, and show the findings (exit 1 when there are errors)"""
+    from porthole.plugins.crossdev import health as hc, roots
+    if len(args) != 1:
+        print("usage: plugin crossdev health NAME", file=sys.stderr)
+        return 2
+    target = roots.made_here().get(args[0])
+    if target is None:
+        print("No system called %s was made here" % args[0], file=sys.stderr)
+        return 1
+    findings = hc.check(target, print)
+    for line in hc.report_lines(findings) or ["No problems found."]:
+        print(line)
+    try:
+        print("Report: " + hc.save_report(target, findings))
+    except OSError as e:
+        print("The report couldn't be saved: %s" % e, file=sys.stderr)
+    return 1 if any(f.severity == hc.ERROR for f in findings) else 0
+
+
 def remove_root(args):
     from porthole.plugins.crossdev import roots
     if len(args) != 1:
@@ -452,6 +473,7 @@ def build(args):
     steps = [step("build-check", "Check the build can go ahead")]
     steps += [step("build-stage", stage_title, stage=stage) for stage, stage_title in bd.STAGES]
     steps.append(step("firstboot", "The first-boot setup"))
+    steps.append(step("health", "Check the finished system"))
     job = runner.new_job("plugin", title, steps, recheck=False)
     with runner.jobs_state() as state:
         state["jobs"].append(job)
@@ -517,6 +539,12 @@ RECIPE_NOTES = {
         "emerge stopped on a circular dependency (A needs B, B needs A) and suggested\n"
         "USE flags to turn off for a first build. That build uses a temporary\n"
         "package.use file; the stage then runs again, building it with its usual flags."),
+    "health": (
+        "The finished system checked: no programs built for this computer, every\n"
+        "library a program needs present, perl and Python modules under the system's\n"
+        "names (also in its binary packages), kernel modules indexed. Errors fail the\n"
+        "build; warnings are only reported. The same check by hand:\n"
+        "  porthole-update-service plugin crossdev health NAME"),
     "firstboot": (
         "The library cache (ldconfig, run in the system), then the First boot setup\n"
         "written into it: the device name, accounts and services chosen. Those files\n"
@@ -921,6 +949,34 @@ def _run_stage(runner, job_id, step, log, target, stage, env, argvs):
     return True
 
 
+def step_health(runner, job_id, step, log):
+    """The last step of a build: is what was built really the system's?
+    Errors fail the build (nothing should be packaged from it); warnings are
+    only reported"""
+    from porthole.plugins.crossdev import health as hc, roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    findings = hc.check(target, log)
+    errors = [f for f in findings if f.severity == hc.ERROR]
+    warnings = [f for f in findings if f.severity == hc.WARNING]
+    for line in hc.report_lines(findings):
+        log(("!! " if line.startswith("Error") else "") + line)
+    try:
+        log("The full report: " + hc.save_report(target, findings))
+    except OSError as e:
+        log("!! The report couldn't be saved: %s" % e)
+    if errors:
+        log("!! %s isn't healthy: %d error%s (above). Fix them, then check it again "
+            "(porthole-update-service plugin crossdev health %s)." % (
+                target.title, len(errors), "" if len(errors) == 1 else "s", target.name))
+        return False
+    log("%s is healthy%s." % (target.title, ", with %d warning%s to look at" % (
+        len(warnings), "" if len(warnings) == 1 else "s") if warnings else ""))
+    return True
+
+
 def step_firstboot(runner, job_id, step, log):
     """Write the first-boot setup into the system (the end of its build)"""
     from porthole.plugins.crossdev import firstboot as fb, roots
@@ -944,7 +1000,7 @@ def step_firstboot(runner, job_id, step, log):
         return False
 
 
-COMMANDS = {"check": check, "make-repo": make_repo, "new-root": new_root,
+COMMANDS = {"check": check, "health": health, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "reset-root": reset_root, "toolchain": toolchain,
             "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
@@ -953,4 +1009,4 @@ STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": step_build_check,
          "build-stage": step_build_stage, "emulate": step_emulate,
-         "break-cycle": step_break_cycle}
+         "break-cycle": step_break_cycle, "health": step_health}

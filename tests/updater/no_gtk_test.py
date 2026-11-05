@@ -32,7 +32,8 @@ for name in sorted(os.listdir(os.path.join(os.path.dirname(os.path.abspath(__fil
                                    "porthole", "plugins", name, "root.py")):
         ENGINE.append("porthole.plugins.%s.root" % name)
 ENGINE += ["porthole.plugins.crossdev." + m for m in (
-    "roots", "build", "emulate", "conf", "toolchain", "checks", "packages", "firstboot")]
+    "roots", "build", "emulate", "conf", "toolchain", "checks", "packages", "firstboot",
+    "health")]
 
 failed = 0
 for module in ENGINE:
