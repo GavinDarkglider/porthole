@@ -544,10 +544,14 @@ def bashrc_block(chost, root, tools=None, python_moves=(), perl_moves=()):
             "\t\tdone < <(find \"${ED}\" -type f -name .packlist -print0)"]
     if body:
         lines += [
-            "\t# Fixed when the package is merged, so binary packages made before",
-            "\t# (with the wrong names) are fixed as they are installed too",
-            "\tpre_pkg_preinst() {",
-            "\t\tlocal d f"] + body + ["\t}"]
+            "\t# Fixed right after the package installs into its image, so binary",
+            "\t# packages are made with the system's names; and again when a",
+            "\t# package is merged, for binary packages made before this",
+            "\tporthole_cross_names() {",
+            "\t\tlocal d f"] + body + [
+            "\t}",
+            "\tpost_src_install() { porthole_cross_names; }",
+            "\tpre_pkg_preinst() { porthole_cross_names; }"]
     lines += ["fi", BASHRC_END]
     return "\n".join(lines)
 
