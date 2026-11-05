@@ -324,6 +324,83 @@ def toolchain(args):
                   target.name, **({"again": True} if args[1:] else {}))
 
 
+def _toolchain_in_use(tuple_, log=None):
+    """The systems using a toolchain: noted against it, or wanting its gcc
+    and binutils by their settings now"""
+    from porthole.plugins.crossdev import roots, toolchain as tc
+    systems = roots.made_here()
+    using = set(tc.users(tuple_)) & set(systems)
+    for name, target in sorted(systems.items()):
+        try:
+            found, _resolved = tc.for_system(target)
+        except tc.ToolchainError:
+            continue
+        if found == tuple_:
+            using.add(name)
+    return sorted(using)
+
+
+def remove_toolchain(args):
+    """plugin crossdev remove-toolchain TUPLE: queue removing a toolchain
+    no system uses (crossdev --clean)"""
+    from porthole.plugins.crossdev import toolchain as tc
+    from porthole.updater import runner
+    if len(args) != 1 or not re.match(r"^[A-Za-z0-9_.]+(-[A-Za-z0-9_.]+){2,3}$", args[0]):
+        print("usage: plugin crossdev remove-toolchain TUPLE", file=sys.stderr)
+        return 2
+    tuple_ = args[0]
+    if tuple_ not in tc.read_registry()["toolchains"]:
+        print("Porthole didn't make a toolchain called %s" % tuple_, file=sys.stderr)
+        return 1
+    if tuple_ == tc.host_chost():
+        print("%s is this computer's own compiler" % tuple_, file=sys.stderr)
+        return 1
+    using = _toolchain_in_use(tuple_)
+    if using:
+        print("%s is used by %s" % (tuple_, ", ".join(using)), file=sys.stderr)
+        return 1
+    with runner.jobs_state(write=False) as state:
+        busy = [j for j in runner.active_jobs(state)
+                if any(s.get("plugin") == "crossdev" for s in j.get("steps") or [])]
+    if busy:
+        print("A system job is %s (%s): remove it once that has finished."
+              % (busy[0]["status"], busy[0]["title"]), file=sys.stderr)
+        return 1
+    if not tc.installed(tuple_):
+        tc.forget(tuple_)  # already gone from this computer: just off the list
+        print("%s isn't installed any more; taken off the list" % tuple_)
+        return 0
+    return _queue("Remove the cross toolchain %s" % tuple_, "remove-toolchain", "",
+                  toolchain=tuple_)
+
+
+def step_remove_toolchain(runner, job_id, step, log):
+    """crossdev --clean for a toolchain no system uses (checked again: a
+    system may have taken it on since it was queued)"""
+    import shutil
+    from porthole.plugins.crossdev import toolchain as tc
+    tuple_ = step.get("toolchain", "")
+    using = _toolchain_in_use(tuple_)
+    if using:
+        log("!! %s is used by %s now; it stays" % (tuple_, ", ".join(using)))
+        return False
+    argv = ["crossdev", "--clean", tuple_]
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv):
+        return False
+    unmask = os.path.join("/etc/portage/package.unmask", "porthole-cross-" + tuple_)
+    if os.path.exists(unmask):
+        os.unlink(unmask)
+        log("Removed %s" % unmask)
+    tc.forget(tuple_)
+    if shutil.which("distcc-config"):
+        log("$ distcc-config --update-masquerade-with-crossdev")
+        runner.run_logged(job_id, step, log, ["distcc-config",
+                                               "--update-masquerade-with-crossdev"])
+    log("The toolchain %s is removed" % tuple_)
+    return True
+
+
 def step_toolchain(runner, job_id, step, log):
     """Work the toolchain out again (as root, now), build it with
     crossdev, and let distccd run the new compiler"""
@@ -643,6 +720,9 @@ RECIPE_NOTES = {
         "crossdev builds a cross toolchain: binutils, gcc, the kernel headers and the\n"
         "C library for another CPU, installed beside this computer's own compiler\n"
         "(as <CHOST>-gcc). Its ebuilds go into a local repository of their own."),
+    "remove-toolchain": (
+        "crossdev --clean removes a cross toolchain: its packages (category\n"
+        "cross-<name>), its programs and its crossdev settings."),
     "reset-root": (
         "Starting over: the system's folder is emptied, its settings kept."),
     "build-check": (
@@ -1145,7 +1225,8 @@ def step_firstboot(runner, job_id, step, log):
         return False
 
 
-COMMANDS = {"check": check, "health": health, "shell": shell, "make-repo": make_repo, "new-root": new_root,
+COMMANDS = {"check": check, "health": health, "shell": shell,
+            "remove-toolchain": remove_toolchain, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "reset-root": reset_root, "toolchain": toolchain,
             "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
@@ -1154,4 +1235,5 @@ STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": step_build_check,
          "build-stage": step_build_stage, "emulate": step_emulate,
-         "break-cycle": step_break_cycle, "health": step_health}
+         "break-cycle": step_break_cycle, "health": step_health,
+         "remove-toolchain": step_remove_toolchain}

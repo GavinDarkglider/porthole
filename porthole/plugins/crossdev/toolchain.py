@@ -205,6 +205,30 @@ def unused(registry=None, systems=()):
     return sorted(t for t in data["toolchains"] if t not in used)
 
 
+def listing(systems, registry=None, vdb="/var/db/pkg"):
+    """[{"tuple", "gcc", "binutils", "users", "installed"}] of the
+    toolchains Porthole knows, for the systems (their names) made here"""
+    data = registry if registry is not None else read_registry()
+    systems = set(systems)
+    out = []
+    for tuple_, entry in sorted(data["toolchains"].items()):
+        versions = entry.get("versions") or {}
+        out.append({"tuple": tuple_, "gcc": versions.get("gcc", "?"),
+                    "binutils": versions.get("binutils", "?"),
+                    "users": [n for n in users(tuple_, data) if n in systems],
+                    "installed": bool(installed(tuple_, vdb))})
+    return out
+
+
+def forget(tuple_, path=None):
+    """Drop a removed toolchain from the list (and any system still noted
+    against it)"""
+    data = read_registry(path)
+    data["toolchains"].pop(tuple_, None)
+    data["systems"] = {n: t for n, t in data["systems"].items() if t != tuple_}
+    write_registry(data, path)
+
+
 def command(resolved, output_repo, tuple_=None):
     """crossdev's arguments for the resolved toolchain, into output_repo
     (crossdev's repository), installed as tuple_ (default: the system's

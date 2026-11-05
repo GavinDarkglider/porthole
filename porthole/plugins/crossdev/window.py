@@ -226,6 +226,99 @@ def open_in_terminal(argv, title="Porthole"):
     return False
 
 
+class ToolchainsDialog(Gtk.Dialog):
+    """The cross toolchains Porthole made, who uses each, and removing the
+    unused ones"""
+
+    def __init__(self, parent):
+        super().__init__(title="Cross toolchains", transient_for=parent, modal=True)
+        self.parent_window = parent
+        self.set_default_size(720, 320)
+        box = self.get_content_area()
+        box.set_spacing(6)
+        box.set_border_width(10)
+        box.pack_start(Gtk.Label(xalign=0, wrap=True, label=(
+            "Systems wanting the same gcc and binutils share a toolchain; a system whose "
+            "settings ask for another gcc gets one of its own, so the others keep theirs. "
+            "A toolchain no system uses can be removed.")), False, False, 0)
+        # toolchain, gcc, binutils, used by, removable
+        self.store = Gtk.ListStore(str, str, str, str, bool)
+        self.view = Gtk.TreeView(model=self.store)
+        for i, title in enumerate(("Toolchain", "gcc", "binutils", "Used by")):
+            column = Gtk.TreeViewColumn(title, Gtk.CellRendererText(), text=i)
+            column.set_resizable(True)
+            self.view.append_column(column)
+        self.view.get_selection().connect("changed", lambda s: self.update())
+        scroller = Gtk.ScrolledWindow(vexpand=True)
+        scroller.add(self.view)
+        box.pack_start(scroller, True, True, 0)
+        self.empty = Gtk.Label(label="Porthole hasn't made any toolchains yet.",
+                               no_show_all=True)
+        box.pack_start(self.empty, False, False, 0)
+        self.remove_button = self.add_button("Remove…", 1)
+        self.add_button("Close", Gtk.ResponseType.CLOSE)
+        self.fill()
+        self.show_all()
+
+    def fill(self):
+        from porthole.plugins.crossdev import roots, toolchain as tc
+        self.store.clear()
+        for item in tc.listing(roots.made_here()):
+            used = ", ".join(item["users"]) or (
+                "nobody" if item["installed"] else "nobody (not installed any more)")
+            self.store.append([item["tuple"], item["gcc"], item["binutils"], used,
+                               not item["users"]])
+        self.empty.set_visible(len(self.store) == 0)
+        self.update()
+
+    def selected(self):
+        model, it = self.view.get_selection().get_selected()
+        return (model[it][0], model[it][4]) if it else (None, False)
+
+    def update(self):
+        _name, removable = self.selected()
+        self.remove_button.set_sensitive(removable)
+
+    def run_dialog(self):
+        while self.run() == 1:
+            self.remove_selected()
+        self.destroy()
+
+    def remove_selected(self):
+        from porthole.plugins.crossdev import toolchain as tc
+        name, removable = self.selected()
+        if not removable:
+            return
+        warning = ""
+        if tc.split_tuple(name)[1] in ("unknown", "pc", ""):
+            # a standard name, not one Porthole gave it: may be used by hand too
+            warning = ("\n\nIts programs have a standard name (%s-gcc, ...): if you build "
+                       "anything else with them by hand (a kernel, say), that stops working."
+                       % name)
+        confirm = Gtk.MessageDialog(transient_for=self, modal=True,
+                                    message_type=Gtk.MessageType.QUESTION,
+                                    buttons=Gtk.ButtonsType.NONE,
+                                    text="Remove the toolchain %s?" % name)
+        confirm.format_secondary_text(
+            "crossdev --clean removes its packages, programs and settings as a job. No "
+            "system uses it; building it again later takes an hour or more." + warning)
+        confirm.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Remove", Gtk.ResponseType.OK)
+        answer = confirm.run()
+        confirm.destroy()
+        if answer != Gtk.ResponseType.OK:
+            return
+        from porthole.updater.elevate import run_as_root, service
+
+        def done(ok, output):
+            if not ok:
+                self.parent_window.error("The toolchain wasn't removed", output)
+                return
+            if "taken off the list" not in output:
+                show_job(output)
+            self.fill()
+        run_as_root(service("plugin", "crossdev", "remove-toolchain", name), done)
+
+
 class SystemsWindow(Gtk.Window):
     """The systems built here for other computers: a list, New, Remove"""
 
@@ -282,6 +375,12 @@ class SystemsWindow(Gtk.Window):
             "on this computer) first.")
         self.build_button.connect("clicked", lambda b: self.build_system())
         buttons.pack_start(self.build_button, False, False, 0)
+        toolchains = Gtk.Button(label="Toolchains…")
+        toolchains.set_tooltip_text(
+            "The cross toolchains built here, which systems use each (systems wanting "
+            "the same gcc and binutils share one), and removing the ones none uses")
+        toolchains.connect("clicked", lambda b: ToolchainsDialog(self).run_dialog())
+        buttons.pack_start(toolchains, False, False, 0)
         self.shell_button = Gtk.Button(label="Open a shell in it…")
         self.shell_button.set_tooltip_text(
             "A root shell inside the system, in a terminal, to change things by hand "
