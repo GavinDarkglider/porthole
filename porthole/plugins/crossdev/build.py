@@ -267,7 +267,9 @@ def perl_arch(root):
     """The system's perl architecture folder name (aarch64-linux): the one
     with its Config.pm, or None (no perl in it yet)"""
     import glob
-    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/perl5/*/*/Config.pm"))):
+    # Config_heavy.pl is only in perl's own folder: perl5/<version>/Net has a
+    # Config.pm too (libnet's Net::Config), and sorts first
+    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/perl5/*/*/Config_heavy.pl"))):
         return os.path.basename(os.path.dirname(path))
     return None
 
@@ -296,7 +298,17 @@ def repair_perl_modules(target, log=lambda m: None, host=None):
     moved = 0
     for top in glob.glob(os.path.join(root, "usr/lib*/perl5/*/*")):
         wrong, right = os.path.join(top, host), os.path.join(top, arch)
-        if not os.path.isdir(top) or not os.path.lexists(wrong) or os.path.islink(wrong):
+        if not os.path.isdir(top) or not os.path.lexists(wrong):
+            continue
+        if os.path.islink(wrong):
+            # a link to some other folder: an older Porthole took perl's
+            # architecture from the wrong Config.pm and moved modules there
+            # (perl5/vendor_perl/<version>/Net)
+            there = os.readlink(wrong)
+            if there != arch and "/" not in there and os.path.isdir(os.path.join(top, there)):
+                moved += _unmove_perl_modules(root, top, there, arch, host, log)
+                os.unlink(wrong)
+                os.symlink(arch, wrong)
             continue
         if os.path.islink(right):
             os.unlink(right)
@@ -324,6 +336,106 @@ def repair_perl_modules(target, log=lambda m: None, host=None):
         log("Moved %d perl module file%s from this computer's perl folder (%s) to the "
             "system's (%s); a cross build put them there" % (
                 moved, "" if moved == 1 else "s", host, arch))
+    return moved
+
+
+def _unmove_perl_modules(root, top, bad, arch, host, log):
+    """Modules moved into top/bad instead of top/arch: moved on, with the
+    installed packages' file lists (and .packlists) changed to match. A
+    package with C code (a .so under bad/auto) had all its files in perl's
+    architecture folder; the others only their .packlist (bad/auto/...), as
+    bad may be a real module folder too (Net::HTTP's files in Net/). Files
+    a package lists under top/host (through the link) are just moved: the
+    link to arch keeps those lists right."""
+    import glob
+    import hashlib
+    rel = lambda path: "/" + os.path.relpath(path, root)
+    bad_dir, arch_dir = rel(os.path.join(top, bad)) + "/", rel(os.path.join(top, arch)) + "/"
+    host_dir = rel(os.path.join(top, host)) + "/"
+    moved = 0
+    for vdb in glob.glob(os.path.join(root, "var/db/pkg/*/*")):
+        contents = os.path.join(vdb, "CONTENTS")
+        try:
+            with open(contents) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            kind, _, rest = line.partition(" ")
+            if kind == "obj" and rest.startswith(host_dir):
+                path = rest.rsplit(" ", 2)[0][len(host_dir):]
+                source, dest = root + bad_dir + path, root + arch_dir + path
+                if os.path.lexists(source) and not os.path.islink(source):
+                    os.makedirs(os.path.dirname(dest), mode=0o755, exist_ok=True)
+                    if os.path.lexists(dest):
+                        os.unlink(source)
+                    else:
+                        os.rename(source, dest)
+                    moved += 1
+        if not any(" %sauto/" % bad_dir in line for line in lines):
+            continue
+        has_c = any(line.startswith("obj %sauto/" % bad_dir) and ".so " in line
+                    for line in lines)
+        which = bad_dir if has_c else bad_dir + "auto/"
+        renames = {}
+        for line in lines:
+            kind, _, rest = line.partition(" ")
+            if kind in ("obj", "sym") and rest.startswith(which):
+                path = rest.split(" -> ")[0] if kind == "sym" else rest.rsplit(" ", 2)[0]
+                renames[path] = arch_dir + path[len(bad_dir):]
+        for old, new in sorted(renames.items()):
+            source, dest = root + old, root + new
+            if not os.path.lexists(source):
+                continue
+            os.makedirs(os.path.dirname(dest), mode=0o755, exist_ok=True)
+            if os.path.lexists(dest):
+                os.unlink(source)  # the system's own build of it wins
+            else:
+                os.rename(source, dest)
+            moved += 1
+        fixed = []
+        for line in lines:
+            kind, _, rest = line.partition(" ")
+            if kind == "dir" and rest.startswith(which):
+                line = "dir " + arch_dir + rest[len(bad_dir):]
+            elif kind == "sym" and rest.split(" -> ")[0] in renames:
+                path = rest.split(" -> ")[0]
+                line = "sym " + renames[path] + rest[len(path):]
+            elif kind == "obj" and rest.rsplit(" ", 2)[0] in renames:
+                path = renames[rest.rsplit(" ", 2)[0]]
+                if path.endswith("/.packlist") and os.path.isfile(root + path):
+                    with open(root + path) as f:
+                        text = f.read()
+                    with open(root + path, "w") as f:
+                        for entry in text.splitlines():
+                            name = entry.split(" ")[0]
+                            f.write(renames.get(name, name) + entry[len(name):] + "\n")
+                    with open(root + path, "rb") as f:
+                        digest = hashlib.md5(f.read()).hexdigest()
+                    line = "obj %s %s %d" % (path, digest, int(os.stat(root + path).st_mtime))
+                else:
+                    line = "obj " + path + rest[len(rest.rsplit(" ", 2)[0]):]
+            fixed.append(line)
+        if renames:
+            with open(contents, "w") as f:
+                f.write("\n".join(fixed) + "\n")
+            for name in ("NEEDED", "NEEDED.ELF.2"):
+                path = os.path.join(vdb, name)
+                if os.path.isfile(path):
+                    with open(path) as f:
+                        text = f.read()
+                    for old, new in renames.items():
+                        text = text.replace(old, new)
+                    with open(path, "w") as f:
+                        f.write(text)
+    # folders left empty in bad (bottom up; the real Net modules stay)
+    for folder, dirs, files in os.walk(os.path.join(top, bad), topdown=False):
+        if not os.listdir(folder) and folder != os.path.join(top, bad):
+            os.rmdir(folder)
+    if moved:
+        log("Moved %d perl module file%s from %s to %s (an older Porthole put them "
+            "in the wrong folder)" % (moved, "" if moved == 1 else "s",
+                                      bad_dir.rstrip("/"), arch_dir.rstrip("/")))
     return moved
 
 
