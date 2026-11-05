@@ -43,6 +43,30 @@ class EmulateError(Exception):
     pass
 
 
+# held while someone has a shell open in a system (plugin crossdev shell):
+# its builds, starting over and deleting it wait for it to be closed
+SHELL_LOCK = "/run/lock/porthole-shell-%s.lock"
+
+
+def shell_open(name):
+    """True while a shell is open in the system called name"""
+    import fcntl
+    try:
+        with open(SHELL_LOCK % name) as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except FileNotFoundError:
+        return False
+    except BlockingIOError:
+        return True
+    return False
+
+
+def refuse_if_shell(target):
+    if shell_open(target.name):
+        raise EmulateError("A shell is open in %s (plugin crossdev shell). Leave it "
+                           "(exit) first." % target.title)
+
+
 def failed_packages(text, root):
     """[=cat/pkg-ver] emerge --keep-going listed as failed for root, from
     its output (the last list in text): only those that really failed (a

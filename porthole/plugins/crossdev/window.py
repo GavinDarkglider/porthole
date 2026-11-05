@@ -190,6 +190,42 @@ class ReadinessWindow(Gtk.Window):
         step()
 
 
+# how each terminal program is told to run a command (argv after these)
+# (None: the whole command as one string, --command=...)
+TERMINALS = (("xfce4-terminal", ["-x"]), ("konsole", ["-e"]), ("gnome-terminal", ["--"]),
+             ("mate-terminal", ["-x"]), ("lxterminal", None), ("qterminal", ["-e"]),
+             ("terminator", ["-x"]), ("tilix", ["-e"]), ("alacritty", ["-e"]),
+             ("kitty", []), ("foot", []), ("wezterm", ["start", "--"]), ("urxvt", ["-e"]),
+             ("xterm", ["-e"]))
+
+
+def open_in_terminal(argv, title="Porthole"):
+    """Run argv as root in a terminal window: sudo asks for the password
+    there (pkexec where there is no sudo). The window stays open if it
+    fails, to read why. False if no terminal program is installed."""
+    import os
+    import shlex
+    import shutil
+    import subprocess
+    script = ('printf "\\033]0;%%s\\007" %s; '
+              'if command -v sudo >/dev/null; then sudo -- "$@"; else pkexec "$@"; fi; '
+              'status=$?; if [ $status -ne 0 ]; then echo; '
+              'printf "Press Enter to close this window. "; read answer; fi; exit $status'
+              % shlex.quote(title))
+    command = ["sh", "-c", script, "porthole-shell"] + list(argv)
+    wanted = os.environ.get("TERMINAL")
+    choices = ([(wanted, dict(TERMINALS).get(os.path.basename(wanted), ["-e"]))]
+               if wanted else []) + list(TERMINALS)
+    for program, options in choices:
+        path = shutil.which(program) if program else None
+        if path:
+            argv_ = [path] + (options + command if options is not None
+                              else ["--command=" + shlex.join(command)])
+            subprocess.Popen(argv_, start_new_session=True, stdin=subprocess.DEVNULL)
+            return True
+    return False
+
+
 class SystemsWindow(Gtk.Window):
     """The systems built here for other computers: a list, New, Remove"""
 
@@ -246,6 +282,13 @@ class SystemsWindow(Gtk.Window):
             "on this computer) first.")
         self.build_button.connect("clicked", lambda b: self.build_system())
         buttons.pack_start(self.build_button, False, False, 0)
+        self.shell_button = Gtk.Button(label="Open a shell in it…")
+        self.shell_button.set_tooltip_text(
+            "A root shell inside the system, in a terminal, to change things by hand "
+            "(before packaging it, say). Its programs run through qemu; emerge in it "
+            "compiles over distcc here. Not while it is being built.")
+        self.shell_button.connect("clicked", lambda b: self.open_shell())
+        buttons.pack_start(self.shell_button, False, False, 0)
         self.reset_button = Gtk.Button(label="Start over…")
         self.reset_button.set_tooltip_text(
             "Empty the system to build it again from the beginning: its settings, package "
@@ -301,6 +344,7 @@ class SystemsWindow(Gtk.Window):
         self.settings_button.set_sensitive(self.selected() is not None)
         self.build_button.set_sensitive(self.selected() is not None)
         self.toolchain_button.set_sensitive(self.selected() is not None)
+        self.shell_button.set_sensitive(self.selected() is not None)
 
     def error(self, text, detail):
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
@@ -330,6 +374,17 @@ class SystemsWindow(Gtk.Window):
                 # set it up before anything is built
                 self.open_settings(args[1])
         run_as_root(service("plugin", "crossdev", *args), done)
+
+    def open_shell(self):
+        name = self.selected()
+        if not name:
+            return
+        from porthole.updater.elevate import service
+        if not open_in_terminal(service("plugin", "crossdev", "shell", name),
+                                "Porthole: a shell in %s" % name):
+            self.error("No terminal program found",
+                       "Install one (xterm, xfce4-terminal, konsole, …) or set TERMINAL "
+                       "to yours, then try again.")
 
     def open_settings(self, name):
         if not name:

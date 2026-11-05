@@ -175,6 +175,84 @@ def binpkgs(args):
     return 0
 
 
+def shell(args):
+    """plugin crossdev shell NAME: a root shell inside the system, to change
+    things by hand (its programs run through qemu; emerge in it compiles
+    over distcc here). Needs a terminal. Everything is taken away again when
+    the shell ends."""
+    import fcntl
+    from porthole.plugins.crossdev import emulate, roots
+    from porthole.updater import runner
+    from porthole.updater.ondemand import Helpers, HelperError
+    if len(args) != 1:
+        print("usage: plugin crossdev shell NAME", file=sys.stderr)
+        return 2
+    if not sys.stdin.isatty():
+        print("The shell needs a terminal: run it in one.", file=sys.stderr)
+        return 2
+    target = roots.made_here().get(args[0])
+    if target is None:
+        print("No system called %s was made here" % args[0], file=sys.stderr)
+        return 1
+    with runner.jobs_state(write=False) as state:
+        busy = [j for j in runner.active_jobs(state) if any(
+            s.get("plugin") == "crossdev" and s.get("name") == target.name
+            for s in j.get("steps") or [])]
+    if busy:
+        print("%s has a job %s (%s): open a shell once it has finished." % (
+            target.title, busy[0]["status"], busy[0]["title"]), file=sys.stderr)
+        return 1
+    root = os.path.realpath(target.root)
+    if not os.path.exists(os.path.join(root, "bin/sh")):
+        print("%s has nothing to run yet: build it first." % target.title, file=sys.stderr)
+        return 1
+    os.makedirs(os.path.dirname(emulate.SHELL_LOCK), exist_ok=True)
+    lock = open(emulate.SHELL_LOCK % target.name, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("A shell is already open in %s." % target.title, file=sys.stderr)
+        return 1
+    helpers = Helpers("shell-" + target.name, ["binfmt", "distcc"])
+    try:
+        helper_env = helpers.start(print)
+    except HelperError as e:
+        print(e, file=sys.stderr)
+        return 1
+    try:
+        emulate.distcc_links(root, print)
+        inside = emulate.emulated_env(target, helper_env)
+        with emulate.Chroot(target, print):
+            print("\n%s, inside the system (%s). Its own programs run through qemu, so\n"
+                  "they are slower than usual; emerge compiles over distcc on this computer.\n"
+                  "Changes are kept. Type exit to leave: everything mounted for this is\n"
+                  "taken away again.\n" % (target.title, root))
+            shell_cmd = "/bin/bash" if os.path.exists(os.path.join(root, "bin/bash")) \
+                else "/bin/sh"
+            if os.environ.get("TERM"):
+                inside["TERM"] = os.environ["TERM"]
+            # Ctrl-C is the shell's (and what runs in it): not ours, or the
+            # mounts would be taken away under a shell still open
+            import signal
+            keys = (signal.SIGINT, signal.SIGQUIT, signal.SIGTSTP)
+            before = [signal.signal(k, signal.SIG_IGN) for k in keys]
+            try:
+                code = subprocess.call(
+                    emulate.chroot_argv(root, [shell_cmd, "-l"], inside),
+                    preexec_fn=lambda: [signal.signal(k, signal.SIG_DFL) for k in keys])
+            finally:
+                for k, old in zip(keys, before):
+                    signal.signal(k, old)
+        print("Left %s." % target.title)
+        return code if code >= 0 else 128 - code  # ended by a signal, as a shell says
+    except emulate.EmulateError as e:
+        print(e, file=sys.stderr)
+        return 1
+    finally:
+        helpers.stop(print)
+        lock.close()
+
+
 def health(args):
     """plugin crossdev health NAME: check a system as the last build step
     does, and show the findings (exit 1 when there are errors)"""
@@ -318,7 +396,14 @@ def reset_root(args):
 
 
 def step_reset_root(runner, job_id, step, log):
-    from porthole.plugins.crossdev import roots
+    from porthole.plugins.crossdev import emulate, roots
+    try:
+        target = roots.made_here().get(step.get("name", ""))
+        if target is not None:
+            emulate.refuse_if_shell(target)
+    except emulate.EmulateError as e:
+        log("!! %s" % e)
+        return False
     try:
         return roots.reset(step.get("name", ""), log=log)
     except (roots.RootError, OSError) as e:
@@ -327,7 +412,14 @@ def step_reset_root(runner, job_id, step, log):
 
 
 def step_remove_root(runner, job_id, step, log):
-    from porthole.plugins.crossdev import roots
+    from porthole.plugins.crossdev import emulate, roots
+    try:
+        target = roots.made_here().get(step.get("name", ""))
+        if target is not None:
+            emulate.refuse_if_shell(target)
+    except emulate.EmulateError as e:
+        log("!! %s" % e)
+        return False
     try:
         return roots.remove(step.get("name", ""), log=log)
     except (roots.RootError, OSError) as e:
@@ -484,7 +576,11 @@ def build(args):
 
 
 def _build_env(target, log):
-    from porthole.plugins.crossdev import build as bd
+    from porthole.plugins.crossdev import build as bd, emulate
+    try:
+        emulate.refuse_if_shell(target)
+    except emulate.EmulateError as e:
+        raise bd.BuildError(str(e))
     chost = bd.chost_of(target)
     if not chost:
         raise bd.BuildError("%s's settings give no CHOST" % target.title)
@@ -1000,7 +1096,7 @@ def step_firstboot(runner, job_id, step, log):
         return False
 
 
-COMMANDS = {"check": check, "health": health, "make-repo": make_repo, "new-root": new_root,
+COMMANDS = {"check": check, "health": health, "shell": shell, "make-repo": make_repo, "new-root": new_root,
             "remove-root": remove_root, "reset-root": reset_root, "toolchain": toolchain,
             "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
