@@ -263,52 +263,78 @@ def link_python_modules(target, log=lambda m: None):
     return made
 
 
-def perl_arch(root):
-    """The system's perl architecture folder name (aarch64-linux): the one
-    with its Config.pm, or None (no perl in it yet)"""
-    import glob
-    # Config_heavy.pl is only in perl's own folder: perl5/<version>/Net has a
-    # Config.pm too (libnet's Net::Config), and sorts first
-    for path in sorted(glob.glob(os.path.join(root, "usr/lib*/perl5/*/*/Config_heavy.pl"))):
-        return os.path.basename(os.path.dirname(path))
-    return None
+# perl's install folders (perl -V:<name>): where modules with C code, plain
+# modules, and their .packlist files go
+PERL_DIRS = ("installarchlib", "installprivlib", "installvendorarch",
+             "installvendorlib", "installsitearch", "installsitelib")
+# of those, the ones only perl modules with C code use (named for one CPU)
+PERL_ARCH_DIRS = ("installarchlib", "installvendorarch", "installsitearch")
+
+_PERL_ASK = 'use Config; print "$_=$Config{$_}\\n" for @ARGV'
 
 
-def host_perl_arch():
+def _perl_config(argv):
+    """perl's own answer for PERL_DIRS: {name: folder}, or {}"""
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "LC_ALL": "C"}
     try:
-        return subprocess.run(["perl", "-MConfig", "-e", "print $Config{archname}"],
-                              capture_output=True, text=True, timeout=30).stdout.strip() or None
+        out = subprocess.run(argv + ["-e", _PERL_ASK] + list(PERL_DIRS), env=env,
+                             capture_output=True, text=True, timeout=60).stdout
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return {}
+    found = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    return {k: v.rstrip("/") for k, v in found.items() if k in PERL_DIRS and v.startswith("/")}
 
 
-def repair_perl_modules(target, log=lambda m: None, host=None):
-    """Perl modules already installed in this computer's perl folder
-    (vendor_perl/<version>/x86_64-linux) by cross builds: moved into the
-    system's own (aarch64-linux), with a link left at the old place so the
-    packages' file lists stay valid. Also undoes a link the other way (the
-    system's folder pointing at this computer's), keeping what was set
-    aside next to it (<arch>.1)."""
-    import glob
+def host_perl_dirs():
+    """This computer's perl install folders (the ones a cross build uses)"""
+    perl = shutil.which("perl")
+    return _perl_config([perl]) if perl else {}
+
+
+def system_perl_dirs(root):
+    """The system's perl install folders, asked of its own perl through qemu,
+    or {} (no perl in it yet, or no qemu for it)"""
+    perl = os.path.join(root, "usr/bin/perl")
+    qemu = qemu_for(elf_id(os.path.realpath(perl)) or (0, 0, True))
+    if not os.path.isfile(perl) or not qemu or not shutil.which("qemu-" + qemu):
+        return {}
+    return _perl_config(["qemu-" + qemu, "-L", root, perl])
+
+
+def perl_dir_moves(host, system, names=PERL_DIRS):
+    """[(this computer's folder, the system's)] where they differ, the
+    deepest first (an architecture folder can be inside a library one)"""
+    moves = [(host[n], system[n]) for n in names
+             if host.get(n) and system.get(n) and host[n] != system[n]]
+    return sorted(set(moves), key=lambda m: -m[0].count("/"))
+
+
+def repair_perl_modules(target, log=lambda m: None, host=None, system=None):
+    """Perl modules with C code already installed in this computer's perl
+    architecture folders (perl -V:installvendorarch here) by cross builds:
+    moved into the system's own, with a link left at the old place so the
+    packages' file lists stay valid. A link from an older Porthole that
+    points somewhere else is moved on the same way. Only architecture
+    folders: nothing of the system's own perl is ever in this computer's
+    (a plain library folder of another version may be)."""
     root = os.path.realpath(target.root)
-    host = host or host_perl_arch()
-    arch = perl_arch(root)
-    if not host or not arch or host == arch:
-        return 0
+    host = host_perl_dirs() if host is None else host
+    system = system_perl_dirs(root) if system is None else system
     moved = 0
-    for top in glob.glob(os.path.join(root, "usr/lib*/perl5/*/*")):
-        wrong, right = os.path.join(top, host), os.path.join(top, arch)
-        if not os.path.isdir(top) or not os.path.lexists(wrong):
+    for here, theirs in perl_dir_moves(host, system, PERL_ARCH_DIRS):
+        wrong, right = root + here, root + theirs
+        if not os.path.lexists(wrong):
             continue
         if os.path.islink(wrong):
-            # a link to some other folder: an older Porthole took perl's
-            # architecture from the wrong Config.pm and moved modules there
-            # (perl5/vendor_perl/<version>/Net)
-            there = os.readlink(wrong)
-            if there != arch and "/" not in there and os.path.isdir(os.path.join(top, there)):
-                moved += _unmove_perl_modules(root, top, there, arch, host, log)
+            there = os.path.realpath(wrong)
+            if there != right and there.startswith(root + "/") and os.path.isdir(there):
+                moved += _unmove_perl_modules(root, "/" + os.path.relpath(there, root),
+                                              theirs, here, log)
+            if there != right:
                 os.unlink(wrong)
-                os.symlink(arch, wrong)
+                os.symlink(os.path.relpath(right, os.path.dirname(wrong)), wrong)
+            continue
+        if not os.path.isdir(wrong):
             continue
         if os.path.islink(right):
             os.unlink(right)
@@ -328,30 +354,29 @@ def repair_perl_modules(target, log=lambda m: None, host=None):
                     with open(dest) as f:
                         text = f.read()
                     with open(dest, "w") as f:
-                        f.write(text.replace("/%s/" % host, "/%s/" % arch))
+                        f.write(text.replace(here + "/", theirs + "/"))
                 moved += 1
         shutil.rmtree(wrong)
-        os.symlink(arch, wrong)
+        os.symlink(os.path.relpath(right, os.path.dirname(wrong)), wrong)
     if moved:
-        log("Moved %d perl module file%s from this computer's perl folder (%s) to the "
-            "system's (%s); a cross build put them there" % (
-                moved, "" if moved == 1 else "s", host, arch))
+        log("Moved %d perl module file%s from this computer's perl folders to the "
+            "system's; a cross build put them there" % (moved, "" if moved == 1 else "s"))
     return moved
 
 
-def _unmove_perl_modules(root, top, bad, arch, host, log):
-    """Modules moved into top/bad instead of top/arch: moved on, with the
-    installed packages' file lists (and .packlists) changed to match. A
-    package with C code (a .so under bad/auto) had all its files in perl's
-    architecture folder; the others only their .packlist (bad/auto/...), as
-    bad may be a real module folder too (Net::HTTP's files in Net/). Files
-    a package lists under top/host (through the link) are just moved: the
-    link to arch keeps those lists right."""
+def _unmove_perl_modules(root, bad_dir, arch_dir, host_dir, log):
+    """Modules an older Porthole moved into bad_dir instead of the system's
+    arch_dir (it read perl's architecture from libnet's Net/Config.pm, so
+    bad_dir was .../vendor_perl/<version>/Net): moved on, with the installed
+    packages' file lists (and .packlists) changed to match. A package with
+    C code (a .so under bad_dir/auto) had all its files in perl's
+    architecture folder; the others only their .packlist (bad_dir/auto/...),
+    as bad_dir may be a real module folder too (Net::HTTP's files in Net/).
+    Files a package lists under host_dir (through the link) are just moved:
+    the link to arch_dir keeps those lists right. Folders are root-relative."""
     import glob
     import hashlib
-    rel = lambda path: "/" + os.path.relpath(path, root)
-    bad_dir, arch_dir = rel(os.path.join(top, bad)) + "/", rel(os.path.join(top, arch)) + "/"
-    host_dir = rel(os.path.join(top, host)) + "/"
+    bad_dir, arch_dir, host_dir = bad_dir + "/", arch_dir + "/", host_dir + "/"
     moved = 0
     for vdb in glob.glob(os.path.join(root, "var/db/pkg/*/*")):
         contents = os.path.join(vdb, "CONTENTS")
@@ -428,9 +453,10 @@ def _unmove_perl_modules(root, top, bad, arch, host, log):
                         text = text.replace(old, new)
                     with open(path, "w") as f:
                         f.write(text)
-    # folders left empty in bad (bottom up; the real Net modules stay)
-    for folder, dirs, files in os.walk(os.path.join(top, bad), topdown=False):
-        if not os.listdir(folder) and folder != os.path.join(top, bad):
+    # folders left empty in bad_dir (bottom up; the real modules there stay)
+    top = root + bad_dir.rstrip("/")
+    for folder, dirs, files in os.walk(top, topdown=False):
+        if folder != top and not os.listdir(folder):
             os.rmdir(folder)
     if moved:
         log("Moved %d perl module file%s from %s to %s (an older Porthole put them "
@@ -444,7 +470,7 @@ BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
 def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None,
-                 host_perl=None, target_perl=None):
+                 perl_moves=()):
     """Porthole's block in the system's bashrc: only when it is cross-built"""
     lines = [
         BASHRC_BEGIN,
@@ -471,19 +497,21 @@ def bashrc_block(chost, root, tools=None, host_tag=None, target_tag=None,
             '\t\t\tmv -- "${f}" "${f%%-%s.so}-%s.so" || die' % (host_tag, target_tag),
             "\t\tdone < <(find \"${ED}\" -type f -name '*.cpython-3*-%s.so' -print0)"
             % host_tag]
-    if host_perl and target_perl and host_perl != target_perl:
+    if perl_moves:
         body += [
-            "\t\t# perl modules with C code go to this computer's perl folder (%s)"
-            % host_perl,
-            "\t\t# in a cross build; the system's perl looks in its own (%s)" % target_perl,
-            "\t\tfor d in \"${ED}\"/usr/lib*/perl5/{vendor_perl,site_perl}/*/%s; do"
-            % host_perl,
-            "\t\t\t[[ -d ${d} && ! -L ${d} ]] || continue",
-            '\t\t\tmkdir -p "${d%%/*}/%s" || die' % target_perl,
-            '\t\t\tcp -a "${d}"/. "${d%%/*}/%s"/ && rm -r "${d}" || die' % target_perl,
-            "\t\tdone",
+            "\t\t# perl modules go to this computer's perl folders in a cross build",
+            "\t\t# (its perl -V:install*); the system's perl looks in its own"]
+        for here, theirs in perl_moves:
+            body += [
+                '\t\tif [[ -d ${ED}%s && ! -L ${ED}%s ]]; then' % (here, here),
+                '\t\t\tmkdir -p "${ED}%s" || die' % theirs,
+                '\t\t\tcp -a "${ED}%s"/. "${ED}%s"/ && rm -r "${ED}%s" || die'
+                % (here, theirs, here),
+                "\t\tfi"]
+        body += [
             "\t\twhile IFS= read -r -d '' f; do",
-            '\t\t\tsed -i "s:/%s/:/%s/:g" "${f}" || die' % (host_perl, target_perl),
+            '\t\t\tsed -i %s "${f}" || die' % " ".join(
+                "-e 's:^%s/:%s/:'" % m for m in perl_moves),
             "\t\tdone < <(find \"${ED}\" -type f -name .packlist -print0)"]
     if body:
         lines += [
@@ -506,7 +534,8 @@ def write_bashrc(target, chost, base=None):
         text = ""
     root = os.path.realpath(target.root)
     block = bashrc_block(chost, root, wrappers_dir(target, base), host_multiarch(),
-                         python_multiarch(root), host_perl_arch(), perl_arch(root))
+                         python_multiarch(root),
+                         perl_dir_moves(host_perl_dirs(), system_perl_dirs(root)))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
         text = before + block + rest.split(BASHRC_END, 1)[1]
