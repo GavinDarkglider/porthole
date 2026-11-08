@@ -179,6 +179,15 @@ def _expand(rpath, rel_path, lib):
                             .replace("$LIB", lib).replace("${LIB}", lib))
 
 
+EM_BPF = 247
+
+
+def _is_bpf(path):
+    from porthole.plugins.crossdev import build
+    ident = build.elf_id(path)
+    return bool(ident) and ident[0] == EM_BPF
+
+
 def check_programs(root, findings):
     elves = scan_elf(root)
     if elves is None:
@@ -193,6 +202,8 @@ def check_programs(root, findings):
             continue
         if machine == host and not _under(rel, FOREIGN_OK):
             leaked.append("%s (%s)" % (rel, machine))
+        elif _is_bpf(root + rel):
+            continue  # eBPF programs run in the kernel, on no CPU (ir-keytable's)
         else:
             foreign.append("%s (%s)" % (rel, machine))
     if leaked:
@@ -212,7 +223,12 @@ def check_programs(root, findings):
     dirs = library_dirs(root)
     libraries = Libraries(root)
     lib = "lib64" if os.path.isdir(os.path.join(root, "usr/lib64")) else "lib"
-    missing, bundled = {}, {}
+    missing, bundled, elsewhere = {}, {}, {}
+    # every library the system has, by name, wherever it is
+    by_name = {}
+    for machine, rel, _needed, _rpath in elves:
+        if not wanted or machine in wanted:
+            by_name.setdefault(os.path.basename(rel), []).append(rel)
     for machine, rel, needed, rpaths in elves:
         if wanted and machine not in wanted:
             continue
@@ -226,6 +242,12 @@ def check_programs(root, findings):
                 continue
             if libraries.has(os.path.dirname(rel), name):
                 continue  # a bundle next to its own libraries (a launcher sets the path)
+            if name in by_name:
+                # there, but not where the loader looks: fine when the program
+                # loading it opens it by its full path first (a GL vendor library)
+                elsewhere.setdefault((name, ", ".join(sorted(
+                    os.path.dirname(r) for r in by_name[name]))), []).append(rel)
+                continue
             target = missing if _under(rel, SYSTEM_DIRS) else bundled
             target.setdefault(name, []).append(rel)
     for found, severity, where in ((missing, ERROR, "the system's"),
@@ -241,6 +263,17 @@ def check_programs(root, findings):
                    "is" if len(found) == 1 else "are"), items,
                 "Usually a package that should be rebuilt (emerge @preserved-rebuild) "
                 "or a dependency missing from an ebuild."))
+    if elsewhere:
+        items = ["%s (in %s), needed by %s%s" % (name, folders, ", ".join(users[:3]),
+                                                  " and %d more" % (len(users) - 3)
+                                                  if len(users) > 3 else "")
+                 for (name, folders), users in sorted(elsewhere.items())]
+        findings.append(Finding(
+            WARNING, "library-off-path", "%d librar%s outside the folders the loader "
+            "searches" % (len(elsewhere), "y" if len(elsewhere) == 1 else "ies"), items,
+            "Fine if whatever loads these programs opens the library by its full path "
+            "first (GL vendor libraries are loaded that way); otherwise its folder "
+            "belongs in /etc/ld.so.conf.d or /etc/env.d."))
 
 
 # -- module names a cross build gets wrong --------------------------------------------
@@ -391,7 +424,7 @@ def check_packages(root, findings):
 
 
 def check_links(root, findings):
-    broken = []
+    broken, here = [], []
     for top in SYSTEM_DIRS + ("etc",):
         start = os.path.join(root, top)
         if not os.path.isdir(start) or os.path.islink(start):
@@ -402,12 +435,26 @@ def check_links(root, findings):
                 if not os.path.islink(path):
                     continue
                 target = os.readlink(path)
+                if target == root or target.startswith(root + "/"):
+                    # made with the path of the system on this computer
+                    # (an ebuild using ${ESYSROOT} or ${EROOT} in a link)
+                    here.append("%s -> %s" % (_rel(root, path), target))
+                    continue
                 full = root + target if target.startswith("/") else os.path.join(folder, target)
-                if target.startswith(("/proc/", "/sys/", "/dev/", "/run/")) \
-                        or target in ("/proc", "/sys", "/dev", "/run"):
+                # where it leads on the running system
+                there = os.path.normpath(target if target.startswith("/") else os.path.join(
+                    "/", _rel(root, folder), target))
+                if there.startswith(("/proc/", "/sys/", "/dev/", "/run/")) \
+                        or there in ("/proc", "/sys", "/dev", "/run"):
                     continue  # there on the running system
                 if not os.path.exists(full) and not _resolves(root, path):
                     broken.append("%s -> %s" % (_rel(root, path), target))
+    if here:
+        findings.append(Finding(
+            ERROR, "host-path-links", "%d link%s to this computer's copy of the system, "
+            "leading nowhere on the system itself" % (len(here), "" if len(here) == 1 else "s"),
+            here, "Build the package again: Porthole now fixes these links as it installs "
+                  "(the ebuild names the system by its path on this computer)."))
     if broken:
         findings.append(Finding(
             WARNING, "broken-links", "%d link%s leading nowhere"

@@ -35,6 +35,7 @@
 
 import os
 import re
+import shlex
 import shutil
 import subprocess
 
@@ -543,8 +544,33 @@ BASHRC_BEGIN = "# --- Porthole: cross builds (changed by Porthole) ---"
 BASHRC_END = "# --- end of Porthole's cross build settings ---"
 
 
-def bashrc_block(chost, root, tools=None, python_moves=(), perl_moves=()):
-    """Porthole's block in the system's bashrc: only when it is cross-built"""
+def host_python_suffixes():
+    """[(program, C module ending)] of this computer's Pythons (python3.13,
+    python3.13t, ...), each asked directly"""
+    import glob
+    found = []
+    for path in sorted(glob.glob("/usr/bin/python3.*")):
+        if os.path.islink(path) or not elf_id(path):
+            continue
+        suffix = _python_suffix([path])
+        if suffix:
+            found.append((os.path.basename(path), suffix))
+    return found
+
+
+def host_perl_order(host):
+    """[(name, this computer's folder)] of PERL_DIRS, the deepest first (an
+    architecture folder can be inside a library one, so it moves first)"""
+    return sorted(((n, host[n]) for n in PERL_DIRS if host.get(n)),
+                  key=lambda m: -m[1].count("/"))
+
+
+def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
+    """Porthole's block in the system's bashrc: only when it is cross-built.
+    host_pythons: host_python_suffixes(); host_perl: host_perl_order(). The
+    system's own answers are asked inside the hook, when a package has
+    something to move: its perl or Python may come in with the same emerge,
+    after the bashrc was written."""
     lines = [
         BASHRC_BEGIN,
         "# Only when this system is cross-built on another computer (CBUILD set to",
@@ -560,39 +586,77 @@ def bashrc_block(chost, root, tools=None, python_moves=(), perl_moves=()):
         "\t# GI_CROSS_LAUNCHER",
         '\texport CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
         '\texport GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root)]
-    body = []
-    if python_moves:
+    body = [
+        "\t\t# links an ebuild made with the system's path on this computer",
+        "\t\t# (${ESYSROOT} or ${EROOT} in dosym) lead nowhere on the system: its",
+        "\t\t# own path instead",
+        "\t\twhile IFS= read -r -d '' f; do",
+        '\t\t\tmine=$(readlink -- "${f}")',
+        '\t\t\tln -sfn -- "${mine#%s}" "${f}" || die' % shlex.quote(root),
+        "\t\tdone < <(find \"${ED}\" -type l -lname %s -print0)" % shlex.quote(root + "/*")]
+    if host_pythons:
         body += [
             "\t\t# Python C modules get this computer's Python's ending in a cross",
-            "\t\t# build (sysconfig EXT_SUFFIX); the system's Python looks for its own"]
-        for mine, theirs in python_moves:
-            body += [
-                "\t\twhile IFS= read -r -d '' f; do",
-                '\t\t\tmv -- "${f}" "${f%%%s}%s" || die' % (mine, theirs),
-                "\t\tdone < <(find \"${ED}\" -type f -name '*%s' -print0)" % mine]
-    if perl_moves:
+            "\t\t# build (sysconfig EXT_SUFFIX); the system's Python, asked here,",
+            "\t\t# looks for its own",
+            "\t\tfor name in %s; do" % " ".join(
+                shlex.quote("%s %s" % pair) for pair in host_pythons),
+            '\t\t\tmine=${name#* } name=${name%% *}',
+            "\t\t\t[[ -n $(find \"${ED}\" -type f -name \"*${mine}\" -print -quit) ]] || continue",
+            '\t\t\ttheirs=$(porthole_system_run "/usr/bin/${name}" -I -c %s)' % shlex.quote(
+                _PYTHON_ASK),
+            '\t\t\t[[ ${theirs} == *.so && ${theirs} != "${mine}" ]] || continue',
+            "\t\t\twhile IFS= read -r -d '' f; do",
+            '\t\t\t\tmv -- "${f}" "${f%"${mine}"}${theirs}" || die',
+            "\t\t\tdone < <(find \"${ED}\" -type f -name \"*${mine}\" -print0)",
+            "\t\tdone"]
+    if host_perl:
         body += [
             "\t\t# perl modules go to this computer's perl folders in a cross build",
-            "\t\t# (its perl -V:install*); the system's perl looks in its own"]
-        for here, theirs in perl_moves:
-            body += [
-                '\t\tif [[ -d ${ED}%s && ! -L ${ED}%s ]]; then' % (here, here),
-                '\t\t\tmkdir -p "${ED}%s" || die' % theirs,
-                '\t\t\tcp -a "${ED}%s"/. "${ED}%s"/ && rm -r "${ED}%s" || die'
-                % (here, theirs, here),
-                "\t\tfi"]
-        body += [
-            "\t\twhile IFS= read -r -d '' f; do",
-            '\t\t\tsed -i %s "${f}" || die' % " ".join(
-                "-e 's:^%s/:%s/:'" % m for m in perl_moves),
-            "\t\tdone < <(find \"${ED}\" -type f -name .packlist -print0)"]
+            "\t\t# (its perl -V:install*); the system's perl, asked here, looks in",
+            "\t\t# its own",
+            "\t\tlocal -a here=(%s)" % " ".join(
+                shlex.quote("%s=%s" % pair) for pair in host_perl),
+            "\t\tlocal -A there=()",
+            "\t\tfor name in \"${here[@]}\"; do",
+            '\t\t\t[[ -d ${ED}${name#*=} ]] || continue',
+            "\t\t\twhile IFS='=' read -r f theirs; do",
+            '\t\t\t\t[[ ${theirs} == /* ]] && there[${f}]=${theirs%/}',
+            '\t\t\tdone < <(porthole_system_run /usr/bin/perl -MConfig -e %s %s)' % (
+                shlex.quote(_PERL_ASK), " ".join(n for n, _d in host_perl)),
+            "\t\t\tbreak",
+            "\t\tdone",
+            "\t\tlocal -a sed_args=()",
+            "\t\tfor name in \"${here[@]}\"; do",
+            '\t\t\tmine=${name#*=} theirs=${there[${name%%=*}]}',
+            '\t\t\t[[ -n ${theirs} && ${theirs} != "${mine}" ]] || continue',
+            "\t\t\tsed_args+=(-e \"s:^${mine}/:${theirs}/:\")",
+            '\t\t\tif [[ -d ${ED}${mine} && ! -L ${ED}${mine} ]]; then',
+            '\t\t\t\tmkdir -p "${ED}${theirs}" || die',
+            '\t\t\t\tcp -a "${ED}${mine}"/. "${ED}${theirs}"/ && rm -r "${ED}${mine}" || die',
+            "\t\t\tfi",
+            "\t\tdone",
+            "\t\tif (( ${#sed_args[@]} )); then",
+            "\t\t\twhile IFS= read -r -d '' f; do",
+            '\t\t\t\tsed -i "${sed_args[@]}" "${f}" || die',
+            "\t\t\tdone < <(find \"${ED}\" -type f -name .packlist -print0)",
+            "\t\tfi"]
     if body:
         lines += [
+            "\t# One of the system's own programs, run through qemu (nothing when",
+            "\t# the system doesn't have it yet)",
+            "\tporthole_system_run() {",
+            '\t\tlocal program=%s$1' % shlex.quote(root),
+            "\t\tshift",
+            '\t\t[[ -f ${program} && ! -L ${program} ]] || return 1',
+            '\t\tenv -u LD_PRELOAD LC_ALL=C %s -L %s "${program}" "$@" 2>/dev/null' % (
+                qemu_name(chost), shlex.quote(root)),
+            "\t}",
             "\t# Fixed right after the package installs into its image, so binary",
             "\t# packages are made with the system's names; and again when a",
             "\t# package is merged, for binary packages made before this",
             "\tporthole_cross_names() {",
-            "\t\tlocal d f"] + body + [
+            "\t\tlocal f name mine theirs"] + body + [
             "\t}",
             "\tpost_src_install() { porthole_cross_names; }",
             "\tpre_pkg_preinst() { porthole_cross_names; }"]
@@ -610,8 +674,8 @@ def write_bashrc(target, chost, base=None):
     except OSError:
         text = ""
     root = os.path.realpath(target.root)
-    block = bashrc_block(chost, root, wrappers_dir(target, base), python_suffix_moves(root),
-                         perl_dir_moves(host_perl_dirs(), system_perl_dirs(root)))
+    block = bashrc_block(chost, root, wrappers_dir(target, base), host_python_suffixes(),
+                         host_perl_order(host_perl_dirs()))
     if BASHRC_BEGIN in text and BASHRC_END in text:
         before, rest = text.split(BASHRC_BEGIN, 1)
         text = before + block + rest.split(BASHRC_END, 1)[1]
