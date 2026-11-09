@@ -888,6 +888,38 @@ def _log_since(job_id, offset):
         return ""
 
 
+def _system_left(env, wanted):
+    """[=cat/pkg-ver] the system set still needs, with what they need, as a
+    cross build would merge them; set members whose plan takes in any of
+    wanted (cat/pkg) are left out (nintendo-switch-meta needing glib)"""
+    from porthole.plugins.crossdev import emulate
+    from porthole.updater import recipe
+
+    def plan(args):
+        argv = ["emerge", "--pretend", "--oneshot", "--noreplace", "--color=n"] + args
+        result = subprocess.run(argv, capture_output=True, text=True,
+                                env=dict(os.environ, **env))
+        recipe.ran(argv, result.returncode)
+        return emulate.merge_list(result.stdout) if result.returncode == 0 else None
+
+    def clean(found):
+        return found is not None and not any(emulate.cp_of(a) in wanted for a in found)
+
+    members = [a for a in plan(["--nodeps", "@system"]) or []
+               if emulate.cp_of(a) not in wanted]
+    if not members:
+        return []
+    found = plan(members)
+    if clean(found):
+        return found
+    left = []
+    for member in members:
+        found = plan([member])
+        if clean(found):
+            left += [a for a in found if a not in left]
+    return left
+
+
 def _emulate(runner, job_id, step, log, target, env, atoms):
     """Build atoms inside the system under qemu, compiling over distcc on
     this computer; True when they all built"""
@@ -948,6 +980,14 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             if emulate.cp_of(atom) in wanted:
                 break
             tools.append(atom)
+        # ebuilds take the system set as given (flex's configure needs grep),
+        # and the stage that would have built the rest of it stopped at what
+        # failed: what of it doesn't need them is cross-built with the tools
+        base = _system_left(env, wanted)
+        if base:
+            log("== emulator: %d package%s of the system set (and what they need) not in "
+                "yet, cross-built with the tools" % (len(base), "" if len(base) == 1 else "s"))
+        tools = base + [a for a in tools if a not in base]
         tried = set()  # failed tools the loop below builds in the system
         if tools:
             argv = ["emerge", "--verbose", "--color=y", "--oneshot", "--keep-going",
