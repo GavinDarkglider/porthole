@@ -63,10 +63,16 @@ def follow(job_id=None, out=None):
                       time.strftime("%Y-%m-%d %H:%M", time.localtime(
                           job.get("finished") or 0)))).encode())
     out.flush()
-    # a queued job has no log yet
-    while job and job["status"] == "queued" and not os.path.exists(job["log"]):
+    # a queued job has no log yet, and a job that just started may not
+    # have made it yet either
+    while job and job["status"] in ACTIVE and not os.path.exists(job["log"]):
         time.sleep(1)
         job = find(job_id)
+    if not job or not os.path.exists(job["log"]):
+        out.write(("*** Job %s: it left no log.\n"
+                   % (job or {}).get("status", "gone")).encode())
+        out.flush()
+        return 1
     with open(job["log"], "rb") as log:
         size = os.fstat(log.fileno()).st_size
         if size > REPLAY_BYTES:
