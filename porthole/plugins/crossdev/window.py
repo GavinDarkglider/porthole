@@ -370,8 +370,8 @@ class SystemsWindow(Gtk.Window):
         buttons.pack_start(self.toolchain_button, False, False, 0)
         self.build_button = Gtk.Button(label="Build the system…")
         self.build_button.set_tooltip_text(
-            "Cross-compile it here: kernel headers and C library, @system, its package list, "
-            "then its first-boot setup. Shows what it builds (and anything it needs changed "
+            "Cross-compile it here: kernel headers and C library, @system, its package list "
+            "(removing what nothing needs any more), then its first-boot setup. Shows what it builds (and anything it needs changed "
             "on this computer) first.")
         self.build_button.connect("clicked", lambda b: self.build_system())
         buttons.pack_start(self.build_button, False, False, 0)
@@ -943,7 +943,8 @@ class BuildDialog(Gtk.Dialog):
             len(plan["root"]), target.title, plan["chost"])), False, False, 0)
         box.pack_start(small(
             "Cross-compiled here, in order: kernel headers and C library, the base system, "
-            "the system's package list, then its first-boot setup. Hours, for a whole "
+            "the system's package list (removing what nothing needs any more), then its "
+            "first-boot setup. Hours, for a whole "
             "system; it can be stopped and started again, and picks up where it stopped."),
             False, False, 0)
         box.pack_start(listing(plan["root"], 110), False, False, 0)

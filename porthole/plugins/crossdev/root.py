@@ -47,6 +47,7 @@
         toolchain     {"name": NAME}
         build-check   {"name": NAME}   compiler wrappers; emerge --pretend
         build-stage   {"name": NAME, "stage": base|system|extra|world}
+        depclean      {"name": NAME}   remove what nothing in it needs any more
         firstboot     {"name": NAME}   write its first-boot setup into it
 
     Copyright (C) 2026 Porthole developers
@@ -668,6 +669,7 @@ def build(args):
                      "action": action, "name": target.name}, **more)
     steps = [step("build-check", "Check the build can go ahead")]
     steps += [step("build-stage", stage_title, stage=stage) for stage, stage_title in bd.STAGES]
+    steps.append(step("depclean", "Remove what nothing needs any more"))
     steps.append(step("firstboot", "The first-boot setup"))
     steps.append(step("health", "Check the finished system"))
     job = runner.new_job("plugin", title, steps, recheck=False)
@@ -759,6 +761,11 @@ RECIPE_NOTES = {
         "emerge stopped on a circular dependency (A needs B, B needs A) and suggested\n"
         "USE flags to turn off for a first build. That build uses a temporary\n"
         "package.use file; the stage then runs again, building it with its usual flags."),
+    "depclean": (
+        "emerge --depclean: packages nothing in @system or @world needs any more (left\n"
+        "behind when a package's dependencies or the system's USE flags change) are\n"
+        "removed from the system. Their build dependencies are kept, as emerge does by\n"
+        "default, and libraries something still links are kept (preserve-libs)."),
     "health": (
         "The finished system checked: no programs built for this computer, every\n"
         "library a program needs present, perl and Python modules under the system's\n"
@@ -1242,6 +1249,29 @@ def step_health(runner, job_id, step, log):
     return True
 
 
+def step_depclean(runner, job_id, step, log):
+    """Remove what nothing in the system needs any more, after @world (mesa
+    once nothing asks for it). emerge refuses, removing nothing, when the
+    system's dependencies don't work out"""
+    from porthole.plugins.crossdev import build as bd, roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    try:
+        env = _build_env(target, log)
+    except (bd.BuildError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    argv = ["emerge", "--depclean", "--verbose", "--color=y"]
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+        log("!! emerge couldn't work out what the system still needs (above); nothing "
+            "was removed.")
+        return False
+    return True
+
+
 def step_firstboot(runner, job_id, step, log):
     """Write the first-boot setup into the system (the end of its build)"""
     from porthole.plugins.crossdev import firstboot as fb, roots
@@ -1276,4 +1306,5 @@ STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "firstboot": step_firstboot, "build-check": step_build_check,
          "build-stage": step_build_stage, "emulate": step_emulate,
          "break-cycle": step_break_cycle, "health": step_health,
+         "depclean": step_depclean,
          "remove-toolchain": step_remove_toolchain}
