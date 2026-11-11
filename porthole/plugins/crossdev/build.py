@@ -221,14 +221,15 @@ def write_ldd(target, chost, base=None):
     """An ldd first in PATH that also lists the system's programs, each
     through the qemu and dynamic linker (ld.so --list) of its own ABI
     (a multilib system has several); others go to the real ldd.
-    g-ir-scanner runs ldd on the program it builds."""
+    g-ir-scanner runs ldd on the program it builds. LD_PRELOAD is never
+    the system's (see bashrc_block)."""
     root = os.path.realpath(target.root)
     path = os.path.join(wrappers_dir(target, base), "ldd")
     cases = []
     for ident, linker in sorted(dynamic_linkers(root).items()):
         qemu = qemu_for(ident)
         if qemu:
-            cases.append('\t%d/%d/%d) exec qemu-%s -L %s %s --list "$last" ;;'
+            cases.append('\t%d/%d/%d) exec qemu-%s -L %s -U LD_PRELOAD %s --list "$last" ;;'
                          % (ident[0], ident[1], 1 if ident[2] else 2, qemu, root, linker))
     if not cases:
         if os.path.exists(path):
@@ -296,7 +297,7 @@ def python_suffix_moves(root):
         here = shutil.which(name)
         if not qemu or not shutil.which("qemu-" + qemu) or not here:
             continue
-        theirs = _python_suffix(["qemu-" + qemu, "-L", root, program])
+        theirs = _python_suffix(system_qemu_argv(qemu, root) + [program])
         mine = _python_suffix([here])
         if theirs and mine and theirs != mine and (mine, theirs) not in moves:
             moves.append((mine, theirs))
@@ -366,6 +367,47 @@ def host_perl_dirs():
     return _perl_config([perl]) if perl else {}
 
 
+def system_library_path(root):
+    """The folders the system's etc/ld.so.conf (and ld.so.conf.d) lists, as
+    LD_LIBRARY_PATH: its loader only finds them through the library cache,
+    which isn't made until the emulator or the end of the build (gcc's
+    libgcc_s, which perl and Python need, is in one)"""
+    import glob
+    found = []
+
+    def read(path, depth=0):
+        try:
+            with open(path) as f:
+                lines = f.read().splitlines()
+        except OSError:
+            return
+        for line in lines:
+            line = line.split("#", 1)[0].strip()
+            if line.startswith("include ") and depth < 4:
+                pattern = line.split(None, 1)[1]
+                if not pattern.startswith("/"):
+                    pattern = os.path.join("/etc", pattern)
+                for inc in sorted(glob.glob(os.path.join(root, pattern.lstrip("/")))):
+                    read(inc, depth + 1)
+            elif line.startswith("/") and line not in found:
+                found.append(line)
+
+    read(os.path.join(root, "etc/ld.so.conf"))
+    for path in sorted(glob.glob(os.path.join(root, "etc/ld.so.conf.d/*.conf"))):
+        read(path, 1)
+    return ":".join(found)
+
+
+def system_qemu_argv(qemu, root):
+    """qemu running one of the system's programs: its files first, its
+    library folders given to its loader"""
+    argv = ["qemu-" + qemu, "-L", root]
+    libs = system_library_path(root)
+    if libs:
+        argv += ["-E", "LD_LIBRARY_PATH=" + libs]
+    return argv
+
+
 def system_perl_dirs(root):
     """The system's perl install folders, asked of its own perl through qemu,
     or {} (no perl in it yet, or no qemu for it)"""
@@ -373,7 +415,7 @@ def system_perl_dirs(root):
     qemu = qemu_for(elf_id(os.path.realpath(perl)) or (0, 0, True))
     if not os.path.isfile(perl) or not qemu or not shutil.which("qemu-" + qemu):
         return {}
-    return _perl_config(["qemu-" + qemu, "-L", root, perl])
+    return _perl_config(system_qemu_argv(qemu, root) + [perl])
 
 
 def perl_dir_moves(host, system, names=PERL_DIRS):
@@ -583,9 +625,13 @@ def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
         '\texport PATH="%s:${PATH}"' % tools if tools else "\t:",
         "\t# gobject-introspection's g-ir-scanner compiles with $CC (else this",
         "\t# computer's own compiler) and runs the program it built through",
-        "\t# GI_CROSS_LAUNCHER",
+        "\t# GI_CROSS_LAUNCHER. LD_PRELOAD is this computer's (the build's",
+        "\t# sandbox puts it back on every program it starts, env -u or not):",
+        "\t# never handed on to the system's loader, which would preload the",
+        "\t# system's own libsandbox.so (that needs libgcc_s, not in yet early",
+        "\t# on)",
         '\texport CC="${CC:-${CHOST}-gcc}" CXX="${CXX:-${CHOST}-g++}"',
-        '\texport GI_CROSS_LAUNCHER="%s -L %s"' % (qemu_name(chost), root)]
+        '\texport GI_CROSS_LAUNCHER="%s -L %s -U LD_PRELOAD"' % (qemu_name(chost), root)]
     body = [
         "\t\t# links an ebuild made with the system's path on this computer",
         "\t\t# (${ESYSROOT} or ${EROOT} in dosym) lead nowhere on the system: its",
@@ -618,8 +664,10 @@ def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
             "\t\tlocal -a here=(%s)" % " ".join(
                 shlex.quote("%s=%s" % pair) for pair in host_perl),
             "\t\tlocal -A there=()",
+            "\t\t# (not perl itself: its folders are the system's, and there is",
+            "\t\t# no perl yet to ask)",
             "\t\tfor name in \"${here[@]}\"; do",
-            '\t\t\t[[ -d ${ED}${name#*=} ]] || continue',
+            '\t\t\t[[ -d ${ED}${name#*=} && ! -e ${ED}/usr/bin/perl ]] || continue',
             "\t\t\twhile IFS='=' read -r f theirs; do",
             '\t\t\t\t[[ ${theirs} == /* ]] && there[${f}]=${theirs%/}',
             '\t\t\tdone < <(porthole_system_run /usr/bin/perl -MConfig -e %s %s)' % (
@@ -654,8 +702,21 @@ def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
             '\t\t\tewarn "Porthole: the system has no ${name} to ask yet"',
             "\t\t\treturn 1",
             "\t\tfi",
-            '\t\tenv -u LD_PRELOAD LC_ALL=C %s -L %s "${program}" "$@" && return 0' % (
+            "\t\t# the folders the system's ld.so.conf.d lists: its loader only finds",
+            "\t\t# them through the library cache, made later (gcc's libgcc_s is in",
+            "\t\t# one)",
+            "\t\tlocal f dir libs=",
+            "\t\tfor f in %s/etc/ld.so.conf.d/*.conf; do" % shlex.quote(root),
+            "\t\t\t[[ -f ${f} ]] || continue",
+            "\t\t\twhile read -r dir _; do",
+            '\t\t\t\t[[ ${dir} == /* ]] && libs+=${libs:+:}${dir}',
+            '\t\t\tdone < "${f}"',
+            "\t\tdone",
+            "\t\tlocal -a extra=()",
+            '\t\t[[ -n ${libs} ]] && extra=(-E "LD_LIBRARY_PATH=${libs}")',
+            '\t\tenv LC_ALL=C %s -L %s -U LD_PRELOAD "${extra[@]}" "${program}" "$@" \\' % (
                 qemu_name(chost), shlex.quote(root)),
+            "\t\t\t&& return 0",
             '\t\tewarn "Porthole: the system\'s ${name} (through qemu) failed, exit status $?"',
             "\t\treturn 1",
             "\t}",
