@@ -39,6 +39,10 @@
         plugin crossdev firstboot NAME FILE    its first-boot setup (FILE: JSON
                                                the front end wrote, mode 0600,
                                                password hashes, never passwords)
+        plugin crossdev export NAME FOLDER     copy it to FOLDER (empty, or an
+                                               earlier copy) for its computer:
+                                               repositories copied in, its
+                                               profile and repos.conf there
 
     Job steps (kind "plugin", plugin "crossdev"):
 
@@ -282,6 +286,38 @@ def health(args):
     except OSError as e:
         print("The report couldn't be saved: %s" % e, file=sys.stderr)
     return 1 if any(f.severity == hc.ERROR for f in findings) else 0
+
+
+def export(args):
+    """plugin crossdev export NAME FOLDER: copy a built system to FOLDER (an
+    SD card's root partition, say) with settings for the computer it runs
+    on: its repositories copied in, make.profile and repos.conf pointing at
+    them (export.py)"""
+    from porthole.plugins.crossdev import export as ex, roots
+    from porthole.updater import runner
+    if len(args) != 2:
+        print("usage: plugin crossdev export NAME FOLDER", file=sys.stderr)
+        return 2
+    target = roots.made_here().get(args[0])
+    if target is None:
+        print("No system called %s was made here" % args[0], file=sys.stderr)
+        return 1
+    with runner.jobs_state(write=False) as state:
+        busy = [j for j in runner.active_jobs(state) if any(
+            s.get("plugin") == "crossdev" and s.get("name") == target.name
+            for s in j.get("steps") or [])]
+    if busy or roots.mounts_under(target.root):
+        print("%s is in use (%s): copy it once that has finished." % (
+            target.title, busy[0]["title"] if busy else "things are mounted in it"),
+            file=sys.stderr)
+        return 1
+    try:
+        dest = ex.export(target, args[1], roots.used_repos(target))
+    except (ex.ExportError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
+    print("%s copied to %s." % (target.title, dest))
+    return 0
 
 
 def remove_root(args):
@@ -1361,7 +1397,8 @@ COMMANDS = {"check": check, "health": health, "shell": shell,
             "remove-root": remove_root, "reset-root": reset_root, "toolchain": toolchain,
             "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
-            "firstboot": firstboot, "packages": packages, "build": build}
+            "firstboot": firstboot, "packages": packages, "build": build,
+            "export": export}
 STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": step_build_check,
