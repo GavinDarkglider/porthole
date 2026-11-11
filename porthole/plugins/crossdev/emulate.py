@@ -330,6 +330,34 @@ def distcc_links(root, log=lambda m: None):
     return made
 
 
+def drop_distcc_links(root, log=lambda m: None):
+    """distcc_links' links taken away again when the emulator is done: they
+    are Porthole's, not distcc's (removing distcc leaves them leading
+    nowhere), and the system on its own compiles itself"""
+    folder = os.path.join(os.path.realpath(root), "usr/lib/distcc")
+    try:
+        names = sorted(os.listdir(folder))
+    except OSError:
+        return 0
+    dropped = 0
+    for name in names:
+        link = os.path.join(folder, name)
+        if _COMPILER.match(name) and os.path.islink(link) and \
+                os.readlink(link) == "/usr/bin/distcc":
+            try:
+                os.unlink(link)
+                dropped += 1
+            except OSError as e:
+                log("!! couldn't remove %s: %s" % (link, e))
+    try:
+        os.rmdir(folder)  # only when nothing of distcc's own is left in it
+    except OSError:
+        pass
+    if dropped:
+        log("== distcc: the system's %d compiler names taken away again" % dropped)
+    return dropped
+
+
 def emulated_env(target, helper_env):
     """The environment of emerge inside the root: distcc to the job's
     distccd when the root has distcc; no sandboxes that don't work under

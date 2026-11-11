@@ -258,6 +258,7 @@ def shell(args):
         print(e, file=sys.stderr)
         return 1
     finally:
+        emulate.drop_distcc_links(root)
         helpers.stop(print)
         lock.close()
 
@@ -1052,6 +1053,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         log("!! The emulator couldn't be set up: %s" % e)
         return False
     finally:
+        emulate.drop_distcc_links(root, log)
         helpers.stop(log)
 
 
@@ -1084,9 +1086,68 @@ def step_build_stage(runner, job_id, step, log):
         log("!! %s (programs built for the system can't run during the cross build)" % e)
         helpers = Helpers(job_id, [])
     try:
-        return _run_stage(runner, job_id, step, log, target, stage, env, argvs)
+        result = _run_stage(runner, job_id, step, log, target, stage, env, argvs)
+        if not (runner.update(job_id) or {}).get("cancel"):
+            _redo_binpkgs(runner, job_id, step, log, target, env)
+        return result
     finally:
         helpers.stop(log)
+
+
+def _installed_pf(root, rel):
+    """cat/pf installed in the system that a binary package (relative to
+    PKGDIR: cat/pn/pf-N.gpkg.tar, cat/pf.gpkg.tar, cat/pf.tbz2 ...) was made
+    of, or None"""
+    parts = rel.split("/")
+    base = re.sub(r"\.(gpkg\.tar|tbz2|xpak)$", "", parts[-1])
+    for pf in (base, re.sub(r"-\d+$", "", base)):
+        if os.path.isdir(os.path.join(root, "var/db/pkg", parts[0], pf)):
+            return "%s/%s" % (parts[0], pf)
+    return None
+
+
+def _redo_binpkgs(runner, job_id, step, log, target, env):
+    """Binary packages made with this computer's perl folders or Python
+    endings (the hook in the system's bashrc couldn't ask the system's perl
+    or Python: seen when it came in with the same emerge), made again from
+    the installed copies, which the hook fixed when they were merged
+    (quickpkg). One not installed is only removed: building it makes it
+    again."""
+    from porthole.plugins.crossdev import health as hc
+    root = os.path.realpath(target.root)
+    try:
+        pkgdir, bad = hc.bad_binpkgs(target, root)
+    except Exception as e:
+        log("!! The binary packages couldn't be checked: %s" % e)
+        return
+    if not bad:
+        return
+    log("== %d binary package%s made with this computer's perl folders or Python "
+        "endings: made again from what is installed" % (len(bad), "" if len(bad) == 1
+                                                         else "s"))
+    redo = []
+    for rel in bad:
+        pf = _installed_pf(root, rel)
+        try:
+            os.unlink(os.path.join(pkgdir, rel))
+        except OSError as e:
+            log("!! couldn't remove %s: %s" % (rel, e))
+            continue
+        if pf:
+            redo.append("=" + pf)
+        else:
+            log("== %s isn't installed: removed, building it makes it again" % rel)
+    if redo:
+        # settings files as installed go in, as in a built package; ones
+        # changed since (quickpkg's precaution) don't
+        argv = ["quickpkg", "--include-unmodified-config=y"] + redo
+        log("$ " + " ".join(argv))
+        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+            log("!! quickpkg didn't make them all (above); the health check lists what's "
+                "left")
+    argv = ["emaint", "binhost", "--fix"]
+    log("$ " + " ".join(argv))
+    runner.run_logged(job_id, step, log, argv, extra_env=env)
 
 
 CYCLE_FILE = "zz-porthole-cycle"

@@ -644,13 +644,20 @@ def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
     if body:
         lines += [
             "\t# One of the system's own programs, run through qemu (nothing when",
-            "\t# the system doesn't have it yet)",
+            "\t# the system doesn't have it yet). Its errors stay in the build",
+            "\t# log: a package left with this computer's names is redone by",
+            "\t# Porthole after the stage, and the log says why it was",
             "\tporthole_system_run() {",
-            '\t\tlocal program=%s$1' % shlex.quote(root),
+            '\t\tlocal name=$1 program=%s$1' % shlex.quote(root),
             "\t\tshift",
-            '\t\t[[ -f ${program} && ! -L ${program} ]] || return 1',
-            '\t\tenv -u LD_PRELOAD LC_ALL=C %s -L %s "${program}" "$@" 2>/dev/null' % (
+            '\t\tif [[ ! -f ${program} || -L ${program} ]]; then',
+            '\t\t\tewarn "Porthole: the system has no ${name} to ask yet"',
+            "\t\t\treturn 1",
+            "\t\tfi",
+            '\t\tenv -u LD_PRELOAD LC_ALL=C %s -L %s "${program}" "$@" && return 0' % (
                 qemu_name(chost), shlex.quote(root)),
+            '\t\tewarn "Porthole: the system\'s ${name} (through qemu) failed, exit status $?"',
+            "\t\treturn 1",
             "\t}",
             "\t# Fixed right after the package installs into its image, so binary",
             "\t# packages are made with the system's names; and again when a",

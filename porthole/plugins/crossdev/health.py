@@ -324,18 +324,18 @@ def _binpkg_names(path):
         return None
 
 
-def check_binpkgs(target, root, findings, cache_dir=REPORT_DIR):
-    """The system's binary packages: none with this computer's perl folders
-    or Python endings (checked once per package file)"""
+def bad_binpkgs(target, root, cache_dir=REPORT_DIR):
+    """(PKGDIR, [binary packages in it, relative to it, with this computer's
+    perl folders or Python endings]); each package file is looked into once"""
     from porthole.plugins.crossdev import build, conf
     pkgdir = conf.effective(conf.read(target), "PKGDIR")
     if not pkgdir or not os.path.isdir(pkgdir):
-        return
+        return pkgdir, []
     perl = [here.lstrip("/") + "/" for here, _t in build.perl_dir_moves(
         build.host_perl_dirs(), build.system_perl_dirs(root), build.PERL_ARCH_DIRS)]
     python = [mine for mine, _t in build.python_suffix_moves(root)]
     if not perl and not python:
-        return
+        return pkgdir, []
     cache_path = os.path.join(cache_dir, "binpkgs-%s.json" % target.name)
     try:
         with open(cache_path) as f:
@@ -370,6 +370,13 @@ def check_binpkgs(target, root, findings, cache_dir=REPORT_DIR):
         os.replace(cache_path + ".new", cache_path)
     except OSError:
         pass
+    return pkgdir, bad
+
+
+def check_binpkgs(target, root, findings, cache_dir=REPORT_DIR):
+    """The system's binary packages: none with this computer's perl folders
+    or Python endings"""
+    pkgdir, bad = bad_binpkgs(target, root, cache_dir)
     if bad:
         findings.append(Finding(
             ERROR, "binpkg-names", "%d binary package%s with this computer's perl folders or "
