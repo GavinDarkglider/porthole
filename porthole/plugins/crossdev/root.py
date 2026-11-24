@@ -695,7 +695,7 @@ def build(args):
         for path in bd.write_changes(target, changes.get("host_use"), changes.get("root_use"),
                                      changes.get("root_keywords")):
             print("Wrote %s" % path)
-        bd.write_policy(target, bool(changes.get("allow_python")))
+        bd.write_policy(target, bool(changes.get("allow_python")), changes.get("host") or ())
     except (ValueError, bd.BuildError, OSError) as e:
         print(e, file=sys.stderr)
         return 1
@@ -775,7 +775,12 @@ RECIPE_NOTES = {
         "                      computer's (its profile, make.conf, package.use ...)\n"
         "  CHOST / CBUILD      the computer built for / the computer building\n"
         "  PATH                Porthole's compiler wrappers first (they add --sysroot)\n"
-        "  QEMU_LD_PREFIX      the system's libraries, for its programs run by qemu"),
+        "  QEMU_LD_PREFIX      the system's libraries, for its programs run by qemu\n"
+        "Every emerge into the system runs behind Porthole's sandbox (python -m\n"
+        "porthole.plugins.crossdev.sandbox): in a mount namespace of its own, with this\n"
+        "computer's /etc, /usr and /var as overlays, so what a package writes there\n"
+        "outside the system's folders is caught and not made. Build tools it needs on\n"
+        "this computer (the plan listed them) are installed first, by plain emerge."),
     ("build-stage", "base"): (
         "The kernel headers and the C library first: everything else is compiled\n"
         "against them. --usepkg installs a binary package already made with the same\n"
@@ -905,12 +910,71 @@ def step_build_check(runner, job_id, step, log):
                 % (chost, qemu))
     log("Building into %s, as its own sysroot; compilers from %s"
         % (env["ROOT"], bd.wrappers_dir(target)))
+    from porthole.plugins.crossdev import health
+    for line in health.account_mismatches(env["ROOT"]):
+        log("!! Warning: %s. A package that sets file owners by name while it builds gets "
+            "this computer's number; give the account the same number on both." % line)
     argv = bd.check_argv(target)
     log("$ " + " ".join(argv))
-    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+    if not _cross(runner, job_id, step, log, target, env, argv, installs=False):
         log("!! Portage can't work the build out as it stands (above); nothing was built.")
         return False
     return True
+
+
+def _host_tools(runner, job_id, step, log, target, env, argv):
+    """What argv would install on this computer (build tools), installed
+    first, in a step of its own, when the user agreed to it in the plan;
+    otherwise the build stops here. The emerge itself then has nothing to
+    install outside the system (its sandbox would catch it)."""
+    from porthole.plugins.crossdev import build as bd, emulate, sandbox
+    from porthole.updater import recipe
+    pretend = [a for a in argv if not a.startswith("--color")] + ["--pretend", "--color=n"]
+    result = subprocess.run(pretend, capture_output=True, text=True,
+                            env=dict(os.environ, **env))
+    recipe.ran(pretend, result.returncode)
+    host = bd.parse_pretend(result.stdout, target.root)["host"]
+    if not host:
+        # nothing for here; or emerge can't work it out, which the emerge
+        # itself shows
+        return True
+    approved = bd.approved_host(target)
+    unasked = [cpv for cpv in host if emulate.cp_of(cpv) not in approved]
+    if unasked:
+        log("!! This would install on this computer what the build plan didn't list, so "
+            "you haven't agreed to it: %s. Nothing was installed. Starting the build "
+            "again shows the new plan to agree to." % " ".join(unasked))
+        raise sandbox.Stopped()
+    argv = ["emerge", "--verbose", "--color=y", "--oneshot"] + ["=" + cpv for cpv in host]
+    log("== On this computer first: %d build tool%s the plan listed (they run here "
+        "while the system's packages build)" % (len(host), "" if len(host) == 1 else "s"))
+    log("$ " + " ".join(argv))
+    if not runner.run_logged(job_id, step, log, argv):
+        log("!! The build tools for this computer didn't install (above)")
+        raise sandbox.Stopped()
+    return True
+
+
+def _cross(runner, job_id, step, log, target, env, argv, installs=True):
+    """An emerge (or other portage command) into the system: the build
+    tools it needs here first (installs), then it, in the sandbox"""
+    from porthole.plugins.crossdev import sandbox
+    if installs:
+        _host_tools(runner, job_id, step, log, target, env, argv)
+    return sandbox.run(runner, job_id, step, log, argv, target, env)
+
+
+def _stops(action):
+    """A step that fails as it is when the build tried to change this
+    computer (sandbox.Stopped, already logged)"""
+    def step(runner, job_id, step_, log):
+        from porthole.plugins.crossdev import sandbox
+        try:
+            return action(runner, job_id, step_, log)
+        except sandbox.Stopped:
+            return False
+    step.__doc__ = action.__doc__
+    return step
 
 
 def _log_size(job_id):
@@ -979,7 +1043,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
         log("== emulator: first %s, cross-built, so the system can build in itself"
             % " and ".join(missing))
         log("$ " + " ".join(argv))
-        runner.run_logged(job_id, step, log, argv, extra_env=env)
+        _cross(runner, job_id, step, log, target, env, argv)
         still = [cp for cp in emulate.NEEDED if not emulate.installed(root, cp)]
         if still:
             log("!! %s didn't build; can't build in the emulator without %s"
@@ -1044,7 +1108,7 @@ def _emulate(runner, job_id, step, log, target, env, atoms):
             for _round in range(4):
                 offset = _log_size(job_id)
                 log("$ " + " ".join(argv))
-                if runner.run_logged(job_id, step, log, argv, extra_env=env):
+                if _cross(runner, job_id, step, log, target, env, argv):
                     break
                 # the tools that really failed (perl XS modules, say) are
                 # built in the system; those dropped for them cross-compile
@@ -1178,12 +1242,12 @@ def _redo_binpkgs(runner, job_id, step, log, target, env):
         # changed since (quickpkg's precaution) don't
         argv = ["quickpkg", "--include-unmodified-config=y"] + redo
         log("$ " + " ".join(argv))
-        if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+        if not _cross(runner, job_id, step, log, target, env, argv, installs=False):
             log("!! quickpkg didn't make them all (above); the health check lists what's "
                 "left")
     argv = ["emaint", "binhost", "--fix"]
     log("$ " + " ".join(argv))
-    runner.run_logged(job_id, step, log, argv, extra_env=env)
+    _cross(runner, job_id, step, log, target, env, argv, installs=False)
 
 
 CYCLE_FILE = "zz-porthole-cycle"
@@ -1226,7 +1290,7 @@ def step_break_cycle(runner, job_id, step, log):
         argv = ["emerge", "--verbose", "--color=y", "--oneshot", "=" + cpv]
         log("$ " + " ".join(argv))
         try:
-            ok = runner.run_logged(job_id, step, log, argv, extra_env=env)
+            ok = _cross(runner, job_id, step, log, target, env, argv)
         finally:
             os.unlink(path)
             recipe.ran(["rm", path])
@@ -1276,7 +1340,7 @@ def _run_stage(runner, job_id, step, log, target, stage, env, argvs):
         argv = argvs[index]
         offset = _log_size(job_id)
         log("$ " + " ".join(argv))
-        if runner.run_logged(job_id, step, log, argv, extra_env=env):
+        if _cross(runner, job_id, step, log, target, env, argv):
             continue
         if (runner.update(job_id) or {}).get("cancel"):
             return False
@@ -1362,7 +1426,7 @@ def step_depclean(runner, job_id, step, log):
         return False
     argv = ["emerge", "--depclean", "--verbose", "--color=y"]
     log("$ " + " ".join(argv))
-    if not runner.run_logged(job_id, step, log, argv, extra_env=env):
+    if not _cross(runner, job_id, step, log, target, env, argv, installs=False):
         log("!! emerge couldn't work out what the system still needs (above); nothing "
             "was removed.")
         return False
@@ -1401,8 +1465,8 @@ COMMANDS = {"check": check, "health": health, "shell": shell,
             "export": export}
 STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
-         "firstboot": step_firstboot, "build-check": step_build_check,
-         "build-stage": step_build_stage, "emulate": step_emulate,
-         "break-cycle": step_break_cycle, "health": step_health,
-         "depclean": step_depclean,
+         "firstboot": step_firstboot, "build-check": _stops(step_build_check),
+         "build-stage": _stops(step_build_stage), "emulate": _stops(step_emulate),
+         "break-cycle": _stops(step_break_cycle), "health": step_health,
+         "depclean": _stops(step_depclean),
          "remove-toolchain": step_remove_toolchain}

@@ -430,6 +430,46 @@ def check_packages(root, findings):
             sorted(kept), "Run emerge @preserved-rebuild for the system."))
 
 
+def _ids(path):
+    """{name: id} from a passwd or group file"""
+    ids = {}
+    try:
+        with open(path, errors="replace") as f:
+            for line in f:
+                fields = line.split(":")
+                if len(fields) > 3 and fields[2].isdigit():
+                    ids[fields[0]] = int(fields[2])
+    except OSError:
+        pass
+    return ids
+
+
+def account_mismatches(root, host="/"):
+    """["user messagebus: 101 here, 105 in the system", ...]: a package that
+    sets file owners by name while it builds (fowners) gets this
+    computer's number for it, and the file in the system belongs to
+    whoever has that number there"""
+    found = []
+    for db, what in (("passwd", "user"), ("group", "group")):
+        here, there = _ids(os.path.join(host, "etc", db)), _ids(os.path.join(root, "etc", db))
+        for name in sorted(set(here) & set(there)):
+            if here[name] != there[name]:
+                found.append("%s %s: %d on this computer, %d in the system"
+                             % (what, name, here[name], there[name]))
+    return found
+
+
+def check_accounts(root, findings):
+    mismatches = account_mismatches(root)
+    if mismatches:
+        findings.append(Finding(
+            WARNING, "account-ids", "Accounts numbered differently here and in the system",
+            mismatches, "Files a package gave to one of these by name while it built have "
+            "this computer's number, so in the system they belong to someone else. Give "
+            "the account the same number on both (usermod -u / groupmod -g), then rebuild "
+            "the packages that own such files."))
+
+
 def check_links(root, findings):
     broken, here = [], []
     for top in SYSTEM_DIRS + ("etc",):
@@ -511,6 +551,7 @@ def check(target, log=lambda m: None, binpkgs=True):
                         if binpkgs else None),
                        ("kernel", lambda: check_kernel(root, findings)),
                        ("packages", lambda: check_packages(root, findings)),
+                       ("accounts", lambda: check_accounts(root, findings)),
                        ("links", lambda: check_links(root, findings))):
         log("== health: checking %s" % name)
         try:

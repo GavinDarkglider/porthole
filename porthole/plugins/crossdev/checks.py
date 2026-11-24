@@ -173,6 +173,17 @@ def check_all(arch=None, tuple_=None):
         option in ("y", "m") if option is not None else None,
         "CONFIG_BINFMT_MISC=%s" % option if option else "unknown (no kernel config readable)",
         None if option in ("y", "m") else "Set CONFIG_BINFMT_MISC in the kernel."))
+    # the sandbox every emerge into a system runs in (sandbox.py)
+    option = kernel_option("CONFIG_OVERLAY_FS")
+    checks.append(Check(
+        "overlayfs", "Kernel support for keeping builds off this computer (overlayfs)",
+        option in ("y", "m") if option is not None else None,
+        "CONFIG_OVERLAY_FS=%s" % option if option else "unknown (no kernel config readable)",
+        None if option in ("y", "m") else
+        "Set CONFIG_OVERLAY_FS in the kernel: builds into a system run with this "
+        "computer's /etc, /usr and /var behind an overlay, so nothing they write "
+        "there is made. Without it, builds don't start."))
+
     if target:
         from porthole.updater.ondemand import Binfmt
         how = Binfmt.available()

@@ -961,9 +961,19 @@ class BuildDialog(Gtk.Dialog):
                            False, False, 0)
             box.pack_start(small(
                 "Some packages run tools while they build, and those run here, so they are "
-                "installed or rebuilt on this computer, as in any cross build:"),
+                "installed or rebuilt on this computer, as in any cross build, each before "
+                "the packages that need them. Only these: anything else the build tries "
+                "to change on this computer is caught and not made."),
                 False, False, 0)
             box.pack_start(listing(plan["host"], 70), False, False, 0)
+            accounts = [cpv for cpv in plan["host"] if cpv.startswith(("acct-user/",
+                                                                         "acct-group/"))]
+            if accounts:
+                box.pack_start(small(
+                    "These add accounts to this computer (packages set file owners by "
+                    "name while they build, so the name must exist here): %s"
+                    % ", ".join(re.sub(r"-[0-9].*$", "", a) for a in accounts)),
+                    False, False, 0)
         if plan["host_use"]:
             box.pack_start(heading("Changes to this computer's settings"), False, False, 0)
             box.pack_start(small(
@@ -1000,7 +1010,7 @@ class BuildDialog(Gtk.Dialog):
         import json
         from porthole.updater.elevate import run_as_root, service
         changes = {"host_use": self.plan["host_use"], "root_use": self.plan["root_use"],
-                   "root_keywords": self.plan["root_keywords"],
+                   "root_keywords": self.plan["root_keywords"], "host": self.plan["host"],
                    "allow_python": self.allow is not None or self.python_ok}
 
         def done(ok, output):

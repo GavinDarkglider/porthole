@@ -18,8 +18,14 @@
     setup. Packages that fail to cross-compile are listed at the end (the
     emulator fallback builds them in a later version).
 
-    Tools a build runs on this computer (BDEPEND) are installed here, the
-    way any cross build does; when they need a change on this computer
+    Tools a build runs on this computer (BDEPEND, and IDEPEND: an
+    acct-user a package sets file owners with) are installed here, the
+    way any cross build does, but only those the plan listed and the user
+    agreed to, each in a step of its own before the emerge that needs
+    them. The emerge into the system itself runs in a sandbox: what it
+    writes to this computer's /etc, /usr or /var outside the system's
+    folders is caught and not made (sandbox.py). When the tools need a
+    change on this computer
     (typically one more Python target, when the system's Python is
     another version), it is shown before building and only made when
     the user agrees, in Porthole's own file
@@ -963,13 +969,47 @@ def policy_path(target, base=None):
     return os.path.join(os.path.dirname(wrappers_dir(target, base)), POLICY_NAME)
 
 
-def write_policy(target, allow_python, base=None):
+_CP = re.compile(r"^[A-Za-z0-9+_][A-Za-z0-9+_.-]*/[A-Za-z0-9+_][A-Za-z0-9+_-]*$")
+
+
+def write_policy(target, allow_python, host=(), base=None):
+    """What the user agreed to for the rest of the build: Python targets
+    added here by itself, and the packages (cat/pkg) it may install on
+    this computer: the build tools the plan listed"""
     import json
+    from portage.versions import cpv_getkey
+    tools = []
+    for cpv in host or ():
+        cp = cpv_getkey(cpv) if isinstance(cpv, str) else None
+        if not cp or not _CP.match(cp):
+            raise BuildError("Not a package: %r" % (cpv,))
+        if cp not in tools:
+            tools.append(cp)
     path = policy_path(target, base)
     os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
     with open(path + ".new", "w") as f:
-        json.dump({"allow_python": bool(allow_python)}, f)
+        json.dump({"allow_python": bool(allow_python), "host": tools}, f)
     os.replace(path + ".new", path)
+
+
+def approved_host(target, portage_dir="/etc/portage", base=None):
+    """cat/pkg the build may install on this computer: the tools agreed to
+    in the plan, and those Porthole's file for it changes (another Python
+    target, when the user allowed that)"""
+    from portage.dep import Atom
+    approved = set(read_policy(target, base).get("host") or ())
+    try:
+        with open(os.path.join(portage_dir, "package.use", HOST_FILE % target.name)) as f:
+            for line in f:
+                words = line.split()
+                if words and not words[0].startswith("#"):
+                    try:
+                        approved.add(Atom(words[0]).cp)
+                    except Exception:
+                        pass
+    except OSError:
+        pass
+    return approved
 
 
 def read_policy(target, base=None):
