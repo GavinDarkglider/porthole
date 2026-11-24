@@ -193,6 +193,56 @@ def test_host_tools():
         root_steps.subprocess.run, build.approved_host = old_run, old_approved
 
 
+def test_system_accounts():
+    import bz2
+    from porthole.plugins.crossdev import firstboot
+    with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as host:
+        etc = os.path.join(root, "etc")
+        os.makedirs(etc)
+        os.makedirs(os.path.join(host, "etc"))
+        files = {"passwd": "root:x:0:0::/root:/bin/sh\nmessagebus:x:101:101::/:/sbin/nologin\n",
+                 "group": "root:x:0:\nmessagebus:x:101:\nwheel:x:10:root\nusers:x:100:\n",
+                 "shadow": "root:!:1::::::\nmessagebus:!:1::::::\n",
+                 "gshadow": "root:::\nmessagebus:!::\nwheel:!::root\n"}
+        for name, text in files.items():
+            with open(os.path.join(etc, name), "w") as f:
+                f.write(text)
+        with open(os.path.join(host, "etc/passwd"), "w") as f:
+            f.write("me:x:%d:%d::/:/bin/sh\n" % (os.getuid(), os.getgid()))
+        open(os.path.join(host, "etc/group"), "w").close()
+        for kind, pf, variable, name in (("user", "messagebus-0-r3", "USER", "messagebus"),
+                                         ("user", "polkitd-0-r3", "USER", "polkitd"),
+                                         ("group", "renamed-0", "GROUP", "wheel")):
+            pkg = os.path.join(root, "var/db/pkg/acct-%s" % kind, pf)
+            os.makedirs(pkg)
+            with bz2.open(os.path.join(pkg, "environment.bz2"), "wt") as f:
+                f.write('declare -- ACCT_%s_NAME="%s"\n' % (variable, name))
+        found = health.missing_accounts(root)
+        check("account package without its account found", found == [
+            "acct-user/polkitd-0-r3: no polkitd in /etc/passwd, /etc/shadow"], found)
+        check("users group missing from gshadow found",
+              health.unpaired_accounts(root) == ["group users: no line in /etc/gshadow"],
+              health.unpaired_accounts(root))
+        # a file a package owns, owned by someone the system doesn't have
+        pkg = os.path.join(root, "var/db/pkg/sys-apps/dbus-1.16.2")
+        os.makedirs(pkg)
+        with open(os.path.join(root, "owned"), "w") as f:
+            f.write("x")
+        with open(os.path.join(pkg, "CONTENTS"), "w") as f:
+            f.write("obj /owned 0 0\n")
+        found = health.unknown_owners(root, host)
+        check("file owned by an account the system lacks found",
+              os.getuid() == 0 or found and "(uid %d, me on this computer)" % os.getuid()
+              in found[0], found)
+        firstboot._add_user(root, {"name": "anna", "admin": True, "hash": None},
+                            lambda m: None)
+        with open(os.path.join(etc, "gshadow")) as f:
+            gshadow = f.read().splitlines()
+        check("first boot keeps gshadow with group", "anna:!::" in gshadow
+              and "wheel:!::root,anna" in gshadow and "users:!::anna" in gshadow, gshadow)
+
+
+test_system_accounts()
 test_launcher()
 test_host_tools()
 test_run()

@@ -27,6 +27,7 @@
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 
@@ -459,7 +460,130 @@ def account_mismatches(root, host="/"):
     return found
 
 
+def _acct_name(pkg_dir, kind):
+    """The account an acct-user / acct-group package made (its
+    ACCT_USER_NAME, PN when it didn't set one)"""
+    import bz2
+    variable = "ACCT_%s_NAME" % kind.upper()
+    try:
+        with bz2.open(os.path.join(pkg_dir, "environment.bz2"), "rt", errors="replace") as f:
+            for line in f:
+                match = re.match(r'^declare -[-a-zA-Z]* %s="([^"]+)"' % variable, line)
+                if match:
+                    return match.group(1)
+    except (OSError, EOFError):
+        pass
+    from portage.versions import catpkgsplit
+    split = catpkgsplit(os.path.basename(pkg_dir))
+    return split[1] if split else None
+
+
+def missing_accounts(root):
+    """["acct-user/messagebus-0-r3: no messagebus in /etc/passwd", ...]:
+    account packages installed in the system whose account isn't in the
+    system's own files (it went somewhere else, or was removed after)"""
+    files = {"user": ("passwd", "shadow"), "group": ("group", "gshadow")}
+    found = []
+    for kind, names in files.items():
+        have = {n: set(_ids(os.path.join(root, "etc", n))) if n in ("passwd", "group")
+                else _names(os.path.join(root, "etc", n)) for n in names}
+        for pkg_dir in sorted(glob.glob(os.path.join(root, "var/db/pkg/acct-%s/*" % kind))):
+            name = _acct_name(pkg_dir, kind)
+            if not name:
+                continue
+            gone = [n for n in names if have[n] is not None
+                    and os.path.exists(os.path.join(root, "etc", n)) and name not in have[n]]
+            if gone:
+                found.append("acct-%s/%s: no %s in %s" % (
+                    kind, os.path.basename(pkg_dir), name,
+                    ", ".join("/etc/" + n for n in gone)))
+    return found
+
+
+def _names(path):
+    """Account names in a shadow file; None when it can't be read (not root)"""
+    try:
+        with open(path, errors="replace") as f:
+            return {line.split(":")[0] for line in f if ":" in line}
+    except OSError:
+        return None
+
+
+def unpaired_accounts(root):
+    """["user mail: no line in /etc/shadow", ...]: accounts with no line in
+    the shadow file beside theirs (only checked when it can be read)"""
+    found = []
+    for db, shadow, what in (("passwd", "shadow", "user"), ("group", "gshadow", "group")):
+        names = _names(os.path.join(root, "etc", shadow))
+        if not names:
+            continue
+        for name in sorted(set(_ids(os.path.join(root, "etc", db))) - names):
+            found.append("%s %s: no line in /etc/%s" % (what, name, shadow))
+    return found
+
+
+def unknown_owners(root, host="/"):
+    """["cat/pf: /path (uid 105, messagebus on this computer)", ...]: files
+    installed packages own whose owner or group number the system has
+    no account for"""
+    users, groups = _ids(os.path.join(root, "etc/passwd")), _ids(os.path.join(root, "etc/group"))
+    uids, gids = set(users.values()), set(groups.values())
+    if not uids:
+        return []   # no passwd yet: nothing to check against
+    here = {"uid": {v: k for k, v in _ids(os.path.join(host, "etc/passwd")).items()},
+            "gid": {v: k for k, v in _ids(os.path.join(host, "etc/group")).items()}}
+    found = []
+    for contents in sorted(glob.glob(os.path.join(root, "var/db/pkg/*/*/CONTENTS"))):
+        package = os.path.relpath(os.path.dirname(contents), os.path.join(root, "var/db/pkg"))
+        try:
+            with open(contents, errors="replace") as f:
+                lines = f.readlines()
+        except OSError:
+            continue
+        for line in lines:
+            kind, _sep, rest = line.rstrip("\n").partition(" ")
+            if kind == "obj":
+                path = rest.rsplit(" ", 2)[0]
+            elif kind == "sym":
+                path = rest.split(" -> ")[0]
+            elif kind == "dir":
+                path = rest
+            else:
+                continue
+            try:
+                st = os.lstat(root + path)
+            except OSError:
+                continue
+            for what, number, known in (("uid", st.st_uid, uids), ("gid", st.st_gid, gids)):
+                if number not in known:
+                    name = here[what].get(number)
+                    found.append("%s: %s (%s %d%s)" % (
+                        package, path, what, number,
+                        ", %s on this computer" % name if name else ""))
+    return found
+
+
 def check_accounts(root, findings):
+    missing = missing_accounts(root)
+    if missing:
+        findings.append(Finding(
+            ERROR, "accounts-missing", "Account packages whose account isn't in the system",
+            missing, "Install the package again into the system (emerge --oneshot), so it "
+            "adds the account to the system's own /etc/passwd and /etc/group."))
+    strays = unknown_owners(root)
+    if strays:
+        findings.append(Finding(
+            ERROR, "unknown-owners", "Files owned by accounts the system doesn't have",
+            strays, "The package set the owner while it was being built, with an account "
+            "the system lacks (named after this computer's): it needs the acct-user or "
+            "acct-group package in the system too. Install that into the system, then "
+            "rebuild the package."))
+    unpaired = unpaired_accounts(root)
+    if unpaired:
+        findings.append(Finding(
+            WARNING, "accounts-unpaired", "Accounts missing from /etc/shadow or /etc/gshadow",
+            unpaired, "Something edited /etc/passwd or /etc/group by hand. In the system, "
+            "pwconv and grpconv add the missing lines (or pwck / grpck to look)."))
     mismatches = account_mismatches(root)
     if mismatches:
         findings.append(Finding(

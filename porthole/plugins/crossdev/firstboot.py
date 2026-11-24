@@ -25,6 +25,7 @@ import glob
 import json
 import os
 import re
+import stat
 import subprocess
 import time
 
@@ -369,6 +370,30 @@ def _set_hash(root, user, hashed):
     _write(root, "etc/shadow", "\n".join(lines) + "\n", 0o640)
 
 
+def _keep_gshadow(root, group, names):
+    """The system's /etc/gshadow (when it has one) in step with its
+    /etc/group for the groups named: a line for each, the same members"""
+    path = os.path.join(root, "etc/gshadow")
+    if not os.path.exists(path):
+        return
+    lines = _passwd_lines(root, "etc/gshadow")
+    where = {l.split(":")[0]: i for i, l in enumerate(lines) if ":" in l}
+    for line in group:
+        fields = line.split(":")
+        if len(fields) < 4 or fields[0] not in names:
+            continue
+        if fields[0] in where:
+            shadow = lines[where[fields[0]]].split(":")
+            shadow += [""] * (4 - len(shadow))
+            shadow[3] = fields[3]
+            lines[where[fields[0]]] = ":".join(shadow)
+        else:
+            lines.append("%s:!::%s" % (fields[0], fields[3]))
+    st = os.stat(path)
+    _write(root, "etc/gshadow", "\n".join(lines) + "\n", stat.S_IMODE(st.st_mode))
+    os.chown(path, st.st_uid, st.st_gid)
+
+
 def _add_user(root, user, log):
     passwd = _passwd_lines(root, "etc/passwd")
     if not passwd:
@@ -404,6 +429,7 @@ def _add_user(root, user, log):
                 fields[3] = ",".join(members + [user["name"]])
                 group[i] = ":".join(fields)
     _write(root, "etc/group", "\n".join(group) + "\n")
+    _keep_gshadow(root, group, [user["name"]] + groups)
     _set_hash(root, user["name"], user["hash"] or "!")
     if user["admin"]:
         _write(root, "etc/sudoers.d/porthole-wheel",
