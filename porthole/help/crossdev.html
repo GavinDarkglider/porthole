@@ -47,6 +47,12 @@ export, and Porthole running on it takes over from there.</p>
     with <i>Add a repository…</i> if it isn't listed) and the repositories
     it uses. Porthole makes its folder and settings; nothing is built
     yet.</dd>
+  <dt><b>Keeps packages</b> (a column in the list)</dt>
+  <dd>Ticked, a binary package of everything built for the system is kept
+    (FEATURES=buildpkg in its <code>make.conf</code>), in its own folder (see
+    <a href="#files">Where things are</a>). Builds install from them instead
+    of compiling again, <i>Start over</i> keeps them, and the computer the
+    system is for can install from them or they can be hosted for it.</dd>
   <dt><b>Settings…</b></dt>
   <dd>What the system is: <a href="#settings">its settings</a>, package
     list and first-boot setup.</dd>
@@ -246,6 +252,13 @@ builds gets this computer's number for it.</p>
   <dt><code>/var/lib/porthole/roots/&lt;name&gt;</code></dt>
   <dd>The system itself; its Portage settings are in its
     <code>etc/portage</code>.</dd>
+  <dt><code>/var/cache/porthole/binpkgs/&lt;name&gt;</code></dt>
+  <dd>Its binary packages (its <code>PKGDIR</code>), kept apart from this
+    computer's own; filled when <i>Keeps packages</i> is ticked, kept by
+    <i>Start over</i>, deleted with the system.</dd>
+  <dt><code>/var/cache/distfiles</code></dt>
+  <dd>Downloads: shared with this computer, so a source is only fetched
+    once.</dd>
   <dt><code>/var/lib/porthole/firstboot/&lt;name&gt;.json</code></dt>
   <dd>Its first-boot setup (root only: it holds password hashes).</dd>
   <dt><code>/var/lib/porthole/cross/&lt;name&gt;</code></dt>
