@@ -652,6 +652,10 @@ def firstboot(args):
             config = json.load(f)
         config = fb.save(target.name, config)
         fb.write_choice_files(target, config)
+        if os.path.isdir(os.path.join(target.root, "var/db/pkg")):
+            # built already: the services take effect now (the rest is
+            # written at the end of the next build)
+            fb.apply_services(target, config, log=print)
     except (OSError, ValueError, fb.FirstBootError) as e:
         print(e, file=sys.stderr)
         return 1

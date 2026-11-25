@@ -48,6 +48,22 @@ _USER = re.compile(r"^[a-z_][a-z0-9_-]{0,30}$")
 _HASH = re.compile(r"^\$(6|y|5)\$[./A-Za-z0-9$]{8,200}$")
 _LOCALE = re.compile(r"^[A-Za-z0-9_.@-]{2,40}$")
 _ZONE = re.compile(r"^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}$")
+_SERVICE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.@:-]{0,63}$")
+
+# when a service starts: OpenRC's runlevels; systemd only knows on and off
+RUNLEVELS = ("sysinit", "boot", "default", "shutdown")
+OFF = "off"
+# what the Gentoo Handbook has every system start, and other common daemons,
+# suggested when the system has them: (role, [services], runlevel)
+USUAL = (("System logger", ("metalog", "sysklogd", "syslog-ng", "rsyslog"), "default"),
+         ("Cron, for scheduled jobs", ("cronie", "dcron", "fcron", "bcron"), "default"),
+         ("Network time", ("chronyd", "ntpd", "openntpd"), "default"),
+         ("Bluetooth service", ("bluetooth",), "default"),
+         ("ACPI daemon (power button, lid)", ("acpid",), "default"),
+         ("Printing service", ("cupsd",), "default"),
+         ("Sound card settings saver", ("alsasound",), "boot"))
+_SUGGESTS = (re.compile(r"rc-update add ([A-Za-z0-9_.@:${}-]+)(?:[ \t]+(sysinit|boot|default|shutdown))?"),
+             re.compile(r"systemctl enable (?:--now )?([A-Za-z0-9_.@:${}-]+?)(?:\.service)?(?=[\s\"'&;]|$)"))
 
 # where each item ends up, for "who sets it" (OpenRC, systemd)
 FILES = {"hostname": ("etc/conf.d/hostname", "etc/hostname"),
@@ -149,6 +165,16 @@ def check(config):
         raise FirstBootError("Not a Wi-Fi choice: %s" % wifi)
     out["wifi"] = wifi
     out["sshd"] = bool(config.get("sshd"))
+    services = config.get("services") or {}
+    if not isinstance(services, dict) or len(services) > 200:
+        raise FirstBootError("Services are a list of names and when they start")
+    out["services"] = {}
+    for name, level in services.items():
+        if not isinstance(name, str) or not _SERVICE.match(name):
+            raise FirstBootError("Not a service name: %r" % (name,))
+        if level not in RUNLEVELS + (OFF,):
+            raise FirstBootError("Not a runlevel: %r" % (level,))
+        out["services"][name] = level
     return out
 
 
@@ -320,6 +346,120 @@ def status(target, config):
     return rows
 
 
+# -- services started at boot -------------------------------------------------------
+
+def available_services(target, init=None):
+    """Services the system has (its init scripts or systemd units)"""
+    init = init or init_system(target)
+    if init == "openrc":
+        folder = os.path.join(target.root, "etc/init.d")
+        try:
+            return sorted(n for n in os.listdir(folder) if _SERVICE.match(n)
+                          and not n.endswith(".sh") and os.access(os.path.join(folder, n),
+                                                                  os.X_OK))
+        except OSError:
+            return []
+    found = set()
+    for folder in ("usr/lib/systemd/system", "lib/systemd/system", "etc/systemd/system"):
+        for path in glob.glob(os.path.join(target.root, folder, "*.service")):
+            name = os.path.basename(path)[:-len(".service")]
+            if _SERVICE.match(name) and not name.endswith("@"):
+                found.add(name)
+    return sorted(found)
+
+
+def started_services(target, init=None):
+    """{service: runlevel} the system starts now (OpenRC: the first runlevel
+    it is in; systemd: "default" when enabled)"""
+    init = init or init_system(target)
+    found = {}
+    if init == "openrc":
+        for level in RUNLEVELS:
+            try:
+                for name in sorted(os.listdir(os.path.join(target.root, "etc/runlevels", level))):
+                    found.setdefault(name, level)
+            except OSError:
+                pass
+    else:
+        for link in glob.glob(os.path.join(target.root, "etc/systemd/system/*.wants/*.service")):
+            found.setdefault(os.path.basename(link)[:-len(".service")], "default")
+        if os.path.lexists(os.path.join(target.root, "etc/systemd/system/display-manager.service")):
+            found.setdefault("display-manager", "default")
+    return found
+
+
+def package_suggestions(target):
+    """{service: (runlevel, cat/pf)} the system's packages say to start, in
+    their install notes (rc-update add NAME LEVEL, systemctl enable NAME)"""
+    import bz2
+    from portage.versions import catpkgsplit
+    found = {}
+    for env in sorted(glob.glob(os.path.join(target.root, "var/db/pkg/*/*/environment.bz2"))):
+        package = os.path.relpath(os.path.dirname(env), os.path.join(target.root, "var/db/pkg"))
+        split = catpkgsplit(package)
+        try:
+            with bz2.open(env, "rt", errors="replace") as f:
+                text = f.read()
+        except (OSError, EOFError):
+            continue
+        for pattern in _SUGGESTS:
+            for match in pattern.finditer(text):
+                name = match.group(1)
+                if split:
+                    name = name.replace("${PN}", split[1]).replace("$PN", split[1])
+                level = match.group(2) if match.lastindex and match.lastindex > 1 else None
+                if _SERVICE.match(name):
+                    found.setdefault(name, (level or "default", package))
+    return found
+
+
+def porthole_services(config, init):
+    """{service: why} what the other first-boot choices start"""
+    found = {}
+    network = NETWORK[config.get("network", "networkmanager")][1]
+    if network:
+        found[network] = "Network at boot (above)"
+    if config.get("sshd"):
+        found["sshd"] = "Log in over the network (above)"
+    if init == "openrc":
+        found.update({"display-manager": "the desktop, when a display manager is installed",
+                      "dbus": "the desktop needs it", "elogind": "the desktop needs it"})
+    return found
+
+
+def services_view(target, config):
+    """[{"name", "level" (now, None when not started), "chosen" (the user's,
+    or None), "source", "suggested" (runlevel or None)}] for the window"""
+    init = init_system(target)
+    have = set(available_services(target, init))
+    started = started_services(target, init)
+    porthole = porthole_services(config, init)
+    hints = {n: (level, "by %s's install notes" % pkg)
+             for n, (level, pkg) in package_suggestions(target).items() if n in have}
+    for role, names, level in USUAL:
+        for name in names:
+            if name in have and name not in hints:
+                hints[name] = (level, "as Gentoo's usual %s" % role[0].lower() + role[1:])
+    chosen = config.get("services") or {}
+    rows = []
+    for name in sorted(set(started) | set(hints) | set(chosen)):
+        if name in chosen:
+            source = "set here"
+        elif name in porthole:
+            source = "Porthole: " + porthole[name]
+        elif name in started:
+            source = "set by its package"
+        else:
+            source = hints[name][1]
+        if name not in have and have:
+            source += " (not installed in the system)"
+        rows.append({"name": name, "level": started.get(name), "chosen": chosen.get(name),
+                     "source": source,
+                     "suggested": hints[name][0] if name in hints and name not in started
+                     else None})
+    return rows
+
+
 # -- writing it into the system (end of its build) ---------------------------------
 
 def _write(root, relative, text, mode=0o644):
@@ -446,6 +586,11 @@ def _enable(root, init, service, log, runlevel="default"):
         os.makedirs(os.path.dirname(link), mode=0o755, exist_ok=True)
         if not os.path.lexists(link):
             os.symlink("/etc/init.d/" + service, link)
+        # in one runlevel only: moving it takes it out of the others
+        for other in RUNLEVELS:
+            old = os.path.join(root, "etc/runlevels", other, service)
+            if other != runlevel and os.path.lexists(old):
+                os.unlink(old)
     else:
         unit = service + ".service"
         for d in ("usr/lib/systemd/system", "lib/systemd/system", "etc/systemd/system"):
@@ -454,11 +599,46 @@ def _enable(root, init, service, log, runlevel="default"):
         else:
             log("!! %s isn't installed in the system: not started at boot" % unit)
             return
-        link = os.path.join(root, "etc/systemd/system/multi-user.target.wants", unit)
+        # the target its unit asks for ([Install] WantedBy), as systemctl enable does
+        wanted_by = "multi-user.target"
+        try:
+            with open(os.path.join(root, d, unit), errors="replace") as f:
+                for line in f:
+                    if line.strip().startswith("WantedBy="):
+                        wanted_by = line.split("=", 1)[1].split()[0] or wanted_by
+                        break
+        except (OSError, IndexError):
+            pass
+        link = os.path.join(root, "etc/systemd/system", wanted_by + ".wants", unit)
         os.makedirs(os.path.dirname(link), mode=0o755, exist_ok=True)
         if not os.path.lexists(link):
-            os.symlink("/usr/lib/systemd/system/" + unit, link)
-    log("Starts at boot: %s" % service)
+            os.symlink("/" + d + "/" + unit, link)
+    log("Starts at boot: %s%s" % (service, " (%s)" % runlevel if init == "openrc" else ""))
+
+
+def _disable(root, init, service, log):
+    removed = False
+    if init == "openrc":
+        links = [os.path.join(root, "etc/runlevels", level, service) for level in RUNLEVELS]
+    else:
+        links = glob.glob(os.path.join(root, "etc/systemd/system/*.wants", service + ".service"))
+    for link in links:
+        if os.path.lexists(link):
+            os.unlink(link)
+            removed = True
+    if removed:
+        log("Not started at boot: %s" % service)
+
+
+def apply_services(target, config, log=lambda m: None):
+    """The services chosen in the First boot tab (after what the other
+    choices start, so a choice here wins)"""
+    init = init_system(target)
+    for name, level in sorted((config.get("services") or {}).items()):
+        if level == OFF:
+            _disable(target.root, init, name, log)
+        else:
+            _enable(target.root, init, name, log, level)
 
 
 def _desktop(root, init, log):
@@ -546,4 +726,5 @@ def apply(target, config, log=lambda m: None):
         _enable(root, init, service, log)
     if config.get("sshd"):
         _enable(root, init, "sshd", log)
+    apply_services(target, config, log)
     return True

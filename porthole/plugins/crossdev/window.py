@@ -34,6 +34,20 @@ def show_job(output):
         from porthole.updater.follow import show_in_terminal
         show_in_terminal(words[-1])
 
+def show_help(anchor=""):
+    """The plugin's page of Porthole's help, in the browser"""
+    from porthole import config
+    from porthole.loaders.loaders import load_web_page
+    load_web_page("file://" + config.Prefs.DATA_PATH + "help/crossdev.html" +
+                  ("#" + anchor if anchor else ""))
+
+
+def help_button(anchor):
+    button = Gtk.Button(label="Help")
+    button.connect("clicked", lambda b: show_help(anchor() if callable(anchor) else anchor))
+    return button
+
+
 class ReadinessWindow(Gtk.Window):
     def __init__(self, mainwindow=None):
         super().__init__(title="Porthole: ready to build for another computer?")
@@ -77,6 +91,7 @@ class ReadinessWindow(Gtk.Window):
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.destroy())
         buttons.pack_end(close, False, False, 0)
+        buttons.pack_end(help_button("start"), False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         self.show_all()
@@ -400,6 +415,7 @@ class SystemsWindow(Gtk.Window):
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.destroy())
         buttons.pack_end(close, False, False, 0)
+        buttons.pack_end(help_button("systems"), False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         self.show_all()

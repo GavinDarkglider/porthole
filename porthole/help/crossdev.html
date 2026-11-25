@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Building for other computers</title>
+<link rel="stylesheet" href="porthole.css">
+</head>
+<body>
+<div class="toc">
+<iframe src="toc.html" frameborder="0" height="560" width="240"></iframe>
+</div>
+<nav class="pages"><a href="#start">Getting started</a> <a href="#systems">Systems</a>
+  <a href="#settings">A system's settings</a> <a href="#firstboot">First boot</a>
+  <a href="#services">Started at boot</a> <a href="#build">Building</a>
+  <a href="#safe">This computer stays as it is</a> <a href="#accounts">Accounts</a>
+  <a href="#files">Where things are</a></nav>
+<h1>Building for other computers</h1>
+
+<p>The <b>crossdev</b> plugin builds a whole Gentoo system for another
+computer on this one: another architecture (a Nintendo Switch, a Raspberry
+Pi, an arm64 server) or the same one. Packages are cross-compiled with a
+toolchain made for the other computer; what won't cross-compile is built
+inside the system under emulation (qemu), still compiling on this computer
+over distcc. The finished system is a folder you can write to a disk or
+export, and Porthole running on it takes over from there.</p>
+
+<h2 id="start">Getting started</h2>
+<p>Switch the plugin on in <a href="customize.html">Settings</a>,
+<b>Plugins</b>. Its windows are then in the <i>Active Plugins</i> menu:</p>
+<dl>
+  <dt><b>Ready to build for another computer?</b></dt>
+  <dd>Checks what building needs on this computer: crossdev, qemu's
+    user-mode emulator for the other architecture, the kernel's support for
+    running other architectures' programs (binfmt_misc), distcc, and the
+    kernel's overlay filesystem (overlayfs, see
+    <a href="#safe">below</a>). Anything missing has a button that adds it
+    to the install queue or sets it up; <b>Set up everything missing</b>
+    does them all.</dd>
+  <dt><b>Systems for other computers…</b></dt>
+  <dd>The systems Porthole has made, and everything you do with them.</dd>
+</dl>
+
+<h2 id="systems">Systems</h2>
+<dl>
+  <dt><b>New system…</b></dt>
+  <dd>A name, a profile (the board's repository usually has one: add it
+    with <i>Add a repository…</i> if it isn't listed) and the repositories
+    it uses. Porthole makes its folder and settings; nothing is built
+    yet.</dd>
+  <dt><b>Settings…</b></dt>
+  <dd>What the system is: <a href="#settings">its settings</a>, package
+    list and first-boot setup.</dd>
+  <dt><b>Build its toolchain…</b></dt>
+  <dd>The cross compiler (binutils, gcc, the kernel headers and C library)
+    the system's profile asks for. Systems wanting the same versions share
+    one; <b>Toolchains…</b> lists them.</dd>
+  <dt><b>Build the system…</b></dt>
+  <dd>Works the whole build out first and shows it before anything is
+    built: see <a href="#build">Building</a>.</dd>
+  <dt><b>Open a shell in it…</b></dt>
+  <dd>A root terminal inside the system (under qemu when it is for another
+    architecture), for looking around or fixing something by hand. Builds
+    of it don't start while the shell is open.</dd>
+  <dt><b>Start over…</b></dt>
+  <dd>Removes everything installed in it, keeping its settings, package
+    list, first-boot setup and binary packages: the next build installs
+    what is already packaged instead of compiling it again.</dd>
+  <dt><b>Delete…</b></dt>
+  <dd>Deletes everything built for it on this computer: its folder (with
+    its settings) and its binary packages. A computer it is installed on
+    keeps what it has.</dd>
+</dl>
+
+<h2 id="settings">A system's settings</h2>
+<p>The profile's values are only a start: look through each tab and set
+what this system should be. <b>Overview</b> lists what still needs looking
+at. Changes show in a bar at the top; <b>Save</b> asks for the administrator
+password and writes them into the system's own <code>make.conf</code> (in a
+block of Porthole's; your own lines are kept).</p>
+<dl>
+  <dt><b>Overview</b></dt>
+  <dd>The profile (<i>Change profile…</i>) and a checklist for before
+    building.</dd>
+  <dt><b>Compiler</b></dt>
+  <dd>The CPU it is built for (always named: never <code>native</code>,
+    which would mean this computer's) and parallel builds (MAKEOPTS, from
+    the computer it is for).</dd>
+  <dt><b>USE flags</b></dt>
+  <dd>The system's global USE flags, searchable.</dd>
+  <dt><b>Hardware</b></dt>
+  <dd>The computer it is for: CPU threads and memory, video cards, input
+    devices, CPU features and languages. Nothing is found out here (this
+    isn't that computer): choose them.</dd>
+  <dt><b>Build options</b></dt>
+  <dd>Stable or testing packages, FEATURES and accepted licences.</dd>
+  <dt><b>Packages</b></dt>
+  <dd>What the system installs (its <code>@world</code>): start from a
+    ready-made list, search for packages, and set USE flags per
+    package.</dd>
+  <dt><b>First boot</b></dt>
+  <dd>What it needs to boot, let you log in and get online: see
+    <a href="#firstboot">below</a>.</dd>
+  <dt><b>Files</b></dt>
+  <dd>The system's own Portage files, for anything the other tabs don't
+    cover.</dd>
+</dl>
+
+<h2 id="firstboot">First boot</h2>
+<p>Settings no package installs: the computer name, time zone, language,
+keyboard, the root password, your account (and whether it may use sudo),
+the network at boot, Wi-Fi, and logging in over the network (sshd).
+Passwords are stored only as hashes, readable by root alone. The packages
+these need are added to what the system installs. Everything here is
+written into the system at the end of each build, after its packages, so
+it doesn't collide with the files they install. <i>Where each comes
+from</i> shows, for each, whether this setup or one of the system's
+packages sets it.</p>
+
+<h3 id="services">Started at boot</h3>
+<p>Which services the system starts, and when. On OpenRC each service
+starts in a <b>runlevel</b>:</p>
+<ul>
+  <li><b>sysinit</b>: the first things: device nodes, <code>/proc</code>
+    and <code>/sys</code>, udev.</li>
+  <li><b>boot</b>: bringing the system up: disks checked and mounted,
+    clock, hostname, keyboard, elogind.</li>
+  <li><b>default</b>: what runs once it is up: the system logger, cron,
+    the network, sshd, dbus, the desktop.</li>
+  <li><b>shutdown</b>: on the way down.</li>
+</ul>
+<p>On systemd a service is either started at boot or not (it is enabled
+for the target its unit asks for, as <code>systemctl enable</code>
+does).</p>
+<p>The list shows every service the built system starts and who set it:
+<i>set by its package</i> (most packages put theirs in place as they
+install), <i>Porthole</i> (what the other first-boot choices start: the
+network, sshd, the desktop with dbus and elogind) or <i>set here</i>. Above
+them come <b>suggestions</b>: services the system has but doesn't start yet,
+that its packages' install notes say to start (<code>rc-update add …</code>
+or <code>systemctl enable …</code>), or that every Gentoo system usually
+runs (a system logger, cron) when one is installed.</p>
+<ul>
+  <li>To change when a service starts, click its <b>Starts</b> column and
+    pick a runlevel, or <i>not started</i>.</li>
+  <li>To add one, type its name under the list (it completes from the
+    system's services), pick when it starts and press <b>Add</b>.</li>
+  <li><b>Save the first-boot setup</b> keeps your choices. When the system
+    is built already, the services change in it straight away; every later
+    build keeps them so. Before the first build the list is mostly empty:
+    it fills in once packages are installed, and what you add is set at the
+    end of the build.</li>
+</ul>
+<p><span class="note">Take care with sysinit and boot: a system without
+udev, localmount or root there may not come up.</span></p>
+
+<h2 id="build">Building</h2>
+<p><b>Build the system…</b> asks portage to work the whole build out
+first (as you, nothing changes yet) and shows:</p>
+<ul>
+  <li>the packages that go into the system,</li>
+  <li>changes the system's own settings need (USE flags, keywords), made
+    in its <code>package.use</code> and <code>package.accept_keywords</code>
+    files <code>00-porthole-build</code>,</li>
+  <li><b>On this computer</b>: build tools that run here while the
+    system's packages build, installed or rebuilt on this computer as in
+    any cross build, and any accounts they add to it (a package that sets
+    file owners by name while it builds needs that account here),</li>
+  <li>changes this computer's settings would need for those tools (often
+    one more Python version), only made when you tick that you allow them,
+    in <code>/etc/portage/package.use/porthole-cross-&lt;name&gt;</code>,
+    removed with the system.</li>
+</ul>
+<p><b>Build it</b> queues the build as a job (see
+<a href="termwindow.html">the job window</a>). In order: a check that the
+build still works out, the kernel headers and C library, the base system
+(<code>@system</code>), what the first-boot choices need, the system's own
+list (<code>@world</code>), removing what nothing needs any more, the
+first-boot setup, and a health check. A build can be stopped and started
+again; it picks up where it stopped, installing what is already packaged.</p>
+<p>When a package won't cross-compile, the next step builds it inside the
+system under emulation, then the stage carries on. When emerge stops on a
+circular dependency, the next step builds the package it suggests with the
+USE flags it suggests, then again with its usual ones.</p>
+<p>The <b>health check</b> at the end looks for programs built for this
+computer instead of the system, libraries a program needs that aren't
+there, perl and Python modules under this computer's names, kernel modules
+without their index, and <a href="#accounts">accounts</a>. Errors fail the
+build; warnings are only reported. Run it again any time, as root:</p>
+<pre>porthole-update-service plugin crossdev health &lt;name&gt;</pre>
+<p>Each job also writes a command record (<code>&lt;job&gt;.sh</code> next
+to its log) with every command it ran and why: what building the system by
+hand would take.</p>
+
+<h2 id="safe">This computer stays as it is</h2>
+<p>A cross build installs into the system's folder, but its packages'
+install scripts run on this computer, as root. So every emerge into the
+system runs where this computer's <code>/etc</code>, <code>/usr</code> and
+<code>/var</code> are behind an overlay only that emerge sees. It reads them
+as they are; what it writes there goes to a scratch layer, not to them.
+Only the system's own folder and settings and portage's build, download,
+binary package, cache and log folders are written for real.</p>
+<p>When the emerge ends and the scratch layer is empty (the normal case),
+nothing happened. When something is in it, a package tried to change this
+computer (a user added to <code>/etc/passwd</code>, a file in
+<code>/usr</code>): the step fails, the log lists each file, and a copy of
+what it wrote is kept in <code>/var/lib/porthole/sandbox/&lt;job&gt;/</code>
+for you to look at. Nothing is copied back.</p>
+<p>The build tools this computer needs are installed before each emerge
+that needs them, in an emerge of their own, and only those the build's plan
+listed when you agreed to it (and those the Python changes you allowed
+rebuild). If a build later needs something else here, it stops and says
+what: start the build again to see the new plan.</p>
+<p>This needs the kernel's overlay filesystem (CONFIG_OVERLAY_FS); without
+it builds don't start. <i>Ready to build for another computer?</i> checks
+for it.</p>
+
+<h2 id="accounts">Accounts and file owners</h2>
+<p>Packages that need a user or group of their own (messagebus for dbus,
+polkitd, …) bring an <code>acct-user</code> or <code>acct-group</code>
+package; installed into the system, it adds the account to the system's
+own <code>/etc/passwd</code> and <code>/etc/group</code>. The health check
+makes sure that happened:</p>
+<ul>
+  <li>an account package installed in the system without its account in
+    the system's files is an error;</li>
+  <li>a file an installed package owns, belonging to a user or group number
+    the system has no account for, is an error (it names the account that
+    number belongs to on this computer: the package set the owner while it
+    built, and the system lacks that account);</li>
+  <li>an account with no line in <code>/etc/shadow</code> or
+    <code>/etc/gshadow</code> is a warning.</li>
+</ul>
+<p>Before building, an account with a different number here and in the
+system is warned about: a package that sets file owners by name while it
+builds gets this computer's number for it.</p>
+
+<h2 id="files">Where things are</h2>
+<dl>
+  <dt><code>/var/lib/porthole/roots/&lt;name&gt;</code></dt>
+  <dd>The system itself; its Portage settings are in its
+    <code>etc/portage</code>.</dd>
+  <dt><code>/var/lib/porthole/firstboot/&lt;name&gt;.json</code></dt>
+  <dd>Its first-boot setup (root only: it holds password hashes).</dd>
+  <dt><code>/var/lib/porthole/cross/&lt;name&gt;</code></dt>
+  <dd>The compiler wrappers its builds use, and what you allowed for the
+    rest of its build.</dd>
+  <dt><code>/etc/portage/package.use/porthole-cross-&lt;name&gt;</code></dt>
+  <dd>This computer's USE changes for its build tools, if you allowed
+    any.</dd>
+  <dt><code>/var/lib/porthole/sandbox/&lt;job&gt;/</code></dt>
+  <dd>What a build tried to write to this computer, when it did.</dd>
+  <dt><code>/var/lib/porthole/health/</code></dt>
+  <dd>The last health report of each system.</dd>
+</dl>
+<p>To copy a finished system somewhere for its computer (an empty folder,
+or an earlier copy to update), with its repositories and settings made to
+work there:</p>
+<pre>porthole-update-service plugin crossdev export &lt;name&gt; &lt;folder&gt;</pre>
+</body>
+</html>

@@ -105,6 +105,10 @@ class SystemSettingsWindow(Gtk.Window):
         close = Gtk.Button(label="Close")
         close.connect("clicked", lambda b: self.close())
         buttons.pack_end(close, False, False, 0)
+        from porthole.plugins.crossdev.window import help_button
+        buttons.pack_end(help_button(lambda: "firstboot" if self.notebook.get_current_page()
+                                     == self.tab_numbers["firstboot"] else "settings"),
+                         False, False, 0)
         box.pack_start(buttons, False, False, 0)
         self.add(box)
         self.connect("delete-event", self.on_delete)
@@ -158,6 +162,8 @@ class SystemSettingsWindow(Gtk.Window):
             info["zones"] = firstboot.zones()
             info["locales"] = firstboot.locales()
             info["init"] = firstboot.init_system(target)
+            info["services"] = firstboot.services_view(target, info["firstboot"])
+            info["available_services"] = firstboot.available_services(target, info["init"])
             info["repos"] = roots.used_repos(target)
             import os
             link = os.path.realpath(os.path.join(target.portage_dir, "make.profile"))
@@ -1061,6 +1067,7 @@ class SystemSettingsWindow(Gtk.Window):
         box.pack_start(_small(
             "Their packages (and sudo for an account that may run things as root) are added "
             "to what the system installs."), False, False, 0)
+        self._services_section(box, info)
 
         save = Gtk.Button(label="Save the first-boot setup", halign=Gtk.Align.START)
         save.connect("clicked", lambda b: self.save_firstboot())
@@ -1071,6 +1078,113 @@ class SystemSettingsWindow(Gtk.Window):
         box.pack_start(_heading("Where each comes from (%s)" % info["init"]), False, False, 0)
         box.pack_start(_facts([(title, source) for _item, title, source
                                in info["firstboot_status"]]), False, False, 0)
+
+    def _services_section(self, box, info):
+        """Started at boot: each service, when it starts (OpenRC runlevel, or
+        on/off with systemd) and who set that"""
+        from porthole.plugins.crossdev import firstboot as fb
+        openrc = info["init"] == "openrc"
+        box.pack_start(_heading("Started at boot" + (" (runlevels)" if openrc else "")),
+                       False, False, 0)
+        built = bool(info["available_services"])
+        box.pack_start(_small(
+            ("sysinit and boot bring the system up (devices, disks, clock); default is "
+             "what runs once it is up (logger, network, desktop); shutdown runs on the "
+             "way down. " if openrc else "") +
+            "Packages set up most of these as they install; the other choices above add "
+            "theirs. Change any of them here, or add one by name. " +
+            ("Saving changes the built system straight away, and every build keeps it so."
+             if built else "Nothing is built yet: the list fills in once it is, and what "
+             "you add now is set at the end of the build.")), False, False, 0)
+        self.fb_levels = list(fb.RUNLEVELS) if openrc else ["at boot"]
+        self.fb_levels.append("not started")
+        levels = Gtk.ListStore(str)
+        for level in self.fb_levels:
+            levels.append([level])
+        # name, shown level, why, level when the tab opened
+        self.fb_services = Gtk.ListStore(str, str, str, str)
+
+        def shown(level):
+            if level in (None, fb.OFF):
+                return "not started"
+            return level if openrc else "at boot"
+        order = {None: -1, fb.OFF: -1, "sysinit": 0, "boot": 1, "default": 2, "shutdown": 3}
+        rows = sorted(info["services"], key=lambda r: (
+            0 if r["suggested"] and not r["chosen"] else 1,
+            order.get(r["chosen"] or r["level"], 2), r["name"]))
+        for row in rows:
+            why = row["source"]
+            if row["suggested"] and not row["chosen"]:
+                why = "suggested%s %s" % (" (%s)" % row["suggested"] if openrc else "", why)
+            level = shown(row["chosen"] or row["level"])
+            self.fb_services.append([row["name"], level, why, level])
+        view = Gtk.TreeView(model=self.fb_services, headers_visible=True)
+        view.append_column(Gtk.TreeViewColumn("Service", Gtk.CellRendererText(), text=0))
+        combo = Gtk.CellRendererCombo(model=levels, text_column=0, has_entry=False,
+                                      editable=True)
+
+        def changed(cell, path, text):
+            self.fb_services[path][1] = text
+            if text != self.fb_services[path][3]:
+                self.fb_services[path][2] = "set here"
+        combo.connect("edited", changed)
+        view.append_column(Gtk.TreeViewColumn("Starts", combo, text=1))
+        view.append_column(Gtk.TreeViewColumn("Who set it", Gtk.CellRendererText(), text=2))
+        scroll = Gtk.ScrolledWindow(min_content_height=220, hexpand=True)
+        scroll.add(view)
+        box.pack_start(scroll, False, False, 0)
+        row = Gtk.Box(spacing=6)
+        row.pack_start(Gtk.Label(label="Add:"), False, False, 0)
+        entry = Gtk.Entry(placeholder_text="service name")
+        completion = Gtk.EntryCompletion(text_column=0)
+        names = Gtk.ListStore(str)
+        for name in info["available_services"]:
+            names.append([name])
+        completion.set_model(names)
+        entry.set_completion(completion)
+        row.pack_start(entry, False, False, 0)
+        level_box = Gtk.ComboBoxText()
+        for level in self.fb_levels[:-1]:
+            level_box.append_text(level)
+        level_box.set_active(self.fb_levels.index("default") if openrc else 0)
+        row.pack_start(level_box, False, False, 0)
+        add = Gtk.Button(label="Add")
+
+        def add_service(_button):
+            name = entry.get_text().strip()
+            if not fb._SERVICE.match(name):
+                self.fb_message.set_markup("<small>\u26a0 Not a service name: %s</small>"
+                                           % GLib.markup_escape_text(name))
+                return
+            level = level_box.get_active_text()
+            why = "set here" + ("" if not built or name in info["available_services"]
+                                else " (not installed in the system)")
+            for item in self.fb_services:
+                if item[0] == name:
+                    item[1], item[2] = level, why
+                    break
+            else:
+                self.fb_services.prepend([name, level, why, "not started"])
+            entry.set_text("")
+        add.connect("clicked", add_service)
+        entry.connect("activate", add_service)
+        row.pack_start(add, False, False, 0)
+        box.pack_start(row, False, False, 0)
+
+    def _fb_service_choices(self):
+        """{service: runlevel or "off"} the user set (changed rows, and
+        choices saved before)"""
+        from porthole.plugins.crossdev import firstboot as fb
+        saved = (self.info.get("firstboot") or {}).get("services") or {}
+        choices = {}
+        for name, level, _why, initial in self.fb_services:
+            if level == initial and name not in saved:
+                continue
+            if level == "not started":
+                choices[name] = fb.OFF
+            else:
+                choices[name] = level if level in fb.RUNLEVELS else "default"
+        return choices
 
     def _fb_text(self, key):
         widget = self.fb[key]
@@ -1111,6 +1225,7 @@ class SystemSettingsWindow(Gtk.Window):
                                      if b.get_active())
             config["wifi"] = next(k for k, b in self.fb["wifi"].items() if b.get_active())
             config["sshd"] = self.fb["sshd"].get_active()
+            config["services"] = self._fb_service_choices()
             fb.check(config)
         except fb.FirstBootError as e:
             return problem(str(e))
