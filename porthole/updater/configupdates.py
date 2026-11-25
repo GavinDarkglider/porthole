@@ -11,7 +11,7 @@
       untouched   you never changed the version Porthole last saw (its
                   copy, below): the new one
       upstream    the package didn't change it since then: yours
-      merged      both changed, in different places: merged (three-way)
+      merged      both changed, in different places: merged (three-way, diff3)
       conflict    both changed the same lines: yours to decide
       settings    a KEY=value file: the new file with your values kept,
                   shown for you to save
@@ -195,8 +195,9 @@ def merge_settings(live, new, base=None):
 
 
 def merge3(live, base, new):
-    """(text, conflicts): your changes and the package's since base, with
-    git merge-file; conflicting lines between <<<<<<< and >>>>>>>"""
+    """(text, conflicts): your changes and the package's since base merged
+    (diff3 -m, from diffutils, which every Gentoo system has); where both
+    changed the same lines, both are given between <<<<<<< and >>>>>>>"""
     with tempfile.TemporaryDirectory() as folder:
         paths = []
         for name, text in (("yours", live), ("before", base), ("new", new)):
@@ -204,11 +205,12 @@ def merge3(live, base, new):
             with open(path, "w", encoding="utf-8", errors="surrogateescape") as f:
                 f.write(text)
             paths.append(path)
-        result = subprocess.run(["git", "merge-file", "-p", "-L", "yours", "-L", "before",
+        result = subprocess.run(["diff3", "-m", "-L", "yours", "-L", "before",
                                  "-L", "new version"] + paths, capture_output=True)
-    if result.returncode < 0 or result.returncode > 127:
-        raise ConfigUpdateError("git merge-file failed: %s" % result.stderr.decode(errors="replace"))
-    return result.stdout.decode("utf-8", errors="surrogateescape"), result.returncode
+    if result.returncode not in (0, 1):
+        raise ConfigUpdateError("diff3 failed: %s" % result.stderr.decode(errors="replace"))
+    text = result.stdout.decode("utf-8", errors="surrogateescape")
+    return text, sum(1 for line in text.splitlines() if line.startswith("<<<<<<< "))
 
 
 def diff(live, new, name="file"):
@@ -246,9 +248,15 @@ def classify(target, update, archive_dir=None):
         elif base is not None and new == base:
             out["kind"] = "upstream"
         elif base is not None:
-            text, conflicts = merge3(live, base, new)
+            try:
+                text, conflicts = merge3(live, base, new)
+            except (ConfigUpdateError, OSError) as e:
+                # couldn't merge: shown for you to decide
+                text, conflicts = None, None
+                out["notes"].append("Couldn't merge: %s" % e)
             out["result"] = text
-            out["kind"] = "conflict" if conflicts else "merged"
+            out["kind"] = ("differs" if conflicts is None else
+                           "conflict" if conflicts else "merged")
             if conflicts:
                 out["notes"].append("%d place%s changed by both you and the package"
                                     % (conflicts, "" if conflicts == 1 else "s"))
