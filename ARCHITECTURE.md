@@ -117,6 +117,9 @@ python3 tests/updater/autopilot_scenarios.py  # fully automatic decisions on the
 python3 tests/updater/service_args.py         # every service command line parses
 python3 tests/updater/system_test.py          # make.conf reading, findings, global USE
 python3 tests/updater/targets_test.py         # targets.conf and per-target writes
+python3 tests/updater/sandbox_test.py         # crossdev sandbox (user namespace), host tools, accounts
+python3 tests/updater/services_test.py        # first boot: services started at boot
+python3 tests/updater/kernel_test.py          # kernels noted at merge, installed inside the system
 python3 tests/updater/review_ui.py SRC OUT SCENARIO [LABEL...]   # review window, needs a display
 ```
 
