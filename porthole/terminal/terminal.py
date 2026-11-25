@@ -224,6 +224,9 @@ class ProcessManager: #dbus.service.Object):
             #GLib.timeout_add(100, self.update)
             debug.dprint("TERMINAL: show_window(): returning")
             return True
+        if self.reader.ident is not None:
+            # this window was open and closed before: its reader stopped
+            self.reader = ProcessOutputReader(Dispatcher(self.process_done))
         # load the glade file
         self.wtree = Gtk.Builder()
         self.wtree.add_from_file(config.Prefs.DATA_PATH + "glade/process_window.ui")
@@ -444,9 +447,10 @@ class ProcessManager: #dbus.service.Object):
         if self.reader.is_alive():
             self.reader.die = "Please"
             debug.dprint("TERMINAL: reader process still alive - killing...")
-            self.reader.join()
-            debug.dprint("okay!")
-            del self.reader
+            # it is a daemon thread and stops at its next check; never wait
+            # long here: this is the main thread, the one it may wait for
+            self.reader.join(1)
+            debug.dprint("okay!" if not self.reader.is_alive() else "still running, left")
         debug.dprint("TERMINAL: on_process_window_destroy(); ...destroying now")
         self.window.destroy()
         del self.window
@@ -808,16 +812,26 @@ class ProcessManager: #dbus.service.Object):
 
     def update(self):
         """ Add text to the buffer """
+        reader = getattr(self, "reader", None)
+        if reader is None or reader.die:
+            # the window was closed: this timer stops
+            return False
         # stores line of text in buffer
         # if the string is locked, we'll get it on the next round
         #cr_flag = False   # Carriage Return flag
-        if self.reader.string_locked:
+        if reader.string_locked:
             return True
         if not self.window_visible:
-            self.reader.string = ''
+            reader.string = ''
             return True
-        # lock the string
-        self.reader.string_locked = True
+        # lock the string; always unlocked again, or the reader waits forever
+        reader.string_locked = True
+        try:
+            return self._update_locked()
+        finally:
+            reader.string_locked = False
+
+    def _update_locked(self):
         for char in self.reader.string:
             if char:
                 ord_char = ord(char)
@@ -945,8 +959,6 @@ class ProcessManager: #dbus.service.Object):
             self.set_statusbar(_("*** Log loading complete : %s") % self.filename)
             self.reader.f.close()
             self.file_input = False
-        # unlock the string
-        self.reader.string_locked = False
         return True
 
     def do_password_popup(self):

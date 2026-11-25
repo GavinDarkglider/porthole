@@ -231,26 +231,48 @@ def running_follower():
     return pid
 
 
+# how long a running job window has to answer before it counts as gone
+ANSWER_SECONDS = 2.0
+
+
 def raise_existing(job_id=None):
     """Ask the process already showing jobs to bring its window up and
-    follow job_id (default: the current job). True if there was one."""
+    follow job_id (default: the current job). True if it answered (took
+    the request, see wanted_job); a process that is alive but doesn't
+    answer (stuck closing its window) counts as none, so a new window
+    opens and takes over."""
+    import time
     pid = running_follower()
     if pid is None or pid == os.getpid():
         return False
+    want = PIDFILE + ".want"
     try:
-        with open(PIDFILE + ".want", "w") as f:
+        with open(want, "w") as f:
             f.write(job_id or "")
         os.kill(pid, signal.SIGUSR1)
     except OSError:
         return False
-    return True
+    end = time.monotonic() + ANSWER_SECONDS
+    while time.monotonic() < end:
+        if not os.path.exists(want):
+            return True
+        time.sleep(0.05)
+    try:
+        os.unlink(want)
+    except OSError:
+        pass
+    return False
 
 
 def wanted_job():
-    """The job another launch asked us to follow (see raise_existing)"""
+    """The job another launch asked us to follow (see raise_existing),
+    taken: removing the request is the answer it waits for"""
+    want = PIDFILE + ".want"
     try:
-        with open(PIDFILE + ".want") as f:
-            return f.read().strip() or None
+        with open(want) as f:
+            job = f.read().strip() or None
+        os.unlink(want)
+        return job
     except OSError:
         return None
 

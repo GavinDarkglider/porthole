@@ -87,7 +87,7 @@ class ProcessOutputReader(threading.Thread):
                         char = None
                 if char:
                     # if the string is currently being accessed
-                    while(self.string_locked):
+                    while self.string_locked and not self.die:
                         # wait 50 ms and check again
                         time.sleep(0.05)
                     if self.record_output:
@@ -108,10 +108,14 @@ class ProcessOutputReader(threading.Thread):
                 else:
                     # clean up, process is terminated
                     self.process_running = False
-                    while self.string != "":
+                    # wait for update_callback to take what is left; not
+                    # when told to stop: the window closing waits for this
+                    # thread on the same main thread update() runs on
+                    while self.string != "" and not self.die:
                         #debug.dprint("PROCESS_READER: ProcessOutputReader: waiting for update to finish")
-                        # wait for update_callback to finish
                         time.sleep(.5)
+                    if self.die:
+                        break
                     if self.file_input:
                         self.file_input = False
                     else:

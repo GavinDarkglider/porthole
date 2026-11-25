@@ -30,7 +30,6 @@ from gettext import gettext as _
 from porthole import config
 from porthole.utils import debug
 from porthole.mwsupport.pluginmanager import PluginManager
-from porthole.mwsupport.plugingui import PluginGUI
 from porthole.mwsupport.action import ActionHandler
 
 
@@ -109,8 +108,9 @@ class PluginHandler(ActionHandler):
 
 
     def plugin_settings_activate( self, widget ):
-        """Shows the plugin settings window"""
-        self.plugin_dialog = PluginGUI(self.plugin_manager )
+        """Shows Settings at its Plugins page (the old PyGTK plugin dialog
+        is gone)"""
+        self.configure_porthole(page="plugins")
 
     def new_plugin_menuitem( self, label ):
         """adds a menu item for a plugin"""
