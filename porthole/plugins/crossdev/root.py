@@ -1405,6 +1405,15 @@ def step_health(runner, job_id, step, log):
     if target is None:
         log("!! No system called %s was made here" % step.get("name"))
         return False
+    # configuration file updates its packages left (._cfg): the ones that
+    # need no decision settled, the rest reported by the check below
+    from porthole.updater import configupdates
+    try:
+        done, _left = configupdates.auto(target, log=lambda m: log("   " + m))
+        if done:
+            log(configupdates.report(target, done, []))
+    except Exception as e:
+        log("!! configuration file updates couldn't be checked: %s" % e)
     findings = hc.check(target, log)
     errors = [f for f in findings if f.severity == hc.ERROR]
     warnings = [f for f in findings if f.severity == hc.WARNING]

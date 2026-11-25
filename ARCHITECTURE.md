@@ -120,6 +120,7 @@ python3 tests/updater/targets_test.py         # targets.conf and per-target writ
 python3 tests/updater/sandbox_test.py         # crossdev sandbox (user namespace), host tools, accounts
 python3 tests/updater/services_test.py        # first boot: services started at boot
 python3 tests/updater/kernel_test.py          # kernels noted at merge, installed inside the system
+python3 tests/updater/config_updates_test.py  # ._cfg files: sorting, merging, settling
 python3 tests/updater/review_ui.py SRC OUT SCENARIO [LABEL...]   # review window, needs a display
 ```
 

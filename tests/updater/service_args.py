@@ -95,6 +95,11 @@ CASES = [
      {"settings": ["build_window=01:00-06:00", "idle_minutes=20"]}),
     (["news", "read", "--repo", "gentoo", "2026-05-03-binpkg-changes"],
      {"state": "read", "repo": "gentoo", "names": ["2026-05-03-binpkg-changes"]}),
+    (["config-updates", "list", "--target", "switch"], {"action": "list", "target": "switch"}),
+    (["config-updates", "auto"], {"action": "auto", "target": "local"}),
+    (["config-updates", "apply", "--file", "/etc/conf.d/sshd", "--choice", "merged",
+      "--content", "/tmp/x"],
+     {"action": "apply", "file": "/etc/conf.d/sshd", "choice": "merged", "content": "/tmp/x"}),
 ]
 
 

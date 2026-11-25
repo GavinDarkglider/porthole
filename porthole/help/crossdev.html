@@ -205,7 +205,10 @@ it…</i> and run <code>emerge --config =&lt;the kernel package&gt;</code>
 <p>The <b>health check</b> at the end looks for programs built for this
 computer instead of the system, libraries a program needs that aren't
 there, perl and Python modules under this computer's names, kernel modules
-without their index, and <a href="#accounts">accounts</a>. Errors fail the
+without their index, <a href="#accounts">accounts</a>, and configuration
+files with a package's new version still waiting (it first settles the ones
+that need no decision; see <a href="configupdates.html">Configuration
+updates</a>). Errors fail the
 build; warnings are only reported. Run it again any time, as root:</p>
 <pre>porthole-update-service plugin crossdev health &lt;name&gt;</pre>
 <p>Each job also writes a command record (<code>&lt;job&gt;.sh</code> next

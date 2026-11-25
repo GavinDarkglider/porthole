@@ -404,6 +404,15 @@ class MainWindow(PluginHandler):
         news.connect("activate", self.open_news)
         menu.insert(news, 1)
         news.show()
+        configs = Gtk.MenuItem.new_with_mnemonic(_("_Configuration Updates..."))
+        configs.connect("activate", self.open_config_updates)
+        menu.insert(configs, 2)
+        configs.show()
+
+    def open_config_updates(self, *widget):
+        """Configuration files with a package's new version waiting"""
+        from porthole.updater import configupdates
+        configupdates.window()
 
     def open_news(self, *widget):
         """Gentoo news: read it, mark it read or unread"""

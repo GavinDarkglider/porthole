@@ -594,6 +594,18 @@ def check_accounts(root, findings):
             "the packages that own such files."))
 
 
+def check_config_updates(target, findings):
+    """Configuration files with a package's new version still waiting: an
+    image made now would carry the old ones"""
+    from porthole.updater import configupdates
+    waiting = [u.name for u in configupdates.pending(target)]
+    if waiting:
+        findings.append(Finding(
+            WARNING, "config-updates", "Configuration files with new versions waiting",
+            waiting, "Porthole: Actions, Configuration Updates, choose this system "
+            "(or porthole-update-service config-updates list --target %s)." % target.name))
+
+
 def check_links(root, findings):
     broken, here = [], []
     for top in SYSTEM_DIRS + ("etc",):
@@ -676,6 +688,7 @@ def check(target, log=lambda m: None, binpkgs=True):
                        ("kernel", lambda: check_kernel(root, findings)),
                        ("packages", lambda: check_packages(root, findings)),
                        ("accounts", lambda: check_accounts(root, findings)),
+                       ("configuration updates", lambda: check_config_updates(target, findings)),
                        ("links", lambda: check_links(root, findings))):
         log("== health: checking %s" % name)
         try:

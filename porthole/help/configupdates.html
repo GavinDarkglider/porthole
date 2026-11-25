@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Configuration updates</title>
+<link rel="stylesheet" href="porthole.css">
+</head>
+<body>
+<div class="toc">
+<iframe src="toc.html" frameborder="0" height="560" width="240"></iframe>
+</div>
+<h1>Configuration updates</h1>
+
+<p>When a package is updated, it never overwrites a configuration file you
+changed (one under <code>CONFIG_PROTECT</code>, most of <code>/etc</code>).
+It puts its new version next to yours, named
+<code>._cfg0000_&lt;name&gt;</code>, and the choice is yours. On the command
+line that is <code>etc-update</code> or <code>dispatch-conf</code>; in
+Porthole it is <i>Actions, Configuration Updates…</i>. A file you never
+changed is replaced by the package itself and never shows up here.</p>
+
+<h2>Settled by themselves</h2>
+<p>After every update or install, Porthole settles the ones that need no
+decision, and the job's log says which, and which are left for you:</p>
+<ul>
+  <li>the new version is the same as yours (its copy is just removed),</li>
+  <li>only comments or blank lines differ (the new version is taken, with
+    its new notes),</li>
+  <li>you never changed the version Porthole saw last time (the new version
+    is taken),</li>
+  <li>the package didn't change it since then (yours is kept),</li>
+  <li>both you and the package changed it, in different places: the two are
+    merged, the way a version control tool merges changes.</li>
+</ul>
+<p>The last three need the version Porthole saw last time: each version you
+settle on is kept in <code>/var/lib/porthole/config-archive</code>,
+readable like the file itself. So the first update of a file after
+installing Porthole may ask you; later ones usually won't.</p>
+
+<h2>The ones for you</h2>
+<p>Each file left shows what happened, and two views:</p>
+<ul>
+  <li><b>Differences</b>: your file against the new version (red is yours,
+    green the new one).</li>
+  <li><b>Result to save</b>: what Porthole suggests, which you can edit.
+    For a file of settings (<code>KEY="value"</code> lines, like those in
+    <code>/etc/conf.d</code>) it is the new file, with its new notes and new
+    settings, and your values kept; the list above it says what changed.
+    Where you and the package changed the same lines, both are shown
+    between <code>&lt;&lt;&lt;&lt;&lt;&lt;&lt;</code> and
+    <code>&gt;&gt;&gt;&gt;&gt;&gt;&gt;</code>: keep the lines you want and
+    remove the markers before saving.</li>
+</ul>
+<p>Then <b>Keep mine</b>, <b>Use the new version</b> or <b>Save this
+result</b>; each asks for the administrator password (unless Porthole is
+<a href="unlock.html">unlocked</a>). A file only root can read can't be
+shown; you can still keep yours or take the new version.</p>
+<p><span class="note"><code>etc-update -3</code> and <code>-5</code> don't
+merge: they replace every file you changed with the package's new
+version, without asking.</span></p>
+
+<h2>Systems for other computers</h2>
+<p><i>For:</i> at the top picks this computer or one of the
+<a href="crossdev.html">systems Porthole builds</a>. A system's health
+check, at the end of each build, settles its updates that need no decision
+and warns about the rest, so an image isn't made with old settings.</p>
+
+<p>On the command line:</p>
+<pre>porthole-update-service config-updates list [--target NAME]
+porthole-update-service config-updates auto [--target NAME]          (as root)
+porthole-update-service config-updates apply --file /etc/... --choice keep|new|merged [--content FILE]</pre>
+</body>
+</html>

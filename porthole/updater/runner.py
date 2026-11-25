@@ -696,6 +696,8 @@ class Runner:
                     dict(job, status=status)))
             except Exception as e:
                 log("!! couldn't add the result to the news item: %s" % e)
+        if job.get("kind") in ("update", "install", "emerge", "command"):
+            self.settle_config_updates(job, log)
         if job.get("recheck"):
             log("\n== Checking what is left to update")
             try:
@@ -704,6 +706,24 @@ class Runner:
                         force=True, sync=False, from_runner=True)
             except Exception as e:
                 log("!! re-check failed: %s: %s" % (type(e).__name__, e))
+
+    def settle_config_updates(self, job, log):
+        """After packages were merged: configuration file updates that need
+        no decision are settled, the rest named (configupdates.py)"""
+        from porthole.updater import configupdates, targets
+        known = targets.load()
+        names = {s.get("target") for s in job.get("steps") or [] if s.get("target")}
+        for name in sorted(names or {targets.LOCAL}):
+            target = known.get(name)
+            if target is None:
+                continue
+            try:
+                done, left = configupdates.auto(target, log=lambda m: log("   " + m))
+                line = configupdates.report(target, done, left)
+                if line:
+                    log("\n== " + line)
+            except Exception as e:
+                log("!! configuration file updates couldn't be checked: %s" % e)
 
     def run_steps(self, job_id, log, status):
         """Run a job's steps in turn; once one fails (or status isn't

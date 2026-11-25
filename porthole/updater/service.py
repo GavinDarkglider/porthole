@@ -49,6 +49,10 @@
         plugin NAME ARGS...         a command of an enabled plugin (its root.py)
         jobs                        show the queue
         config [KEY=VALUE...]       show or change updater.conf
+        config-updates list|auto|apply [--target NAME] [--file F --choice C]
+                                    configuration files with new versions
+                                    waiting (._cfg): list, settle the ones
+                                    that need no decision, or settle one
         plan --request J            work out a plan as root, printed as JSON
         sets NAME...                root-only sets (preserved-rebuild)
         session [--minutes N]       Porthole's root helper (see session.py)
@@ -727,6 +731,14 @@ def main(argv=None):
     sub.add_parser("jobs", help="show the job queue")
     conf = sub.add_parser("config", help="show or change updater.conf")
     conf.add_argument("settings", nargs="*", metavar="KEY=VALUE")
+    cfg = sub.add_parser("config-updates",
+                         help="configuration files with new versions waiting (._cfg)")
+    cfg.add_argument("action", choices=("list", "auto", "apply"))
+    cfg.add_argument("--target", default="local", help="this computer, or a system's name")
+    cfg.add_argument("--file", help="apply: the file, as its path in the system")
+    cfg.add_argument("--choice", choices=("keep", "new", "merged"),
+                     help="apply: keep yours, take the new version, or save --content")
+    cfg.add_argument("--content", help="apply --choice merged: a file with the text to save")
     news = sub.add_parser("news", help="mark Gentoo news items read or unread")
     news.add_argument("state", choices=("read", "unread"))
     news.add_argument("--repo", default="gentoo")
@@ -766,6 +778,9 @@ def main(argv=None):
         print(format_report(plan))
         return 0
 
+    if args.command == "config-updates":
+        # listing is for anyone; it checks root for changing files itself
+        return config_updates_command(args)
     if os.geteuid() != 0:
         parser.error("%s needs root" % args.command)
     if args.command == "session":
@@ -786,6 +801,47 @@ def main(argv=None):
         return 0
     log = Log(echo=not args.quiet)
     return Service(load_config(), log).run(force=args.force, sync=not args.no_sync)
+
+
+def config_updates_command(args):
+    """config-updates list|auto|apply"""
+    from porthole.updater import configupdates as cu, targets
+    target = targets.load().get(args.target)
+    if target is None:
+        print("No such system: %s" % args.target, file=sys.stderr)
+        return 2
+    try:
+        if args.action == "list":
+            out = []
+            for update in cu.pending(target):
+                found = cu.classify(target, update)
+                out.append({"file": update.name, "kind": found["kind"],
+                            "action": found["action"], "notes": found["notes"],
+                            "waiting": len(update.updates)})
+            print(json.dumps(out, indent=1))
+            return 0
+        if os.geteuid() != 0:
+            print("config-updates %s needs root" % args.action, file=sys.stderr)
+            return 2
+        if args.action == "auto":
+            done, left = cu.auto(target)
+            print(cu.report(target, done, left) or "No configuration file updates waiting")
+            return 0
+        if not args.file or not args.choice:
+            print("apply needs --file and --choice", file=sys.stderr)
+            return 2
+        content = None
+        if args.choice == "merged":
+            if not args.content or os.path.getsize(args.content) > 4 * 1024 * 1024:
+                print("--choice merged needs --content (a file under 4 MiB)", file=sys.stderr)
+                return 2
+            with open(args.content, encoding="utf-8", errors="surrogateescape") as f:
+                content = f.read()
+        cu.apply(target, args.file, args.choice, content)
+        return 0
+    except (cu.ConfigUpdateError, OSError) as e:
+        print(e, file=sys.stderr)
+        return 1
 
 
 def job_command(args, parser):
