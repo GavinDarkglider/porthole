@@ -125,6 +125,15 @@ temporary directory and runs the analyzer against them with `--config-root`
 and `--root`, so cycles, blockers, keyword/USE/licence/mask fixes, orphans
 and held-back packages can be tested without touching the real system.
 
+## Help goes with the change
+
+Every user-visible change updates the in-app help (`porthole/help/*.html`,
+and `toc.html` for a new page) in the same commit: windows and buttons,
+build steps, the files and paths Porthole writes (each page's "Where
+things are" list), service commands, and what happens when something
+fails. Help describes what is built, never plans. Screenshots come from an
+installed Porthole with neutral sample data, never a development checkout.
+
 ## Packaging
 
 `setup.py` installs the package, the five scripts, glade files, help and
