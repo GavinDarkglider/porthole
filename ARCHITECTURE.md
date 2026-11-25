@@ -141,8 +141,11 @@ installed Porthole with neutral sample data, never a development checkout.
 ## Packaging
 
 `setup.py` installs the package, the five scripts, glade files, help and
-data. The ebuild installs `/etc/porthole/updater.conf`, the hourly cron job
-and the tray's autostart entry (USE=notifier). Runtime needs: pygobject,
-GTK 3, libnotify, libayatana-appindicator (or an XEmbed tray), libXss (idle
+data (with the settings reference `/usr/share/porthole/updater.conf`). The
+ebuild (`gentoo/app-portage/porthole/porthole-9999.ebuild`, live, from
+GitHub's once-over branch) installs the hourly cron job and the tray's
+autostart entry (USE=notifier); `/etc/porthole/updater.conf` is never
+installed, only written by Porthole with the settings changed. Runtime
+needs: pygobject, GTK 3, diffutils (`diff3`, configuration updates), libnotify, libayatana-appindicator (or an XEmbed tray), libXss (idle
 time), sudo or polkit; optional: smart-live-rebuild (live packages),
 gentoolkit (`eclean-pkg`), rsync (uploading binary packages).

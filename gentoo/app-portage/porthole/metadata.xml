@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE pkgmetadata SYSTEM "https://www.gentoo.org/dtd/metadata.dtd">
+<pkgmetadata>
+	<maintainer type="person">
+		<email>rbrown4014@yahoo.com</email>
+		<name>GavinDarkglider</name>
+	</maintainer>
+	<use>
+		<flag name="crossdev">Install the crossdev plugin: build whole systems for other devices (cross toolchains, emulator builds, health check)</flag>
+		<flag name="notifier">Install the tray notifier and the hourly update service (scheduled sync, update checks, build window)</flag>
+	</use>
+	<upstream>
+		<remote-id type="github">GavinDarkglider/porthole</remote-id>
+		<remote-id type="sourceforge">porthole</remote-id>
+	</upstream>
+</pkgmetadata>

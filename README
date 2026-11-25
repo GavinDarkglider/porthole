@@ -20,31 +20,27 @@ SourceForge: http://sourceforge.net/projects/porthole/
 Also Please report the version of porthole you experienced the bug in
 
 
-==========================
-= How to install Portole =
-==========================
+===========================
+= How to install Porthole =
+===========================
 
-The easiest and recommended way of installing Porthole is by using the
-ebuild that is available from the webpage or portage tree. We assume you know how to
-put ebuilds in the portage overlay. If not, please consult the
-documentation and forums on the Gentoo web site (http://www.gentoo.org),
-or follow the instructions on the Gentoo Wiki at 
-http://gentoo-wiki.com/HOWTO_Installing_3rd_Party_Ebuilds.
+The ebuild for this branch is in gentoo/app-portage/porthole/ (a live
+ebuild, porthole-9999, built from the once-over branch on GitHub). Put it
+in a local repository and install it, as root:
 
-If you don't want to use the ebuild, you can download the tarball
-(porthole-0.5.0.tar.bz2) and install it yourself.
+  eselect repository create local          (once, if you have none yet)
+  mkdir -p /var/db/repos/local/app-portage
+  cp -r gentoo/app-portage/porthole /var/db/repos/local/app-portage/
+  echo "=app-portage/porthole-9999 **" >> /etc/portage/package.accept_keywords/porthole
+  emerge --ask app-portage/porthole
 
-Porthole requires:
->=python-2.3
->=PyGTK-2.4
->=libglade-2.5.0
-and, of course, Portage
+USE flags: notifier (default; the tray and the hourly update service) and
+crossdev (building whole systems for other computers).
 
-
-to install:
-> tar xvjf porthole-0.6.0.tar.bz2
-> cd porthole-0.6.0
-> python setup.py install
+Porthole needs Python 3.12 or newer, pygobject with GTK 3, Portage, polkit
+or sudo, and diffutils; the notifier also libnotify, an appindicator or
+XEmbed tray, libXScrnSaver and cron. Once installed, Porthole updates
+itself through its own Updates like any other live package.
 
 
 ===========
@@ -52,6 +48,7 @@ to install:
 ===========
 
 Webpage: http://porthole.sourceforge.net/
+This branch: https://github.com/GavinDarkglider/porthole
 
 Brian Dolbec		<dol-sen@users.sourceforge.net>
 
