@@ -53,7 +53,9 @@
         sets NAME...                root-only sets (preserved-rebuild)
         session [--minutes N]       Porthole's root helper (see session.py)
 
-    Settings live in /etc/porthole/updater.conf:
+    Settings changed from the defaults live in /etc/porthole/updater.conf;
+    every setting with its default and meaning is in
+    /usr/share/porthole/updater.conf. For example:
 
         [updater]
         # sync the repositories every this many days, 1 or more

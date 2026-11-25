@@ -1926,7 +1926,10 @@ def set_config(changes, path=CONFIG_FILE):
         with open(path) as f:
             lines = f.read().splitlines()
     except FileNotFoundError:
-        lines = ["[updater]"]
+        lines = ["# This computer's Porthole settings: only the ones changed from the",
+                 "# defaults. Every setting, its default and what it means:",
+                 "# /usr/share/porthole/updater.conf",
+                 "", "[updater]"]
     done = set()
     for i, line in enumerate(lines):
         key = line.split("=", 1)[0].strip()

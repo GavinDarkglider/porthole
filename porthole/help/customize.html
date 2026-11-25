@@ -29,6 +29,12 @@ undone by deleting it:
 <code>package.license/00-porthole-licences</code> (which licences are fine),
 <code>package.*/zz-porthole</code> (changes for single packages, each with a
 comment saying why), and one file per repository or binhost it added.</div>
+<p>Porthole's own settings for the whole computer (Updates, Binary
+packages, Plugins) are saved in <code>/etc/porthole/updater.conf</code>,
+which holds only the ones you changed. Every setting, its default and what
+it means is listed in <code>/usr/share/porthole/updater.conf</code>, which
+comes with Porthole and is replaced with it, so a new version of Porthole
+never asks you about that file.</p>
 
 <h2 id="porthole">Porthole</h2>
 <figure><img src="settings-porthole.png" alt="Settings, Porthole page"></figure>
