@@ -193,7 +193,15 @@ boot files. Run from this computer, that would be this computer's
 installkernel, so during the build the kernel is only noted; the
 <b>Install the kernel</b> step then installs it inside the system, through
 the emulator (<code>emerge --config</code>, the package's own way of doing
-it again), with the system's own installkernel, hooks and dracut.</p>
+it again), with the system's own installkernel, hooks and dracut. This
+covers kernel packages built with Gentoo's dist-kernel eclasses (a board's
+prebuilt kernel package, gentoo-kernel); a kernel you build by hand from
+sources inside the system is installed the usual way there. The step ends
+by listing what is in the system's <code>/boot</code>.</p>
+<p>If installing a kernel fails, the step says so and the kernel stays on
+the list: the next build tries again. To do it by hand, <i>Open a shell in
+it…</i> and run <code>emerge --config =&lt;the kernel package&gt;</code>
+(the step doesn't run while a shell is open).</p>
 <p>The <b>health check</b> at the end looks for programs built for this
 computer instead of the system, libraries a program needs that aren't
 there, perl and Python modules under this computer's names, kernel modules
@@ -267,6 +275,9 @@ builds gets this computer's number for it.</p>
   <dt><code>/etc/portage/package.use/porthole-cross-&lt;name&gt;</code></dt>
   <dd>This computer's USE changes for its build tools, if you allowed
     any.</dd>
+  <dt><code>&lt;the system&gt;/var/lib/porthole/kernels-to-install</code></dt>
+  <dd>Kernel packages merged into it whose kernel the <i>Install the
+    kernel</i> step hasn't installed yet.</dd>
   <dt><code>/var/lib/porthole/sandbox/&lt;job&gt;/</code></dt>
   <dd>What a build tried to write to this computer, when it did.</dd>
   <dt><code>/var/lib/porthole/health/</code></dt>
