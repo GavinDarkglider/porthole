@@ -614,7 +614,8 @@ def host_perl_order(host):
 
 
 def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
-    """Porthole's block in the system's bashrc: only when it is cross-built.
+    """Porthole's block in the system's bashrc: its cross-build part only when
+    it is cross-built; the kernel part whenever it is built from outside.
     host_pythons: host_python_suffixes(); host_perl: host_perl_order(). The
     system's own answers are asked inside the hook, when a package has
     something to move: its perl or Python may come in with the same emerge,
@@ -734,8 +735,63 @@ def bashrc_block(chost, root, tools=None, host_pythons=(), host_perl=()):
             "\t}",
             "\tpost_src_install() { porthole_cross_names; }",
             "\tpre_pkg_preinst() { porthole_cross_names; }"]
-    lines += ["fi", BASHRC_END]
+    lines += ["fi"] + kernel_block() + [BASHRC_END]
     return "\n".join(lines)
+
+
+KERNELS_WAITING = "var/lib/porthole/kernels-to-install"
+
+
+def kernel_block():
+    """The bashrc lines that keep a kernel package from installing its
+    kernel while it is merged into the system's folder: that runs this
+    computer's installkernel and its hooks. Noted instead; the build's
+    "kernel" step installs it inside the system (emerge --config there)."""
+    return [
+        "# A kernel package installs its kernel (installkernel: /boot, initramfs)",
+        "# when it is merged. Into this system's folder from another computer",
+        "# (ROOT set) that would run the other computer's installkernel and its",
+        "# hooks: noted instead, and done inside the system by Porthole's",
+        "# \"Install the kernel\" step. The package's saved environment keeps",
+        "# both functions, so in the system (ROOT=/, emerge --config) the real one",
+        "# runs.",
+        "if [[ ${ROOT:-/} != / && ${EBUILD_PHASE} == postinst ]] &&",
+        "\tdeclare -F dist-kernel_install_kernel >/dev/null &&",
+        "\t! declare -F porthole_kernel_install_real >/dev/null; then",
+        "\teval \"porthole_kernel_install_real() $(declare -f dist-kernel_install_kernel |",
+        "\t\ttail -n +2)\"",
+        "\tdist-kernel_install_kernel() {",
+        "\t\tif [[ ${ROOT:-/} == / ]]; then",
+        "\t\t\tporthole_kernel_install_real \"$@\"",
+        "\t\t\treturn",
+        "\t\tfi",
+        "\t\tlocal list=\"${EROOT%%/}/%s\"" % KERNELS_WAITING,
+        "\t\tmkdir -p \"${list%/*}\" || die",
+        "\t\tgrep -qxF \"${CATEGORY}/${PF}\" \"${list}\" 2>/dev/null ||",
+        "\t\t\techo \"${CATEGORY}/${PF}\" >> \"${list}\" || die",
+        "\t\teinfo \"Porthole: ${CATEGORY}/${PF}'s kernel is installed inside the system,\"",
+        "\t\teinfo \"after this stage (its own installkernel, hooks and initramfs)\"",
+        "\t}",
+        "fi"]
+
+
+def kernels_waiting(root):
+    """[cat/pf] of kernel packages whose kernel is still to be installed"""
+    try:
+        with open(os.path.join(root, KERNELS_WAITING)) as f:
+            return [l.strip() for l in f if re.match(r"^[A-Za-z0-9+_.-]+/[A-Za-z0-9+_.-]+$",
+                                                      l.strip())]
+    except OSError:
+        return []
+
+
+def kernel_installed(root, cpf):
+    """Take cpf off the list (installed, or no longer in the system)"""
+    path = os.path.join(root, KERNELS_WAITING)
+    left = [c for c in kernels_waiting(root) if c != cpf]
+    with open(path + ".new", "w") as f:
+        f.write("".join(c + "\n" for c in left))
+    os.replace(path + ".new", path)
 
 
 def write_bashrc(target, chost, base=None):

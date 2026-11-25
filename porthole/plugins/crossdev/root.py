@@ -51,6 +51,7 @@
         toolchain     {"name": NAME}
         build-check   {"name": NAME}   compiler wrappers; emerge --pretend
         build-stage   {"name": NAME, "stage": base|system|extra|world}
+        kernel        {"name": NAME}   install kernels merged into it, inside it
         depclean      {"name": NAME}   remove what nothing in it needs any more
         firstboot     {"name": NAME}   write its first-boot setup into it
 
@@ -710,6 +711,7 @@ def build(args):
                      "action": action, "name": target.name}, **more)
     steps = [step("build-check", "Check the build can go ahead")]
     steps += [step("build-stage", stage_title, stage=stage) for stage, stage_title in bd.STAGES]
+    steps.append(step("kernel", "Install the kernel inside the system"))
     steps.append(step("depclean", "Remove what nothing needs any more"))
     steps.append(step("firstboot", "The first-boot setup"))
     steps.append(step("health", "Check the finished system"))
@@ -749,9 +751,10 @@ def _build_env(target, log):
         except OSError as e:
             log("!! couldn't note which toolchain %s uses: %s" % (target.title, e))
     bd.write_wrappers(target, chost, toolchain=tc_name)
+    # every system built from here (cross or not) needs its kernel part
+    bd.write_bashrc(target, chost)
     if chost != bd.host_chost():
         bd.write_ldd(target, chost)
-        bd.write_bashrc(target, chost)
         bd.link_python_modules(target, log)
         bd.repair_perl_modules(target, log)
     return bd.environment(target, chost)
@@ -807,6 +810,13 @@ RECIPE_NOTES = {
         "emerge stopped on a circular dependency (A needs B, B needs A) and suggested\n"
         "USE flags to turn off for a first build. That build uses a temporary\n"
         "package.use file; the stage then runs again, building it with its usual flags."),
+    "kernel": (
+        "A kernel package installs its kernel (installkernel writes /boot, its\n"
+        "hooks make the initramfs and the board's boot files) when it is merged. Into\n"
+        "the system's folder that would run this computer's installkernel, so\n"
+        "Porthole's bashrc notes the package instead, and here it is installed\n"
+        "inside the system, through the emulator: emerge --config (the package's\n"
+        "own pkg_config) with the system's installkernel, hooks and dracut."),
     "depclean": (
         "emerge --depclean: packages nothing in @system or @world needs any more (left\n"
         "behind when a package's dependencies or the system's USE flags change) are\n"
@@ -1437,6 +1447,72 @@ def step_depclean(runner, job_id, step, log):
     return True
 
 
+def step_kernel(runner, job_id, step, log):
+    """Kernel packages merged into the system didn't install their kernel
+    (Porthole's bashrc noted them, see build.kernel_block): installed here
+    inside the system, emerge --config (the package's own pkg_config, i.e.
+    its pkg_postinst again) in the emulator chroot, so the system's
+    installkernel, its hooks and dracut write /boot"""
+    from porthole.plugins.crossdev import build as bd, emulate, roots
+    from porthole.updater.ondemand import Helpers, HelperError
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    root = os.path.realpath(target.root)
+    waiting = bd.kernels_waiting(root)
+    if not waiting:
+        log("No kernel waiting to be installed.")
+        return True
+    for cpf in list(waiting):
+        if not os.path.isdir(os.path.join(root, "var/db/pkg", cpf)):
+            log("%s isn't in the system any more: nothing to install" % cpf)
+            bd.kernel_installed(root, cpf)
+            waiting.remove(cpf)
+    if not waiting:
+        return True
+    try:
+        emulate.refuse_if_shell(target)
+    except emulate.EmulateError as e:
+        log("!! %s" % e)
+        return False
+    # installkernel's hooks (dracut) run the system's programs: its library
+    # cache first
+    if not emulate.ldconfig(runner, job_id, step, log, target):
+        return False
+    chost = bd.chost_of(target)
+    helpers = Helpers(job_id, ["binfmt"] if chost != bd.host_chost() else [])
+    try:
+        helper_env = helpers.start(log)
+    except HelperError as e:
+        log("!! %s" % e)
+        return False
+    ok = True
+    try:
+        inside = emulate.emulated_env(target, helper_env)
+        with emulate.Chroot(target, log) as chroot:
+            for cpf in waiting:
+                argv = chroot.emerge_argv(["--config", "=" + cpf], inside)
+                log("== installing %s's kernel inside the system" % cpf)
+                log("$ " + " ".join(argv[argv.index("emerge"):]))
+                if runner.run_logged(job_id, step, log, argv):
+                    bd.kernel_installed(root, cpf)
+                else:
+                    log("!! %s's kernel didn't install (above); the next build tries again"
+                        % cpf)
+                    ok = False
+    except (emulate.EmulateError, OSError) as e:
+        log("!! The emulator couldn't be set up: %s" % e)
+        return False
+    finally:
+        helpers.stop(log)
+    if ok:
+        boot = sorted(os.listdir(os.path.join(root, "boot"))) if os.path.isdir(
+            os.path.join(root, "boot")) else []
+        log("The system's /boot: %s" % (" ".join(boot) or "(empty)"))
+    return ok
+
+
 def step_firstboot(runner, job_id, step, log):
     """Write the first-boot setup into the system (the end of its build)"""
     from porthole.plugins.crossdev import firstboot as fb, roots
@@ -1472,5 +1548,5 @@ STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "firstboot": step_firstboot, "build-check": _stops(step_build_check),
          "build-stage": _stops(step_build_stage), "emulate": _stops(step_emulate),
          "break-cycle": _stops(step_break_cycle), "health": step_health,
-         "depclean": _stops(step_depclean),
+         "depclean": _stops(step_depclean), "kernel": step_kernel,
          "remove-toolchain": step_remove_toolchain}

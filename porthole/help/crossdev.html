@@ -174,13 +174,20 @@ first (as you, nothing changes yet) and shows:</p>
 <a href="termwindow.html">the job window</a>). In order: a check that the
 build still works out, the kernel headers and C library, the base system
 (<code>@system</code>), what the first-boot choices need, the system's own
-list (<code>@world</code>), removing what nothing needs any more, the
-first-boot setup, and a health check. A build can be stopped and started
+list (<code>@world</code>), installing its kernel, removing what nothing
+needs any more, the first-boot setup, and a health check. A build can be stopped and started
 again; it picks up where it stopped, installing what is already packaged.</p>
 <p>When a package won't cross-compile, the next step builds it inside the
 system under emulation, then the stage carries on. When emerge stops on a
 circular dependency, the next step builds the package it suggests with the
 USE flags it suggests, then again with its usual ones.</p>
+<p>A kernel package installs its kernel when it is merged: installkernel
+writes <code>/boot</code> and its hooks make the initramfs and the board's
+boot files. Run from this computer, that would be this computer's
+installkernel, so during the build the kernel is only noted; the
+<b>Install the kernel</b> step then installs it inside the system, through
+the emulator (<code>emerge --config</code>, the package's own way of doing
+it again), with the system's own installkernel, hooks and dracut.</p>
 <p>The <b>health check</b> at the end looks for programs built for this
 computer instead of the system, libraries a program needs that aren't
 there, perl and Python modules under this computer's names, kernel modules
