@@ -9,6 +9,7 @@
     (at your option) any later version.
 """
 
+import os
 import re
 import threading
 import time
@@ -396,6 +397,12 @@ class SystemsWindow(Gtk.Window):
             "the same gcc and binutils share one), and removing the ones none uses")
         toolchains.connect("clicked", lambda b: ToolchainsDialog(self).run_dialog())
         buttons.pack_start(toolchains, False, False, 0)
+        self.image_button = Gtk.Button(label="Make an image…")
+        self.image_button.set_tooltip_text(
+            "Make the built system into something to boot on its computer (a live SD "
+            "card, say), the way its board's packages describe")
+        self.image_button.connect("clicked", lambda b: self.make_image())
+        buttons.pack_start(self.image_button, False, False, 0)
         self.shell_button = Gtk.Button(label="Open a shell in it…")
         self.shell_button.set_tooltip_text(
             "A root shell inside the system, in a terminal, to change things by hand "
@@ -460,6 +467,7 @@ class SystemsWindow(Gtk.Window):
         self.build_button.set_sensitive(self.selected() is not None)
         self.toolchain_button.set_sensitive(self.selected() is not None)
         self.shell_button.set_sensitive(self.selected() is not None)
+        self.image_button.set_sensitive(self.selected() is not None)
 
     def error(self, text, detail):
         dialog = Gtk.MessageDialog(transient_for=self, modal=True,
@@ -660,6 +668,26 @@ class SystemsWindow(Gtk.Window):
             show_job(output)
         run_as_root(service("plugin", "crossdev", "reset-root", name), done)
 
+    def make_image(self):
+        from porthole.plugins.crossdev import roots
+        target = roots.made_here().get(self.selected() or "")
+        if target is None:
+            return
+        dialog = ImageDialog(self, target)
+        answer = dialog.run()
+        recipe = dialog.chosen()
+        dialog.destroy()
+        if answer != Gtk.ResponseType.OK or recipe is None:
+            return
+        from porthole.updater.elevate import run_as_root, service
+
+        def done(ok, output):
+            if not ok:
+                self.error("The image wasn't queued", output)
+                return
+            show_job(output)
+        run_as_root(service("plugin", "crossdev", "package", target.name, recipe), done)
+
     def remove_system(self):
         name = self.selected()
         if not name:
@@ -684,6 +712,100 @@ class SystemsWindow(Gtk.Window):
             # a job: the list changes when it has run
             GLib.timeout_add_seconds(3, lambda: self.refresh() and False)
         run_as_root(service("plugin", "crossdev", "remove-root", name), done)
+
+
+class ImageDialog(Gtk.Dialog):
+    """The images the system's packages say it can be made into (image.py):
+    pick one; what it still needs is shown, and making it waits for that"""
+
+    def __init__(self, parent, target):
+        super().__init__(title="Make an image of %s" % target.title, transient_for=parent,
+                         modal=True)
+        from porthole.plugins.crossdev import image as im
+        self.parent_window = parent
+        self.add_button("Help", Gtk.ResponseType.HELP)
+        self.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Make it", Gtk.ResponseType.OK)
+        self.connect("response", self._response)
+        self.recipes, broken = im.recipes(target.root)
+        self.target = target
+        self.radios = {}
+        box = self.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+        if not self.recipes:
+            label = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+            label.set_markup(
+                "No package in %s says how to make an image of it. A board's packages "
+                "install that as a recipe in <tt>/%s</tt>; see the help." % (
+                    GLib.markup_escape_text(target.title), im.RECIPES_DIR))
+            box.pack_start(label, False, False, 0)
+        group = None
+        for recipe in self.recipes.values():
+            radio = Gtk.RadioButton.new_with_label_from_widget(group, recipe.title)
+            group = group or radio
+            radio.connect("toggled", lambda b: self.update())
+            self.radios[recipe.id] = radio
+            box.pack_start(radio, False, False, 0)
+        self.about = Gtk.Label(xalign=0, wrap=True, max_width_chars=70, selectable=True)
+        box.pack_start(self.about, False, False, 0)
+        self.state = Gtk.Label(xalign=0, wrap=True, max_width_chars=70, selectable=True)
+        box.pack_start(self.state, False, False, 0)
+        self.install = Gtk.Button(label="Add squashfs-tools to the install queue",
+                                  halign=Gtk.Align.START, no_show_all=True)
+        self.install.connect("clicked", lambda b: self.queue_tool())
+        box.pack_start(self.install, False, False, 0)
+        for path, error in broken:
+            label = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+            label.set_markup("<small>%s</small>" % GLib.markup_escape_text(error))
+            box.pack_start(label, False, False, 0)
+        self.show_all()
+        self.update()
+
+    def chosen(self):
+        for id_, radio in self.radios.items():
+            if radio.get_active():
+                return id_
+        return None
+
+    def update(self):
+        from porthole.plugins.crossdev import image as im
+        recipe = self.recipes.get(self.chosen() or "")
+        self.install.hide()
+        if recipe is None:
+            self.about.set_text("")
+            self.state.set_text("")
+            self.set_response_sensitive(Gtk.ResponseType.OK, False)
+            return
+        self.about.set_text(recipe.about)
+        lines = im.missing_needs(self.target.root, recipe) + [
+            "%s isn't in it" % s for s in im.missing_sources(self.target.root, recipe)]
+        tool = im.squashfs_tool(recipe.compression) if recipe.squashfs else None
+        if lines:
+            text = ("<b>Not yet:</b> %s. Change its settings and build it again first." %
+                    GLib.markup_escape_text("; ".join(lines)))
+        elif tool:
+            text = "<b>Not yet:</b> %s." % GLib.markup_escape_text(tool)
+            mainwindow = getattr(self.parent_window, "mainwindow", None)
+            self.install.set_visible(mainwindow is not None)
+        else:
+            text = "Ready. The image's files go to <tt>%s</tt>." % GLib.markup_escape_text(
+                os.path.join(im.output_dir(self.target.name, recipe.id), "card"))
+        self.state.set_markup(text)
+        self.set_response_sensitive(Gtk.ResponseType.OK, not lines and not tool)
+
+    def queue_tool(self):
+        mainwindow = self.parent_window.mainwindow
+        queue = mainwindow.install_queue
+        item = checks.queue_install("squashfs-tools", ["sys-fs/squashfs-tools"])["queue"]
+        queue.add(item["name"], item["targets"], item["requested"])
+        from porthole.updater.installqueue import added_popup
+        added_popup(self, "squashfs-tools", len(queue.items), mainwindow.show_install_queue)
+        self.install.hide()
+
+    def _response(self, dialog, response):
+        if response == Gtk.ResponseType.HELP:
+            show_help("image")
+            self.stop_emission_by_name("response")
 
 
 class NewSystemDialog(Gtk.Dialog):

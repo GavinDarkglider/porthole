@@ -63,6 +63,9 @@ export, and Porthole running on it takes over from there.</p>
   <dt><b>Build the system…</b></dt>
   <dd>Works the whole build out first and shows it before anything is
     built: see <a href="#build">Building</a>.</dd>
+  <dt><b>Make an image…</b></dt>
+  <dd>Makes the built system into something to boot on its computer, such
+    as a live SD card: see <a href="#image">Making an image</a>.</dd>
   <dt><b>Open a shell in it…</b></dt>
   <dd>A root terminal inside the system (under qemu when it is for another
     architecture), for looking around or fixing something by hand. Builds
@@ -219,6 +222,61 @@ build; warnings are only reported. Run it again any time, as root:</p>
 to its log) with every command it ran and why: what building the system by
 hand would take.</p>
 
+<h2 id="image">Making an image</h2>
+<p>What a system is made into to boot depends on its computer, so the
+system says it: its board's packages install a <b>recipe</b> for each kind
+of image in <code>/usr/share/porthole/images</code>. <b>Make an image…</b>
+lists them. Pick one to see what it is, where its files go and whether the
+system is ready for it. A recipe can need packages built with certain USE
+flags (a live image needs a kernel that can boot from one, say). Until
+the system has them, it says what to change in its settings before you
+build it again.</p>
+<p>Making the image is a job (see <a href="termwindow.html">the job
+window</a>):</p>
+<ol>
+  <li>The system is copied out the way it is set up for its computer
+    (repositories copied in, <code>make.profile</code> pointing at them,
+    nothing about building here), into a folder next to the image.</li>
+  <li>That copy becomes a squashfs, without what is left over from building
+    (<code>/tmp</code>, <code>/var/tmp</code>, downloads), and the copy is
+    deleted again.</li>
+  <li>The files the computer's bootloader loads (kernel, device tree, boot
+    script, bootloader settings) are copied from the system next to it.</li>
+  <li>Every file is checked against the largest file the card's filesystem
+    takes (FAT32: 4 GiB).</li>
+</ol>
+<p>The result is a folder, <code>card</code>, laid out the way the card
+should be. Copy everything in it to the card; the recipe says which
+partition it goes on and how to boot it. Making the image again replaces
+the folder. The squashfs needs <code>mksquashfs</code> on this computer
+(sys-fs/squashfs-tools); if it is missing, the window offers to add it to
+the install queue.</p>
+<p>From a terminal, as root:</p>
+<pre>porthole-update-service plugin crossdev images &lt;name&gt;
+porthole-update-service plugin crossdev package &lt;name&gt; &lt;recipe&gt;</pre>
+<h3 id="recipe">Writing a recipe</h3>
+<p>For a board's maintainer: a recipe is a small file, installed by the
+package that installs the boot files it uses (so they always match), as
+<code>/usr/share/porthole/images/&lt;recipe&gt;.conf</code>:</p>
+<pre>[image]
+title = Live SD card
+about = What it is, where its files go and how to boot it.
+# packages it needs in the system, with the USE flags that matter
+needs = sys-kernel/board-kernel[live] sys-boot/board-boot[live]
+# the system as a squashfs, at this place in the image (optional)
+squashfs = boot/rootfs.squashfs
+compression = xz
+# the largest a file may be, in bytes (FAT32: 4294967295)
+max_file_size = 4294967295
+
+[files]
+# place in the image = file in the system (links are followed)
+boot/kernel = /boot/vmlinuz
+boot/board.dtb = /boot/board.dtb</pre>
+<p>A flag written <code>-flag</code> in <code>needs</code> must be off.
+Porthole only runs these generic steps; everything about the board stays
+in its packages.</p>
+
 <h2 id="safe">This computer stays as it is</h2>
 <p>A cross build installs into the system's folder, but its packages'
 install scripts run on this computer, as root. So every emerge into the
@@ -289,6 +347,9 @@ builds gets this computer's number for it.</p>
   <dd>What a build tried to write to this computer, when it did.</dd>
   <dt><code>/var/lib/porthole/health/</code></dt>
   <dd>The last health report of each system.</dd>
+  <dt><code>/var/lib/porthole/images/&lt;name&gt;/&lt;recipe&gt;/card</code></dt>
+  <dd>The last image made from that recipe: the files to copy to the
+    card.</dd>
 </dl>
 <p>To copy a finished system somewhere for its computer (an empty folder,
 or an earlier copy to update), with its repositories and settings made to

@@ -321,6 +321,81 @@ def export(args):
     return 0
 
 
+def images(args):
+    """plugin crossdev images NAME: the images the system's packages say it
+    can be made into (image.py), and what each still needs"""
+    from porthole.plugins.crossdev import image as im
+    if len(args) != 1:
+        print("usage: plugin crossdev images NAME", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    found, broken = im.recipes(target.root)
+    for path, error in broken:
+        print("!! %s" % error)
+    if not found:
+        print("%s's packages give no image recipes (%s)." % (
+            target.title, "/" + im.RECIPES_DIR))
+    for recipe in found.values():
+        missing = im.missing_needs(target.root, recipe) + [
+            "%s isn't in it" % s for s in im.missing_sources(target.root, recipe)]
+        print("%s: %s%s" % (recipe.id, recipe.title, "" if missing else " (ready)"))
+        for line in missing:
+            print("    needs: %s" % line)
+    return 0
+
+
+def package(args):
+    """plugin crossdev package NAME RECIPE: queue making the image RECIPE of
+    the system (image.py)"""
+    from porthole.plugins.crossdev import image as im
+    if len(args) != 2:
+        print("usage: plugin crossdev package NAME RECIPE", file=sys.stderr)
+        return 2
+    target = _system(args[0])
+    if target is None:
+        return 1
+    found, _broken = im.recipes(target.root)
+    recipe = found.get(args[1])
+    if recipe is None:
+        print("%s has no image recipe %s" % (target.title, args[1]), file=sys.stderr)
+        return 1
+    return _queue("Make %s of %s" % (recipe.title, target.title), "package", target.name,
+                  recipe=recipe.id)
+
+
+def step_package(runner, job_id, step, log):
+    """Make an image of the system from one of its recipes"""
+    from porthole.plugins.crossdev import emulate, image as im, roots
+    target = roots.made_here().get(step.get("name", ""))
+    if target is None:
+        log("!! No system called %s was made here" % step.get("name"))
+        return False
+    try:
+        emulate.refuse_if_shell(target)
+    except emulate.EmulateError as e:
+        log("!! %s" % e)
+        return False
+    if roots.mounts_under(target.root):
+        log("!! Things are mounted in %s: make the image once that has finished."
+            % target.title)
+        return False
+    recipe = im.recipes(target.root)[0].get(step.get("recipe", ""))
+    if recipe is None:
+        log("!! %s has no image recipe %s any more" % (target.title, step.get("recipe")))
+        return False
+    try:
+        card = im.make(target, recipe, roots.used_repos(target),
+                       lambda argv: runner.run_logged(job_id, step, log, argv), log=log)
+    except (im.ImageError, OSError) as e:
+        log("!! %s" % e)
+        return False
+    log("Done. %s" % recipe.about if recipe.about else "Done.")
+    log("The image's files: %s" % card)
+    return True
+
+
 def remove_root(args):
     from porthole.plugins.crossdev import roots
     if len(args) != 1:
@@ -1551,11 +1626,11 @@ COMMANDS = {"check": check, "health": health, "shell": shell,
             "binpkgs": binpkgs,
             "settings": settings, "write-file": write_file, "profile": profile,
             "firstboot": firstboot, "packages": packages, "build": build,
-            "export": export}
+            "export": export, "images": images, "package": package}
 STEPS = {"remove-root": step_remove_root, "reset-root": step_reset_root,
          "toolchain": step_toolchain,
          "firstboot": step_firstboot, "build-check": _stops(step_build_check),
          "build-stage": _stops(step_build_stage), "emulate": _stops(step_emulate),
          "break-cycle": _stops(step_break_cycle), "health": step_health,
          "depclean": _stops(step_depclean), "kernel": step_kernel,
-         "remove-toolchain": step_remove_toolchain}
+         "remove-toolchain": step_remove_toolchain, "package": step_package}
