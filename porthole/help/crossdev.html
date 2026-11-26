@@ -244,6 +244,9 @@ window</a>):</p>
   <li>The system is copied out the way it is set up for its computer
     (repositories copied in, <code>make.profile</code> pointing at them,
     nothing about building here), into a folder next to the image.</li>
+  <li>The copy is cleaned up the way the recipe says (folders emptied,
+    files removed, as Gentoo's own live media are), never the system
+    itself.</li>
   <li>That copy becomes a squashfs, without what is left over from building
     (<code>/tmp</code>, <code>/var/tmp</code>, downloads), and the copy is
     deleted again.</li>
@@ -273,14 +276,29 @@ needs = sys-kernel/board-kernel[livecd] sys-boot/board-boot[livecd]
 # the system as a squashfs, at this place in the image (optional)
 squashfs = boot/rootfs.squashfs
 compression = xz
+# squashfs block size, 4K to 1M (bigger compresses better)
+block_size = 1M
 # the largest a file may be, in bytes (FAT32: 4294967295)
 max_file_size = 4294967295
+# cleaning up the copy, as catalyst's livecd/empty and livecd/rm:
+# folders emptied, then files removed (globs)
+empty =
+	/usr/src
+	/usr/share/doc
+rm =
+	/etc/*.old
 
 [files]
 # place in the image = file in the system (links are followed)
 boot/kernel = /boot/vmlinuz
 boot/board.dtb = /boot/board.dtb</pre>
 <p>A flag written <code>-flag</code> in <code>needs</code> must be off.
+Cleaning up works on the copy only, and never follows a link out of it.
+Gentoo's release specs (the <code>livecd-stage2</code> specs in its releng
+repository) are a good model: the LiveGUI image keeps everything needed
+to build and empties the kernel sources and repositories; the minimal
+install CD also drops documentation, and, since it never builds,
+compilers and portage.
 Porthole only runs these generic steps; everything about the board stays
 in its packages.</p>
 

@@ -17,8 +17,14 @@
     # the system as a squashfs, at this place in the image
     squashfs = boot/rootfs.squashfs
     compression = xz
+    # squashfs block size, 4K to 1M (bigger compresses better)
+    block_size = 1M
     # the largest a file may be (FAT32: 4 GiB less a byte)
     max_file_size = 4294967295
+    # cleaning up the copy that becomes the squashfs, as catalyst's
+    # livecd/empty and livecd/rm do: folders emptied, files removed (globs)
+    empty = /usr/src /usr/share/doc
+    rm = /etc/*.old /root/.bash_history
 
     [files]
     # place in the image = file in the system (links followed)
@@ -54,7 +60,7 @@ class ImageError(Exception):
 
 class Recipe:
     def __init__(self, id_, path, title, about, needs, squashfs, compression,
-                 max_file_size, files):
+                 max_file_size, files, block_size=None, empty=(), rm=()):
         self.id = id_
         self.path = path
         self.title = title
@@ -64,6 +70,9 @@ class Recipe:
         self.compression = compression
         self.max_file_size = max_file_size
         self.files = files
+        self.block_size = block_size
+        self.empty = list(empty)
+        self.rm = list(rm)
 
     def __repr__(self):
         return "<Recipe %s>" % self.id
@@ -105,6 +114,16 @@ def read_recipe(path):
         max_file_size = int(image.get("max_file_size", "0")) or None
     except ValueError:
         raise ImageError("%s: max_file_size isn't a number of bytes" % path)
+    block_size = image.get("block_size", "").strip() or None
+    if block_size and not re.match(r"^(\d+[KM]?)$", block_size):
+        raise ImageError("%s: block_size %r isn't a size like 128K or 1M" % (path, block_size))
+    cleanup = {}
+    for key in ("empty", "rm"):
+        cleanup[key] = []
+        for word in image.get(key, "").split():
+            if not word.startswith("/"):
+                raise ImageError("%s: %s %r isn't a path in the system" % (path, key, word))
+            cleanup[key].append(_place(word, "%s: %s" % (path, key)))
     files = []
     if parser.has_section("files"):
         for place, source in parser["files"].items():
@@ -117,7 +136,7 @@ def read_recipe(path):
         raise ImageError("%s makes nothing: no squashfs and no [files]" % path)
     return Recipe(id_, path, image.get("title", id_).strip(),
                   " ".join(image.get("about", "").split()), needs, squashfs, compression,
-                  max_file_size, files)
+                  max_file_size, files, block_size, cleanup["empty"], cleanup["rm"])
 
 
 def recipes(root):
@@ -242,6 +261,43 @@ def _file_too_big(card, limit):
     return too_big
 
 
+def _in_copy(copy, path):
+    """Whether path is inside the copy once its folders' links are
+    followed: an absolute link in it means this computer's /, which
+    cleaning up must never touch"""
+    real = os.path.realpath(os.path.dirname(path.rstrip("/")))
+    copy = os.path.realpath(copy)
+    return real == copy or real.startswith(copy + "/")
+
+
+def clean_up(copy, recipe, log=print):
+    """The recipe's empty and rm in the copy that becomes the squashfs;
+    a link is removed itself, never what it points at"""
+    for folder in recipe.empty:
+        path = os.path.join(copy, folder)
+        if not _in_copy(copy, path) or os.path.islink(path) or not os.path.isdir(path):
+            continue
+        for name in os.listdir(path):
+            inside = os.path.join(path, name)
+            if os.path.isdir(inside) and not os.path.islink(inside):
+                shutil.rmtree(inside)
+            else:
+                os.unlink(inside)
+        log("emptied /%s" % folder)
+    removed = 0
+    for pattern in recipe.rm:
+        for path in glob.glob(os.path.join(glob.escape(copy), pattern)):
+            if not _in_copy(copy, path):
+                continue
+            if os.path.isdir(path) and not os.path.islink(path):
+                shutil.rmtree(path)
+            else:
+                os.unlink(path)
+            removed += 1
+    if recipe.rm:
+        log("removed %d file%s matching the recipe's rm" % (removed, "" if removed == 1 else "s"))
+
+
 def make(target, recipe, repos, run, log=print, images_dir=None):
     """The image of target from recipe, in <output_dir>/card; run(argv)
     runs a command with its output in the log and says whether it worked"""
@@ -271,10 +327,16 @@ def make(target, recipe, repos, run, log=print, images_dir=None):
         os.makedirs(staging, mode=0o755)
         log("== The system, set up for its computer, in %s" % staging)
         ex.export(target, staging, repos, log=log)
+        if recipe.empty or recipe.rm:
+            log("== Cleaning up the copy (the recipe's empty and rm)")
+            clean_up(staging, recipe, log=log)
         image = os.path.join(card, recipe.squashfs)
         os.makedirs(os.path.dirname(image), mode=0o755, exist_ok=True)
         argv = ["mksquashfs", staging, image, "-noappend", "-comp", recipe.compression,
-                "-no-progress", "-wildcards", "-e", ex.MARK] + SQUASHFS_EXCLUDES
+                "-no-progress"]
+        if recipe.block_size:
+            argv += ["-b", recipe.block_size]
+        argv += ["-wildcards", "-e", ex.MARK] + SQUASHFS_EXCLUDES
         log("== The system as a squashfs: %s" % recipe.squashfs)
         if not run(argv):
             raise ImageError("mksquashfs didn't make the squashfs (above)")

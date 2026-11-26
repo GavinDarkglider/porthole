@@ -33,7 +33,10 @@ about = Copy it to the card.
 needs = sys-kernel/board-kernel[livecd] sys-boot/board-boot[livecd,-debug]
 squashfs = live/rootfs.squashfs
 compression = xz
+block_size = 1M
 max_file_size = 1000
+empty = /usr/src /var/log /outside
+rm = /etc/*.old /outside/*.old /root/.bash_history
 
 [files]
 live/kernel = /boot/uImage
@@ -120,12 +123,28 @@ def main():
         write(os.path.join(root, "usr/share/board/board.ini"), "[board]\n")
         ran = []
 
+        # a link in the copy to a folder outside it (an absolute link means
+        # this computer's /): cleaning up must leave what it points at alone
+        outside = os.path.join(scratch, "outside")
+        write(os.path.join(outside, "victim.old"), "keep")
+        copies = []
+
         def export(target_, dest, repos, log=print):
             write(os.path.join(dest, "etc/os-release"), "ID=gentoo\n")
+            write(os.path.join(dest, "etc/hosts.old"), "x")
+            write(os.path.join(dest, "usr/src/linux/Makefile"), "x")
+            write(os.path.join(dest, "var/log/emerge.log"), "x")
+            write(os.path.join(dest, "root/.bash_history"), "x")
+            if not os.path.lexists(os.path.join(dest, "outside")):
+                os.symlink(outside, os.path.join(dest, "outside"))
+            copies.append(dest)
             return dest
 
         def mksquashfs(argv):
             ran.append(argv)
+            copy = argv[1]
+            ran.append(sorted(os.path.relpath(os.path.join(f, n), copy)
+                              for f, _d, ns in os.walk(copy) for n in ns + _d))
             write(argv[2], "squashfs")
             return True
         real = ex.export, im.squashfs_tool
@@ -144,6 +163,12 @@ def main():
         check("mksquashfs with the recipe's compression, leftovers left out",
               ran and ran[0][ran[0].index("-comp") + 1] == "xz" and "var/tmp/*" in ran[0],
               ran)
+        check("block size passed on", ran[0][ran[0].index("-b") + 1] == "1M", ran[0])
+        check("the copy cleaned up before the squashfs (folders kept, emptied)",
+              ran[1] == ["etc", "etc/os-release", "outside", "root", "usr", "usr/src",
+                         "var", "var/log"], ran[1])
+        check("nothing outside the copy touched through a link",
+              os.listdir(outside) == ["victim.old"])
         check("the copy for the squashfs is gone again",
               not os.path.exists(os.path.join(images, "board", "board-live", "system")))
 
