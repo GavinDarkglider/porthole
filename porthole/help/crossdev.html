@@ -188,7 +188,8 @@ first (as you, nothing changes yet) and shows:</p>
 build still works out, the kernel headers and C library, the base system
 (<code>@system</code>), what the first-boot choices need, the system's own
 list (<code>@world</code>), installing its kernel, removing what nothing
-needs any more, the first-boot setup, and a health check. A build can be stopped and started
+needs any more, the first-boot setup, and a health check; for a live
+system, its live image last (see <a href="#image">Making an image</a>). A build can be stopped and started
 again; it picks up where it stopped, installing what is already packaged.</p>
 <p>When a package won't cross-compile, the next step builds it inside the
 system under emulation, then the stage carries on. When emerge stops on a
@@ -231,6 +232,12 @@ system is ready for it. A recipe can need packages built with certain USE
 flags (a live image needs a kernel that can boot from one, say). Until
 the system has them, it says what to change in its settings before you
 build it again.</p>
+<p>A system built with <b>USE=livecd</b> (the flag Gentoo's own live
+media are built with) is a live system: one that boots from a squashfs of
+itself, keeping nothing between boots. Its live image is the recipe that
+needs a package built with <code>livecd</code>. <b>Build the system…</b>
+then offers to make that image when the build is done (ticked; untick it
+to only build), and <b>Make an image…</b> lists it first.</p>
 <p>Making the image is a job (see <a href="termwindow.html">the job
 window</a>):</p>
 <ol>

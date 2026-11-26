@@ -212,6 +212,21 @@ def squashfs_tool(compression):
     return None
 
 
+def is_livecd(target):
+    """Whether the system is built as a live system: USE=livecd in its
+    settings (profile and make.conf), the flag Gentoo's live media are
+    built with; they boot a squashfs of the system"""
+    result = subprocess.run(["portageq", "envvar", "USE"], capture_output=True, text=True,
+                            env=dict(os.environ, PORTAGE_CONFIGROOT=target.root))
+    return "livecd" in result.stdout.split()
+
+
+def live_recipes(found):
+    """The recipes for a live image: the ones needing a package built with
+    USE=livecd"""
+    return [r for r in found.values() if any("livecd" in flags for _cp, flags in r.needs)]
+
+
 def output_dir(name, recipe_id, images_dir=None):
     return os.path.join(images_dir or IMAGES_DIR, name, recipe_id)
 

@@ -381,18 +381,29 @@ def step_package(runner, job_id, step, log):
         log("!! Things are mounted in %s: make the image once that has finished."
             % target.title)
         return False
-    recipe = im.recipes(target.root)[0].get(step.get("recipe", ""))
-    if recipe is None:
-        log("!! %s has no image recipe %s any more" % (target.title, step.get("recipe")))
-        return False
-    try:
-        card = im.make(target, recipe, roots.used_repos(target),
-                       lambda argv: runner.run_logged(job_id, step, log, argv), log=log)
-    except (im.ImageError, OSError) as e:
-        log("!! %s" % e)
-        return False
-    log("Done. %s" % recipe.about if recipe.about else "Done.")
-    log("The image's files: %s" % card)
+    found = im.recipes(target.root)[0]
+    if step.get("recipe") == "livecd":
+        # the end of a live system's build: its live images, by whichever
+        # recipes its packages installed during the build
+        wanted = im.live_recipes(found)
+        if not wanted:
+            log("No package in %s gives a recipe for a live image (/%s): none made."
+                % (target.title, im.RECIPES_DIR))
+            return True
+    else:
+        wanted = [found.get(step.get("recipe", ""))]
+        if wanted[0] is None:
+            log("!! %s has no image recipe %s any more" % (target.title, step.get("recipe")))
+            return False
+    for recipe in wanted:
+        try:
+            card = im.make(target, recipe, roots.used_repos(target),
+                           lambda argv: runner.run_logged(job_id, step, log, argv), log=log)
+        except (im.ImageError, OSError) as e:
+            log("!! %s" % e)
+            return False
+        log("Done. %s" % recipe.about if recipe.about else "Done.")
+        log("The image's files: %s" % card)
     return True
 
 
@@ -790,6 +801,8 @@ def build(args):
     steps.append(step("depclean", "Remove what nothing needs any more"))
     steps.append(step("firstboot", "The first-boot setup"))
     steps.append(step("health", "Check the finished system"))
+    if changes.get("live_image"):
+        steps.append(step("package", "Make its live image", recipe="livecd"))
     job = runner.new_job("plugin", title, steps, recheck=False)
     with runner.jobs_state() as state:
         state["jobs"].append(job)

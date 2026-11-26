@@ -739,8 +739,15 @@ class ImageDialog(Gtk.Dialog):
                 "install that as a recipe in <tt>/%s</tt>; see the help." % (
                     GLib.markup_escape_text(target.title), im.RECIPES_DIR))
             box.pack_start(label, False, False, 0)
+        # a live system (USE=livecd): its live image first
+        live = im.live_recipes(self.recipes) if im.is_livecd(target) else []
+        if live:
+            label = Gtk.Label(xalign=0, wrap=True, max_width_chars=70)
+            label.set_markup("<small>%s is built as a live system (USE=livecd).</small>" %
+                             GLib.markup_escape_text(target.title))
+            box.pack_start(label, False, False, 0)
         group = None
-        for recipe in self.recipes.values():
+        for recipe in live + [r for r in self.recipes.values() if r not in live]:
             radio = Gtk.RadioButton.new_with_label_from_widget(group, recipe.title)
             group = group or radio
             radio.connect("toggled", lambda b: self.update())
@@ -1133,6 +1140,13 @@ class BuildDialog(Gtk.Dialog):
                 label="If the build needs another Python version for build tools that run "
                       "here, add it without asking (in porthole-cross-%s)" % target.name)
             box.pack_start(self.allow_python, False, False, 0)
+        from porthole.plugins.crossdev import image as im
+        self.live_image = None
+        if im.is_livecd(target):
+            self.live_image = Gtk.CheckButton(
+                label="Make its live image when the build is done (it is built with "
+                      "USE=livecd: see Make an image…)", active=True)
+            box.pack_start(self.live_image, False, False, 0)
         self.add_button("Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("Build it", Gtk.ResponseType.OK)
         if self.allow is not None:
@@ -1140,6 +1154,7 @@ class BuildDialog(Gtk.Dialog):
         self.show_all()
         answer = self.run()
         self.python_ok = bool(self.allow_python and self.allow_python.get_active())
+        self.make_live = bool(self.live_image and self.live_image.get_active())
         self.destroy()
         if answer == Gtk.ResponseType.OK:
             self.queue()
@@ -1149,7 +1164,8 @@ class BuildDialog(Gtk.Dialog):
         from porthole.updater.elevate import run_as_root, service
         changes = {"host_use": self.plan["host_use"], "root_use": self.plan["root_use"],
                    "root_keywords": self.plan["root_keywords"], "host": self.plan["host"],
-                   "allow_python": self.allow is not None or self.python_ok}
+                   "allow_python": self.allow is not None or self.python_ok,
+                   "live_image": self.make_live}
 
         def done(ok, output):
             if not ok:

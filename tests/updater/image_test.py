@@ -30,7 +30,7 @@ RECIPE = """# a board's live image
 [image]
 title = Live SD card
 about = Copy it to the card.
-needs = sys-kernel/board-kernel[live] sys-boot/board-boot[live,-debug]
+needs = sys-kernel/board-kernel[livecd] sys-boot/board-boot[livecd,-debug]
 squashfs = live/rootfs.squashfs
 compression = xz
 max_file_size = 1000
@@ -60,9 +60,9 @@ def main():
         write(os.path.join(root, im.RECIPES_DIR, "board-live.conf"), RECIPE)
         write(os.path.join(root, im.RECIPES_DIR, "broken.conf"), "[image]\nneeds = not-an-atom\n")
         write(os.path.join(root, "var/db/pkg/sys-kernel/board-kernel-1.0/USE"), "arm64 strip\n")
-        write(os.path.join(root, "var/db/pkg/sys-boot/board-boot-2/USE"), "live debug\n")
+        write(os.path.join(root, "var/db/pkg/sys-boot/board-boot-2/USE"), "livecd debug\n")
         # a package whose name starts the same isn't the one asked for
-        write(os.path.join(root, "var/db/pkg/sys-kernel/board-kernel-sources-1/USE"), "live\n")
+        write(os.path.join(root, "var/db/pkg/sys-kernel/board-kernel-sources-1/USE"), "livecd\n")
         write(os.path.join(root, "boot/uImage-1.0"), "kernel")
         # an absolute link means the system's /, never this computer's
         os.symlink("/boot/uImage-1.0", os.path.join(root, "boot/uImage"))
@@ -72,16 +72,22 @@ def main():
         check("a broken recipe is reported, not used",
               len(broken) == 1 and "not-an-atom" in broken[0][1], broken)
         recipe = found["board-live"]
-        check("its needs", recipe.needs == [("sys-kernel/board-kernel", ["live"]),
-                                            ("sys-boot/board-boot", ["live", "-debug"])],
+        check("its needs", recipe.needs == [("sys-kernel/board-kernel", ["livecd"]),
+                                            ("sys-boot/board-boot", ["livecd", "-debug"])],
               recipe.needs)
         check("its files", recipe.files == [("live/kernel", "/boot/uImage"),
                                             ("bootloader/board.ini", "/usr/share/board/board.ini")],
               recipe.files)
 
+        write(os.path.join(root, im.RECIPES_DIR, "board-disk.conf"),
+              "[image]\nneeds = sys-kernel/board-kernel\n[files]\nkernel = /boot/uImage\n")
+        found, _broken = im.recipes(root)
+        check("a live system's image is the recipe needing USE=livecd",
+              [r.id for r in im.live_recipes(found)] == ["board-live"],
+              [r.id for r in im.live_recipes(found)])
         missing = im.missing_needs(root, recipe)
         check("a flag that's off, and one that should be", missing == [
-            "sys-kernel/board-kernel is built without USE=live",
+            "sys-kernel/board-kernel is built without USE=livecd",
             "sys-boot/board-boot is built with USE=debug"], missing)
         check("links followed inside the system",
               im.in_root(root, "/boot/uImage") == os.path.join(root, "boot/uImage-1.0"))
@@ -107,10 +113,10 @@ def main():
                     images_dir=images)
             check("not made while it lacks something", False, "made")
         except im.ImageError as e:
-            check("not made while it lacks something", "USE=live" in str(e), e)
+            check("not made while it lacks something", "USE=livecd" in str(e), e)
 
-        write(os.path.join(root, "var/db/pkg/sys-kernel/board-kernel-1.0/USE"), "live\n")
-        write(os.path.join(root, "var/db/pkg/sys-boot/board-boot-2/USE"), "live\n")
+        write(os.path.join(root, "var/db/pkg/sys-kernel/board-kernel-1.0/USE"), "livecd\n")
+        write(os.path.join(root, "var/db/pkg/sys-boot/board-boot-2/USE"), "livecd\n")
         write(os.path.join(root, "usr/share/board/board.ini"), "[board]\n")
         ran = []
 
