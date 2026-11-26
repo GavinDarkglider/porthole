@@ -109,4 +109,19 @@ check("make.conf not touched", not os.path.exists(os.path.join(root, "etc", "por
 check("nothing left: file removed",
       runner.set_global_use(json.dumps({}), "c") == "removed"
       and not os.path.exists(system.global_use_path(target.portage_dir)))
+
+# an overlay without use.local.desc: its flags from metadata.xml and IUSE
+overlay = os.path.join(work, "overlay")
+os.makedirs(os.path.join(overlay, "profiles"))
+os.makedirs(os.path.join(overlay, "sys-apps", "board-meta"))
+with open(os.path.join(overlay, "sys-apps", "board-meta", "board-meta-1.ebuild"), "w") as f:
+    f.write('EAPI=8\nIUSE="+wifi kernel-bin ${EXTRA}"\nIUSE+=" fbcondecor"\n')
+with open(os.path.join(overlay, "sys-apps", "board-meta", "metadata.xml"), "w") as f:
+    f.write('<pkgmetadata><use><flag name="fbcondecor">Console backgrounds</flag></use>'
+            '</pkgmetadata>\n')
+said, local = system.flag_descriptions([overlay])
+check("overlay flags found without use.local.desc",
+      sorted(local) == ["fbcondecor", "kernel-bin", "wifi"], local)
+check("overlay flag text from metadata.xml",
+      said.get("fbcondecor") == "Console backgrounds (sys-apps/board-meta)", said)
 sys.exit(1 if failed else 0)

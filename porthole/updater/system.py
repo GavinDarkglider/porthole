@@ -127,13 +127,56 @@ def flag_descriptions(locations=None):
             flag, sep, text = line.partition(" - ")
             if sep:
                 descriptions.setdefault(flag.strip(), text.strip())
-        for line in _lines(os.path.join(profiles, "use.local.desc")):
+        lines = _lines(os.path.join(profiles, "use.local.desc"))
+        if not lines:
+            # overlays rarely ship use.local.desc (egencache makes it):
+            # their packages' metadata.xml and IUSE say the same
+            lines = _package_flags(os.path.dirname(profiles))
+        for line in lines:
             head, sep, text = line.partition(" - ")
             pkg, colon, flag = head.partition(":")
             if sep and colon:
                 local.setdefault(flag.strip(), []).append(pkg.strip())
                 descriptions.setdefault(flag.strip(), text.strip() + " (%s)" % pkg.strip())
     return descriptions, local
+
+
+_FLAG_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9+_@-]*$")
+
+
+def _package_flags(location):
+    """use.local.desc lines ("cat/pkg:flag - text") for a repository
+    without one: each package's flags (its ebuilds' IUSE) with the text of
+    its metadata.xml, or none"""
+    import glob
+    import xml.etree.ElementTree as ET
+    iuse_var = re.compile(r'IUSE\+?="([^"]*)"')
+    lines = []
+    for folder in sorted(glob.glob(os.path.join(location, "*", "*", ""))):
+        cp = os.path.relpath(folder, location)
+        ebuilds = glob.glob(folder + "*.ebuild")
+        if not ebuilds:
+            continue
+        flags = set()
+        for path in ebuilds:
+            try:
+                with open(path, errors="replace") as f:
+                    text = f.read()
+            except OSError:
+                continue
+            for match in iuse_var.finditer(text):
+                flags.update(w for w in (w.lstrip("+-") for w in match.group(1).split())
+                             if _FLAG_NAME.match(w))
+        try:
+            said = {flag.get("name"): " ".join("".join(flag.itertext()).split())
+                    for flag in ET.parse(folder + "metadata.xml").iter("flag")
+                    if flag.get("name")}
+        except (OSError, ET.ParseError):
+            said = {}
+        for flag in sorted(flags | set(said)):
+            # a flag only in IUSE has no text: still found by its name
+            lines.append("%s:%s - %s" % (cp, flag, said.get(flag, "")))
+    return lines
 
 
 def global_flags(locations=None):
