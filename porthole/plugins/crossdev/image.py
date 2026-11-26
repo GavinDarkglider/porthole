@@ -13,7 +13,7 @@
     title = Live SD card
     about = What it is and where its files go.
     # packages it needs in the system, with the USE flags that matter
-    needs = sys-kernel/some-kernel[live] sys-boot/some-bootfiles[live]
+    needs = sys-kernel/some-kernel[livecd] sys-boot/some-bootfiles[livecd]
     # the system as a squashfs, at this place in the image
     squashfs = boot/rootfs.squashfs
     compression = xz
