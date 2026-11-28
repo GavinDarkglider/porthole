@@ -300,8 +300,9 @@ def check_module_names(root, findings):
             "Start the build again: its first step links them under the system's names."))
 
 
-def _binpkg_names(path):
-    """Paths inside a binary package (gpkg or xpak tbz2)"""
+def _binpkg_image(path, look):
+    """look(tarfile of the files a binary package installs: gpkg or xpak
+    tbz2), its result; [] for a gpkg without an image, None when unreadable"""
     import tarfile
     try:
         if path.endswith(".gpkg.tar"):
@@ -317,12 +318,91 @@ def _binpkg_names(path):
                             mode = "r:*"
                         import io
                         with tarfile.open(fileobj=io.BytesIO(data), mode=mode) as image:
-                            return image.getnames()
+                            return look(image)
             return []
         with tarfile.open(path, "r:*") as package:
-            return package.getnames()
+            return look(package)
     except (OSError, tarfile.TarError, EOFError):
         return None
+
+
+def _binpkg_names(path):
+    """Paths inside a binary package (gpkg or xpak tbz2)"""
+    return _binpkg_image(path, lambda image: image.getnames())
+
+
+# GLIBC_2.44 and the like: the glibc version a program or library needs a
+# symbol at (its version needs), or, in glibc's own libraries, defines
+_GLIBC_VERSION = re.compile(rb"GLIBC_(\d+)\.(\d+)(?:\.(\d+))?\x00")
+
+
+def _libc_need(image):
+    """The newest glibc version (2, 44) any program or library in the image
+    names, () when none does"""
+    newest = ()
+    for member in image:
+        if not member.isfile() or member.size < 64:
+            continue
+        f = image.extractfile(member)
+        if f is None or f.read(4) != b"\x7fELF":
+            continue
+        for found in _GLIBC_VERSION.finditer(f.read()):
+            newest = max(newest, tuple(int(n) for n in found.groups() if n is not None))
+    return list(newest)
+
+
+def libc_version(version):
+    """(2, 43) of a glibc package version (2.43-r4, 2.43.9999)"""
+    found = re.match(r"(\d+)\.(\d+)", version or "")
+    return tuple(int(n) for n in found.groups()) if found else ()
+
+
+def newer_libc_binpkgs(target, wanted, cache_dir=REPORT_DIR, log=None):
+    """(PKGDIR, [(binary package relative to it, glibc version it needs)])
+    of the system's binary packages needing a newer glibc than wanted ((2,
+    43): what the system gets), made while it had a newer one; installed on
+    the older one they don't link or run. Each package file is looked into
+    once (its programs and libraries read for the glibc versions they
+    name), so a glibc change later only compares again."""
+    from porthole.plugins.crossdev import conf
+    pkgdir = conf.effective(conf.read(target), "PKGDIR")
+    if not pkgdir or not os.path.isdir(pkgdir) or not wanted:
+        return pkgdir, []
+    cache_path = os.path.join(cache_dir, "binpkgs-libc-%s.json" % target.name)
+    try:
+        with open(cache_path) as f:
+            known = json.load(f)
+    except (OSError, ValueError):
+        known = {}
+    paths = sorted(glob.glob(os.path.join(pkgdir, "**", "*.gpkg.tar"), recursive=True) +
+                   glob.glob(os.path.join(pkgdir, "**", "*.tbz2"), recursive=True))
+    keys = {}
+    for path in paths:
+        stat = os.stat(path)
+        keys[path] = "%d:%d" % (stat.st_size, int(stat.st_mtime))
+    new = [p for p in paths if (known.get(p) or [None])[0] != keys[p]]
+    if new and log:
+        log("Testing %d binary package%s for the glibc version they need (once a package)"
+            % (len(new), "" if len(new) == 1 else "s"))
+    checked, newer = {}, []
+    for path in paths:
+        if path in new:
+            need = _binpkg_image(path, _libc_need)
+            if need is None:
+                continue  # unreadable: emerge says so when it's used
+        else:
+            need = known[path][1]
+        checked[path] = [keys[path], need]
+        if tuple(need) > tuple(wanted):
+            newer.append((os.path.relpath(path, pkgdir), ".".join(str(n) for n in need)))
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        with open(cache_path + ".new", "w") as f:
+            json.dump(checked, f)
+        os.replace(cache_path + ".new", cache_path)
+    except OSError:
+        pass
+    return pkgdir, newer
 
 
 def bad_binpkgs(target, root, cache_dir=REPORT_DIR):

@@ -191,6 +191,16 @@ list (<code>@world</code>), installing its kernel, removing what nothing
 needs any more, the first-boot setup, and a health check; for a live
 system, its live image last (see <a href="#image">Making an image</a>). A build can be stopped and started
 again; it picks up where it stopped, installing what is already packaged.</p>
+<p>Before the C library goes in, the system's binary packages are tested
+against the glibc it gets: each program and library in them names the glibc
+versions it needs. Packages made while the system had a newer glibc (a
+board's repository can take a glibc version back) wouldn't link or run on
+the older one, so they are moved out of the package folder, to
+<code>&lt;package folder&gt;.set-aside/&lt;date&gt;/</code>, and built again.
+Each package is read once; after a glibc change the test only compares
+again. If the system itself already has a newer glibc than its settings
+give it, the step says so: glibc can't go back a version in place, so
+start the system over (its settings are kept).</p>
 <p>When a package won't cross-compile, the next step builds it inside the
 system under emulation, then the stage carries on. When emerge stops on a
 circular dependency, the next step builds the package it suggests with the

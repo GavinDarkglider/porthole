@@ -879,7 +879,10 @@ RECIPE_NOTES = {
     ("build-stage", "base"): (
         "The kernel headers and the C library first: everything else is compiled\n"
         "against them. --usepkg installs a binary package already made with the same\n"
-        "USE flags instead of compiling again."),
+        "USE flags instead of compiling again. Before that, binary packages needing a\n"
+        "newer glibc than the system gets (the GLIBC_2.x versions their programs and\n"
+        "libraries name) are moved to <PKGDIR>.set-aside/<date>/ and the package\n"
+        "index made again (emaint binhost --fix): portage would install them anyway."),
     ("build-stage", "system"): (
         "@system: the base set the profile lists (shell, coreutils, portage's own\n"
         "needs ...), cross-compiled into the system."),
@@ -1288,12 +1291,69 @@ def step_build_stage(runner, job_id, step, log):
         log("!! %s (programs built for the system can't run during the cross build)" % e)
         helpers = Helpers(job_id, [])
     try:
+        if stage == "base":
+            _set_aside_newer_libc(runner, job_id, step, log, target, env)
         result = _run_stage(runner, job_id, step, log, target, stage, env, argvs)
         if not (runner.update(job_id) or {}).get("cancel"):
             _redo_binpkgs(runner, job_id, step, log, target, env)
         return result
     finally:
         helpers.stop(log)
+
+
+def _set_aside_newer_libc(runner, job_id, step, log, target, env):
+    """Before anything is installed: the system's binary packages are tested
+    against the glibc it gets (its settings' choice), and those needing a
+    newer one (made while it had one, say before a board's repository took
+    a glibc version back) are moved out of its package folder, so emerge
+    builds them again instead of installing what wouldn't link or run.
+    Moved, not deleted: <PKGDIR>.set-aside/<date>/."""
+    import glob
+    import shutil
+    import time
+    from porthole.plugins.crossdev import health as hc, toolchain as tc
+    try:
+        resolved = tc.resolve(target)
+    except tc.ToolchainError as e:
+        log("!! The binary packages weren't tested against the system's C library: %s" % e)
+        return
+    libc = next((p for p in resolved["parts"] if p["part"] == "libc"), None)
+    if libc is None or libc["cp"] != tc.LIBCS["glibc"]:
+        return
+    wanted = hc.libc_version(libc["version"])
+    root = os.path.realpath(target.root)
+    have = [os.path.basename(d) for d in glob.glob(os.path.join(root, "var/db/pkg",
+                                                                 libc["cp"] + "-[0-9]*"))]
+    for pf in have:
+        version = pf[len("glibc-"):]
+        if hc.libc_version(version) > wanted:
+            log("!! Warning: the system has glibc %s, newer than its settings give it now "
+                "(%s). glibc can't be taken back a version in place: Start over (its "
+                "settings are kept) to build it with %s." % (version, libc["version"],
+                                                             libc["version"]))
+    try:
+        pkgdir, newer = hc.newer_libc_binpkgs(target, wanted, log=log)
+    except Exception as e:
+        log("!! The binary packages couldn't be tested against glibc %s: %s"
+            % (libc["version"], e))
+        return
+    if not newer:
+        return
+    aside = os.path.join(pkgdir.rstrip("/") + ".set-aside", time.strftime("%Y%m%d-%H%M%S"))
+    log("== %d binary package%s need%s a newer glibc than the system gets (%s): moved to "
+        "%s, so they are built again" % (len(newer), "" if len(newer) == 1 else "s",
+                                         "s" if len(newer) == 1 else "",
+                                         libc["version"], aside))
+    for rel, need in newer:
+        log("   %s (needs glibc %s)" % (rel, need))
+        try:
+            os.makedirs(os.path.dirname(os.path.join(aside, rel)), exist_ok=True)
+            shutil.move(os.path.join(pkgdir, rel), os.path.join(aside, rel))
+        except OSError as e:
+            log("!! couldn't move %s: %s" % (rel, e))
+    argv = ["emaint", "binhost", "--fix"]
+    log("$ " + " ".join(argv))
+    _cross(runner, job_id, step, log, target, env, argv, installs=False)
 
 
 def _installed_pf(root, rel):
